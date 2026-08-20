@@ -38,3 +38,12 @@ test-results/
 
 # Local data
 data/
+# Turborepo cache
+.turbo/
+
+# TypeScript build artifacts
+*.tsbuildinfo
+**/src/*.js
+**/src/*.js.map
+**/src/*.d.ts
+**/src/*.d.ts.map
