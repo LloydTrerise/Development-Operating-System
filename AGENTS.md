@@ -725,3 +725,9 @@ The most important rule is:
 Do not optimize for speed by skipping governance.
 
 The purpose of the staged build is to ensure that DevOS itself is constructed using the same controlled, traceable, specification-driven engineering principles that DevOS is ultimately intended to automate.
+
+---
+
+# 35. Sprint Task Specification Continuity
+
+The version-controlled task specifications under `specs/sprints/` are the authority for task-level scope, dependencies, acceptance criteria, and task sequencing. Before beginning a future sprint, its approved task plan must be converted into reviewed Markdown files in that directory. Do not rely on untracked historical planning material as the only source of task intent.
