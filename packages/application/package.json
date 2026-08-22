@@ -3,6 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -10,7 +12,15 @@
     "test": "vitest run --config ../../vitest.config.ts",
     "test:watch": "vitest --config ../../vitest.config.ts"
   },
+  "dependencies": {
+    "@devos/agents": "workspace:*",
+    "@devos/contracts": "workspace:*",
+    "@devos/domain": "workspace:*",
+    "@devos/knowledge": "workspace:*",
+    "@devos/storage": "workspace:*"
+  },
   "devDependencies": {
+    "@types/node": "^24.0.0",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
   }

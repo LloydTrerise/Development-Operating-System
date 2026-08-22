@@ -60,7 +60,13 @@ export function validateEnvironment(env: RawEnvironment): ConfigValidationResult
   }
 
   validInteger(env.PORT, 'PORT', issues);
-  validUrl(env.DATABASE_URL, 'DATABASE_URL', issues);
+
+  if (env.DATABASE_URL === undefined || env.DATABASE_URL.trim().length === 0) {
+    issues.push({ key: 'DATABASE_URL', message: 'DATABASE_URL is required.' });
+  } else {
+    validUrl(env.DATABASE_URL, 'DATABASE_URL', issues);
+  }
+
   validUrl(env.QUEUE_URL, 'QUEUE_URL', issues);
   validUrl(env.STORAGE_ENDPOINT, 'STORAGE_ENDPOINT', issues);
   validUrl(env.AUTH_ISSUER_URL, 'AUTH_ISSUER_URL', issues);
@@ -90,6 +96,17 @@ export function validateEnvironment(env: RawEnvironment): ConfigValidationResult
     issues.push({
       key: 'AUTH_AUDIENCE',
       message: 'AUTH_AUDIENCE must not be empty when provided.',
+    });
+  }
+
+  // GEMINI_API_KEY (DEVOS-035): optional here — only apps/worker's real
+  // agent-task handler needs it, not every DevOS process — but never echo
+  // the value itself in an issue message (matching every other secret in
+  // this file, e.g. DATABASE_URL's embedded credentials).
+  if (env.GEMINI_API_KEY !== undefined && env.GEMINI_API_KEY.trim().length === 0) {
+    issues.push({
+      key: 'GEMINI_API_KEY',
+      message: 'GEMINI_API_KEY must not be empty when provided.',
     });
   }
 

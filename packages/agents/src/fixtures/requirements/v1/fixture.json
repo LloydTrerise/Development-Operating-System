@@ -1,0 +1,30 @@
+{
+  "role": "REQUIREMENTS",
+  "recordedAt": "2026-08-21T14:06:00.493Z",
+  "provider": "gemini",
+  "modelRef": "gemini-3.6-flash",
+  "objective": "Perform the \"REQUIREMENTS\" role for work item \"Add CSV export to the reporting dashboard\".",
+  "input": {
+    "workItemTitle": "Add CSV export to the reporting dashboard",
+    "workItemDescription": "Users on the analytics team need to export the current reporting dashboard view as a CSV file for offline analysis. No specific format or column list has been agreed yet.",
+    "runInput": {},
+    "discoveryReport": {
+      "summary": "The work item requests a feature allowing analytics team users to export the current reporting dashboard view to a CSV file for offline analysis.",
+      "findings": [
+        "Target users are specifically identified as members of the analytics team.",
+        "The primary goal of the feature is enabling offline analysis.",
+        "The source data for the CSV export is the current view of the reporting dashboard.",
+        "Specific format requirements and column lists are currently missing from the request."
+      ]
+    }
+  },
+  "result": {
+    "summary": "This Product Requirements Document (PRD) defines the requirements for adding a CSV export capability to the reporting dashboard, enabling analytics team users to download the data from their current dashboard view for offline analysis.",
+    "requirements": [
+      "The system shall provide a CSV export mechanism within the reporting dashboard.",
+      "The export functionality shall be accessible to members of the analytics team.",
+      "The CSV export shall contain the data corresponding to the user's current reporting dashboard view.",
+      "The exported file shall be generated in CSV format to support offline analysis."
+    ]
+  }
+}

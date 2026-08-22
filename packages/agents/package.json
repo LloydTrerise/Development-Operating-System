@@ -8,9 +8,17 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run --config ../../vitest.config.ts",
-    "test:watch": "vitest --config ../../vitest.config.ts"
+    "test:watch": "vitest --config ../../vitest.config.ts",
+    "refresh-fixtures": "tsx src/refresh-fixtures.ts"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@devos/contracts": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.3",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
   }

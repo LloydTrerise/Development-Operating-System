@@ -11,7 +11,14 @@
     "test": "vitest run --config ../../vitest.config.ts",
     "test:watch": "vitest --config ../../vitest.config.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@devos/agents": "workspace:*",
+    "@devos/application": "workspace:*",
+    "@devos/config": "workspace:*",
+    "@devos/database": "workspace:*",
+    "@devos/domain": "workspace:*",
+    "@devos/storage": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "tsx": "^4.20.3",

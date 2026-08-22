@@ -1,0 +1,3 @@
+# DEVOS-026 — Implement Agent Runtime
+
+**Dependencies:** DEVOS-025. **Scope:** Execution lifecycle for an agent run — start, attempt tracking, structured-output capture, success/failure outcomes — reusing Sprint 1's task-queue/worker mechanics (`TaskQueue`, `MAX_TASK_ATTEMPTS`, `reclaimStale`) rather than building a parallel execution system. **Acceptance:** An agent definition can be executed end-to-end, producing either a captured structured output or a captured failure with attempt tracking, covered by unit tests against fakes and, where infrastructure-dependent, integration tests matching Sprint 1's `@devos/e2e-tests` pattern.

@@ -1,0 +1,8 @@
+{
+  "name": "prd",
+  "version": 1,
+  "fields": {
+    "summary": { "type": "string" },
+    "requirements": { "type": "array" }
+  }
+}

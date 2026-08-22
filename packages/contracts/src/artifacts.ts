@@ -5,8 +5,8 @@ import type {
   WorkItemId,
   WorkflowRunId,
   WorkflowTaskId,
-} from "./ids.js";
-import type { ArtifactStatus } from "./status.js";
+} from './ids.js';
+import type { ArtifactStatus } from './status.js';
 
 export interface Artifact {
   id: ArtifactId;
@@ -17,7 +17,7 @@ export interface Artifact {
 }
 
 export interface ArtifactProvenance {
-  origin: "HUMAN" | "AGENT" | "INTEGRATION" | "SYSTEM";
+  origin: 'HUMAN' | 'AGENT' | 'INTEGRATION' | 'SYSTEM';
   workflow?: {
     workflowId?: string;
     workflowVersionId?: string;

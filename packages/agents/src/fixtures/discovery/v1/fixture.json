@@ -1,0 +1,27 @@
+{
+  "role": "DISCOVERY",
+  "recordedAt": "2026-08-21T17:31:24.288Z",
+  "provider": "gemini",
+  "modelRef": "gemini-3.6-flash",
+  "objective": "Perform the \"DISCOVERY\" role for work item \"Add CSV export to the reporting dashboard\".",
+  "input": {
+    "workItemTitle": "Add CSV export to the reporting dashboard",
+    "workItemDescription": "Users on the analytics team need to export the current reporting dashboard view as a CSV file for offline analysis. No specific format or column list has been agreed yet.",
+    "runInput": {}
+  },
+  "result": {
+    "summary": "The work item requests adding a CSV export feature to the reporting dashboard so that analytics team members can download the current view for offline analysis.",
+    "findings": [
+      "Target users are members of the analytics team.",
+      "The required feature is a CSV export capability for the reporting dashboard.",
+      "The export should capture the current view of the reporting dashboard.",
+      "The intended use case for the exported CSV is offline analysis."
+    ]
+  },
+  "uncertainty": [
+    {
+      "statement": "The specific CSV file format and list of included columns have not been defined or agreed upon.",
+      "severity": "HIGH"
+    }
+  ]
+}

@@ -11,6 +11,22 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: devos
+          POSTGRES_PASSWORD: devos
+          POSTGRES_DB: devos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devos -d devos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://devos:devos@localhost:5432/devos
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -24,5 +40,26 @@ jobs:
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm --filter @devos/database run migrate
+      # Runs every package's `test` script, including unit tests (fakes,
+      # no external dependencies) and @devos/e2e-tests' automated proof of
+      # the full Sprint 1 control loop (DEVOS-021) against the Postgres
+      # service above — a real API process, a real worker process, real
+      # HTTP, real database rows.
       - run: pnpm test
       - run: pnpm build
+
+  container-build:
+    runs-on: ubuntu-latest
+    needs: quality
+    strategy:
+      matrix:
+        app: [api, worker]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: false
+          tags: devos-${{ matrix.app }}:ci

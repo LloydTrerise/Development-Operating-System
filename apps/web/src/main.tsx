@@ -1,10 +1,21 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import { App } from './App.js';
+import { ProjectProvider } from './project-context.js';
+import { SessionProvider } from './session.js';
 
-function App() {
-  return <main><h1>DevOS</h1><p>Implementation bootstrap foundation.</p></main>;
-}
+const rootElement = document.getElementById('root');
+if (!rootElement) throw new Error('Root element not found.');
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode><App /></StrictMode>,
+createRoot(rootElement).render(
+  <StrictMode>
+    <SessionProvider>
+      <BrowserRouter>
+        <ProjectProvider>
+          <App />
+        </ProjectProvider>
+      </BrowserRouter>
+    </SessionProvider>
+  </StrictMode>,
 );

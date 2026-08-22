@@ -5,13 +5,13 @@ import type {
   WorkflowTaskId,
   WorkflowVersionId,
   WorkItemId,
-} from "./ids.js";
+} from './ids.js';
 import type {
   WorkflowNodeType,
   WorkflowRunStatus,
   WorkflowTaskStatus,
   WorkflowVersionStatus,
-} from "./status.js";
+} from './status.js';
 
 export interface WorkflowInputDefinition {
   name: string;

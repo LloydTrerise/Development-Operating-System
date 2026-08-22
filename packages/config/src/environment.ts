@@ -14,6 +14,7 @@ export interface RawEnvironment {
   AUTH_ISSUER_URL?: string;
   AUTH_AUDIENCE?: string;
   LOG_LEVEL?: string;
+  GEMINI_API_KEY?: string;
 }
 
 export function readEnvironment(env: Environment = process.env): RawEnvironment {
@@ -46,6 +47,7 @@ export function readEnvironment(env: Environment = process.env): RawEnvironment 
   }
 
   if (env.LOG_LEVEL !== undefined) result.LOG_LEVEL = env.LOG_LEVEL;
+  if (env.GEMINI_API_KEY !== undefined) result.GEMINI_API_KEY = env.GEMINI_API_KEY;
 
   return result;
 }

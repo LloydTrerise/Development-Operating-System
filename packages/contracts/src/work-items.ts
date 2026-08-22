@@ -1,5 +1,5 @@
-import type { ProjectId, WorkItemId } from "./ids.js";
-import type { WorkItemStatus } from "./status.js";
+import type { ProjectId, WorkItemId } from './ids.js';
+import type { WorkItemStatus } from './status.js';
 
 export interface WorkItem {
   id: WorkItemId;

@@ -1,0 +1,21 @@
+{
+  "name": "@devos/e2e-tests",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "devDependencies": {
+    "@devos/api": "workspace:*",
+    "@devos/database": "workspace:*",
+    "@devos/domain": "workspace:*",
+    "@devos/worker": "workspace:*",
+    "@types/node": "^24.13.3",
+    "tsx": "^4.20.3",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

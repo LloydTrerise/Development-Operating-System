@@ -1,0 +1,3 @@
+# DEVOS-031 — Implement Discovery Agent
+
+**Dependencies:** DEVOS-026, DEVOS-027, DEVOS-028, DEVOS-029, DEVOS-030. **Scope:** The first concrete agent — generates a factual discovery report from a work item using the real agent runtime and LLM provider adapter, functionally replacing Sprint 1's deterministic `runDiscoveryTask` stub (DEVOS-016) as the actual task handler, while producing an artifact through the same `DISCOVERY_REPORT` artifact/provenance mechanism already built in Sprint 1. **Acceptance:** Given a work item, the discovery agent produces a schema-validated discovery report artifact with correct run/task provenance, a recorded context manifest, and a recorded prompt version.

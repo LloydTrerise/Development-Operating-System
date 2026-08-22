@@ -24,5 +24,4 @@ export interface ApiErrorResponse {
   meta: ApiMeta;
 }
 
-export type HttpErrorStatus =
-  | 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500 | 502 | 503;
+export type HttpErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500 | 502 | 503;

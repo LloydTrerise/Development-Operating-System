@@ -1,0 +1,8 @@
+{
+  "name": "discovery-report",
+  "version": 1,
+  "fields": {
+    "summary": { "type": "string" },
+    "findings": { "type": "array" }
+  }
+}

@@ -3,14 +3,27 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "migrate": "tsx src/migrate.ts",
+    "seed": "tsx src/seed.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p migrations/tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run --config ../../vitest.config.ts",
     "test:watch": "vitest --config ../../vitest.config.ts"
   },
+  "dependencies": {
+    "@devos/contracts": "workspace:*",
+    "@devos/domain": "workspace:*",
+    "kysely": "0.29.5",
+    "pg": "8.23.0"
+  },
   "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "8.23.1",
+    "tsx": "^4.20.3",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
   }

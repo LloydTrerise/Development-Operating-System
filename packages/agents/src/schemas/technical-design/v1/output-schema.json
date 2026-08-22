@@ -1,0 +1,8 @@
+{
+  "name": "technical-design",
+  "version": 1,
+  "fields": {
+    "summary": { "type": "string" },
+    "decisions": { "type": "array" }
+  }
+}

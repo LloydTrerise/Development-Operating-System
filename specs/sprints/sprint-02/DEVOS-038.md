@@ -1,0 +1,3 @@
+# DEVOS-038 — Planning-Path End-to-End
+
+**Dependencies:** DEVOS-035, DEVOS-037 (all core Sprint 2 tasks), and the DEVOS-021 automated-proof pattern from Sprint 1. **Scope:** Automated proof that a work item, run through the real agent pipeline, produces a discovery report, a PRD, a technical design, and an implementation plan — the Sprint 2 analogue of DEVOS-021's "entire control loop passes" proof, extended to cover the full four-stage planning chain. **Acceptance:** A single automated test (following `@devos/e2e-tests`' established pattern — real infrastructure, no reaching into internals beyond what DEVOS-026's architecture requires) demonstrates the complete planning path end-to-end and passes repeatably; this is also the sprint demo scenario (source §10).

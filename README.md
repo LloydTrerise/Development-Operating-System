@@ -8,6 +8,23 @@ engineering knowledge, human approvals and auditable artifacts.
 
 POC — Under Development
 
+## Getting Started
+
+See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for the full local setup
+guide (infrastructure, migrations, seed data, dev servers, and how to run
+every category of test). Quick version:
+
+```sh
+pnpm install
+pnpm docker:up
+export DATABASE_URL="postgresql://devos:devos@localhost:5432/devos"
+pnpm db:migrate && pnpm db:seed
+pnpm dev
+```
+
+See [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) for what Sprint 1
+deliberately does and doesn't cover yet.
+
 ## Development Approach
 
 DevOS is being developed using a specification-driven, AI-assisted

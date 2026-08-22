@@ -1,0 +1,8 @@
+{
+  "name": "example",
+  "version": 1,
+  "fields": {
+    "summary": { "type": "string" },
+    "acknowledged": { "type": "boolean", "required": false }
+  }
+}

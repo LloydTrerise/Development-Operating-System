@@ -1,0 +1,3 @@
+# DEVOS-035 — Connect Agents to Workflow
+
+**Dependencies:** DEVOS-031, DEVOS-032, DEVOS-033, DEVOS-034. **Scope:** Wire the four planning-path agents into the existing workflow engine as real task handlers, replacing the deterministic stub handler that has stood in since DEVOS-016 — the workflow/task/worker/outbox machinery itself (Sprint 1) is unchanged; only which handler runs for which task type changes. **Acceptance:** A published workflow whose nodes reference the discovery/requirements/design/planning agent task types executes them for real through the standard run/task/worker pipeline, with no regression to Sprint 1's restart-safety, duplicate-delivery, or audit guarantees.

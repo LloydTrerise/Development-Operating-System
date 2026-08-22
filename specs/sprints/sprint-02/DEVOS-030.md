@@ -1,0 +1,3 @@
+# DEVOS-030 — Implement Context Manifest
+
+**Dependencies:** DEVOS-026. **Scope:** Record, per agent execution, exactly which sources were supplied as context (work item, prior artifacts, prompt version, etc.) — a "context manifest" for traceability and audit, consistent with `AGENTS.md`'s "Context ≠ Authority" principle: what was given to an agent is recorded as context, not treated as an authoritative instruction. **Acceptance:** Every agent execution produces a queryable manifest of its input sources; the manifest is linked to the execution's audit trail (extending Sprint 1's `audit_records`/outbox pattern, not a parallel logging mechanism).

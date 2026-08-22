@@ -1,0 +1,3 @@
+# DEVOS-046 — Implement Approval UI
+
+**Dependencies:** DEVOS-045. **Scope:** A minimal approval inbox and evidence view in `apps/web`'s existing `features/approvals/` folder (`specs/architecture/repository-code-structure.md` §10 — the only mention of an approvals UI anywhere in the spec set; no component/page behavior is otherwise specified, so this task's UI/UX shape is an implementation choice). Built against the approve/reject API contract (`poc-api-contracts.md` §29–§30). **Acceptance:** A reviewer can see pending approvals scoped to their project, inspect the evidence being approved (the planning artifacts referenced by `evidence_reference`), and approve or reject with a comment — mirroring the RunsPage/ProjectsPage pattern already established in DEVOS-020.

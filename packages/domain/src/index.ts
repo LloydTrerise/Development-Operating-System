@@ -1,2 +1,23 @@
-/** Bootstrap entry point for @devos/domain. */
-export {};
+export * from './agents/agent-execution.js';
+export * from './agents/agent-version.js';
+export * from './agents/agent.js';
+export * from './agents/context-manifest.js';
+export * from './approval/approval.js';
+export * from './artifacts/artifact-version.js';
+export * from './artifacts/artifact.js';
+export * from './audit/audit-record.js';
+export * from './events/outbox-event.js';
+export * from './knowledge/knowledge-reference.js';
+export * from './knowledge/knowledge-source.js';
+export * from './organisations/organisation.js';
+export * from './policy/policy.js';
+export * from './projects/authorization.js';
+export * from './projects/membership.js';
+export * from './projects/project.js';
+export * from './work-items/work-item.js';
+export * from './workflows/task-queue.js';
+export * from './workflows/validation.js';
+export * from './workflows/workflow-definition.js';
+export * from './workflows/workflow-run.js';
+export * from './workflows/workflow-task.js';
+export * from './workflows/workflow-version.js';

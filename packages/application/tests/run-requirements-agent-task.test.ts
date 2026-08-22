@@ -1,0 +1,346 @@
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import type { AgentModelAdapter, PromptRepository, SchemaRepository } from '@devos/agents';
+import type {
+  Agent,
+  AgentExecution,
+  AgentExecutionRepository,
+  AgentRepository,
+  AgentVersion,
+  AgentVersionRepository,
+  Artifact,
+  ArtifactRepository,
+  ArtifactVersion,
+  ArtifactVersionRepository,
+  ContextManifest,
+  ProjectId,
+  WorkflowRun,
+  WorkflowRunRepository,
+  WorkflowTask,
+  WorkItem,
+  WorkItemRepository,
+} from '@devos/domain';
+import { createLocalFilesystemStorage } from '@devos/storage';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { runRequirementsAgentTask } from '../src/tasks/run-requirements-agent-task.js';
+import type { AgentArtifactConsumerTaskHandlerDeps } from '../src/tasks/deps.js';
+
+const CONFIGURATION = {
+  role: 'REQUIREMENTS',
+  provider: 'fake',
+  modelRef: 'fake-model',
+  outputSchemaRef: 'prd-v1',
+  allowedCapabilities: [],
+};
+
+const prompts: PromptRepository = {
+  resolve: async (reference) => `Resolved prompt text for "${reference}".`,
+};
+
+const schemas: SchemaRepository = {
+  resolve: async () => ({
+    name: 'prd',
+    version: 1,
+    fields: { summary: { type: 'string' }, requirements: { type: 'array' } },
+  }),
+};
+
+function buildScenario() {
+  const projectId = randomUUID() as ProjectId;
+  const now = new Date(0).toISOString();
+
+  const workItem: WorkItem = {
+    id: randomUUID() as WorkItem['id'],
+    projectId,
+    title: 'Investigate slow query',
+    description: 'Users report timeouts.',
+    type: 'GENERAL',
+    status: 'OPEN',
+    priority: 'MEDIUM',
+    metadata: {},
+    createdBy: 'alice',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const run: WorkflowRun = {
+    id: randomUUID() as WorkflowRun['id'],
+    projectId,
+    workflowVersionId: randomUUID() as WorkflowRun['workflowVersionId'],
+    workItemId: workItem.id,
+    status: 'PENDING',
+    input: {},
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const agent: Agent = {
+    id: randomUUID() as Agent['id'],
+    projectId,
+    key: 'requirements-agent',
+    name: 'Requirements Agent',
+    status: 'ACTIVE',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const version: AgentVersion = {
+    id: randomUUID() as AgentVersion['id'],
+    agentId: agent.id,
+    version: 1,
+    status: 'PUBLISHED',
+    configuration: CONFIGURATION,
+    promptReference: 'requirements/v1',
+    createdBy: 'alice',
+    createdAt: now,
+  };
+
+  const task: WorkflowTask = {
+    id: randomUUID() as WorkflowTask['id'],
+    workflowRunId: run.id,
+    taskKey: 'requirements',
+    taskType: 'AGENT_TASK',
+    status: 'RUNNING',
+    attempt: 1,
+    input: { agentRef: agent.key },
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const discoveryArtifact: Artifact = {
+    id: randomUUID() as Artifact['id'],
+    projectId,
+    artifactType: 'DISCOVERY_REPORT',
+    name: `Discovery Report — ${workItem.title}`,
+    status: 'GENERATED',
+    workflowRunId: run.id,
+    workflowTaskId: randomUUID() as Artifact['workflowTaskId'],
+    createdBy: 'devos-agent-runtime',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const discoveryVersion: ArtifactVersion = {
+    id: randomUUID() as ArtifactVersion['id'],
+    artifactId: discoveryArtifact.id,
+    version: 1,
+    contentType: 'application/json',
+    contentUri: 'file:///discovery.json',
+    contentHash: 'a'.repeat(64),
+    metadata: {
+      summary: 'The work item asks for slow-query investigation.',
+      findings: ['Users report timeouts.'],
+    },
+    createdBy: 'devos-agent-runtime',
+    createdAt: now,
+  };
+
+  const workflowRuns: WorkflowRunRepository = {
+    getById: async (id) => (id === run.id ? run : null),
+    getByVersionAndIdempotencyKey: async () => null,
+    create: async () => {},
+  };
+  const workItems: WorkItemRepository = {
+    getById: async (id) => (id === workItem.id ? workItem : null),
+    listForProject: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const agents: AgentRepository = {
+    getById: async (id) => (id === agent.id ? agent : null),
+    getByProjectAndKey: async (pid, key) => (pid === projectId && key === agent.key ? agent : null),
+    listForProject: async () => [agent],
+    create: async () => {},
+  };
+  const agentVersions: AgentVersionRepository = {
+    getById: async (id) => (id === version.id ? version : null),
+    getByAgentAndVersion: async () => null,
+    getLatestForAgent: async () => version,
+    listForAgent: async (agentId) => (agentId === agent.id ? [version] : []),
+    create: async () => {},
+    publish: async () => {},
+  };
+
+  const executions: AgentExecution[] = [];
+  const agentExecutions: AgentExecutionRepository = {
+    getById: async (id) => executions.find((e) => e.id === id) ?? null,
+    listForTask: async (taskId) => executions.filter((e) => e.workflowTaskId === taskId),
+    create: async (execution) => {
+      executions.push(execution);
+    },
+    complete: async (id, output, uncertainty, completedAt) => {
+      const index = executions.findIndex((e) => e.id === id);
+      executions[index] = {
+        ...executions[index]!,
+        status: 'SUCCEEDED',
+        output,
+        ...(uncertainty !== undefined ? { uncertainty } : {}),
+        completedAt,
+      };
+    },
+    fail: async (id, errorCode, errorMessage, completedAt) => {
+      const index = executions.findIndex((e) => e.id === id);
+      executions[index] = {
+        ...executions[index]!,
+        status: 'FAILED',
+        ...(errorCode !== undefined ? { errorCode } : {}),
+        errorMessage,
+        completedAt,
+      };
+    },
+  };
+
+  const contextManifests: ContextManifest[] = [];
+  const recordContextManifest = async (manifest: ContextManifest): Promise<void> => {
+    contextManifests.push(manifest);
+  };
+
+  let projectArtifacts: Artifact[] = [discoveryArtifact];
+  const artifacts: ArtifactRepository = {
+    getById: async (id) => projectArtifacts.find((a) => a.id === id) ?? null,
+    listForProject: async () => projectArtifacts,
+    create: async () => {},
+  };
+  const artifactVersions: ArtifactVersionRepository = {
+    getById: async (id) => (id === discoveryVersion.id ? discoveryVersion : null),
+    listForArtifact: async (artifactId) =>
+      artifactId === discoveryArtifact.id ? [discoveryVersion] : [],
+    create: async () => {},
+  };
+
+  return {
+    projectId,
+    workItem,
+    run,
+    agent,
+    version,
+    task,
+    discoveryArtifact,
+    discoveryVersion,
+    workflowRuns,
+    workItems,
+    agents,
+    agentVersions,
+    agentExecutions,
+    executions,
+    contextManifests,
+    recordContextManifest,
+    artifacts,
+    artifactVersions,
+    removeDiscoveryArtifact: () => {
+      projectArtifacts = [];
+    },
+  };
+}
+
+describe('runRequirementsAgentTask', () => {
+  let storageDir: string;
+
+  beforeEach(async () => {
+    storageDir = await mkdtemp(path.join(tmpdir(), 'devos-run-requirements-agent-task-'));
+  });
+
+  afterEach(async () => {
+    await rm(storageDir, { recursive: true, force: true });
+  });
+
+  it('produces a schema-validated PRD artifact linked to the discovery report via provenance and context manifest', async () => {
+    const scenario = buildScenario();
+    let receivedInput: Record<string, unknown> | undefined;
+    const modelAdapter: AgentModelAdapter = {
+      invoke: async (request) => {
+        receivedInput = request.input;
+        return {
+          status: 'SUCCEEDED',
+          result: {
+            summary: 'PRD for slow-query investigation.',
+            requirements: ['The system must log query duration.'],
+          },
+        };
+      },
+    };
+
+    let publishedArtifact: Artifact | undefined;
+    let publishedVersion: ArtifactVersion | undefined;
+
+    const deps: AgentArtifactConsumerTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agents,
+      agentVersions: scenario.agentVersions,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async (artifact, version) => {
+        publishedArtifact = artifact;
+        publishedVersion = version;
+      },
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+    };
+
+    const output = await runRequirementsAgentTask(deps, scenario.task);
+
+    expect(receivedInput?.discoveryReport).toEqual(scenario.discoveryVersion.metadata);
+
+    expect(publishedArtifact).toMatchObject({
+      artifactType: 'PRD',
+      status: 'GENERATED',
+      workflowRunId: scenario.run.id,
+      workflowTaskId: scenario.task.id,
+      createdBy: 'devos-agent-runtime',
+    });
+    expect(publishedVersion?.metadata).toMatchObject({
+      derivedFromArtifactId: scenario.discoveryArtifact.id,
+      derivedFromArtifactVersionId: scenario.discoveryVersion.id,
+      requirements: ['The system must log query duration.'],
+    });
+    expect(output).toMatchObject({
+      status: 'SUCCEEDED',
+      artifactType: 'PRD',
+      derivedFromArtifactId: scenario.discoveryArtifact.id,
+    });
+
+    expect(scenario.contextManifests).toHaveLength(1);
+    expect(scenario.contextManifests[0]?.sources).toContainEqual(
+      expect.objectContaining({
+        type: 'ARTIFACT',
+        ref: `artifact:${scenario.discoveryArtifact.id}:v${scenario.discoveryVersion.version}`,
+        retrievedAt: expect.any(String),
+        authorityLevel: 8,
+      }),
+    );
+  });
+
+  it('throws when no discovery report exists for the run', async () => {
+    const scenario = buildScenario();
+    scenario.removeDiscoveryArtifact();
+    const modelAdapter: AgentModelAdapter = {
+      invoke: async () => ({ status: 'SUCCEEDED', result: {} }),
+    };
+
+    const deps: AgentArtifactConsumerTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agents,
+      agentVersions: scenario.agentVersions,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async () => {},
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+    };
+
+    await expect(runRequirementsAgentTask(deps, scenario.task)).rejects.toThrow(
+      'No DISCOVERY_REPORT artifact found',
+    );
+  });
+});

@@ -1,0 +1,8 @@
+{
+  "name": "implementation-plan",
+  "version": 1,
+  "fields": {
+    "summary": { "type": "string" },
+    "tasks": { "type": "array" }
+  }
+}
