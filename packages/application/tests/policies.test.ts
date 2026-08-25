@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  AuditRecord,
+  AuditRecordRepository,
   Membership,
   MembershipRepository,
   OrganisationId,
@@ -15,7 +17,7 @@ import type { PolicyUseCaseDeps } from '../src/policy/deps.js';
 import { getPolicyForPrincipal } from '../src/policy/get-policy.js';
 import { listPoliciesForProject } from '../src/policy/list-policies.js';
 import { publishPolicy } from '../src/policy/publish-policy.js';
-import { NotFoundError, ValidationError } from '../src/errors.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
 
 function createInMemoryDeps(): PolicyUseCaseDeps {
   const projects = new Map<string, Project>();
@@ -81,7 +83,15 @@ function createInMemoryDeps(): PolicyUseCaseDeps {
     },
   };
 
-  return { projects: projectRepository, memberships: membershipRepository, policies };
+  const auditRecordsStore: AuditRecord[] = [];
+  const auditRecords: AuditRecordRepository = {
+    create: async (record) => {
+      auditRecordsStore.push(record);
+    },
+    listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
+  };
+
+  return { projects: projectRepository, memberships: membershipRepository, policies, auditRecords };
 }
 
 const VALID_DEFINITION = { rule: 'require-approval', scope: 'production-release' };
@@ -156,6 +166,26 @@ describe('policy use cases', () => {
     await expect(publishPolicy(deps, 'alice', policy.id)).rejects.toThrow(ValidationError);
   });
 
+  it('DEVOS-086: writes an audit record when a policy is published', async () => {
+    const policy = await createPolicy(deps, 'alice', projectId, {
+      key: 'audited',
+      definition: VALID_DEFINITION,
+    });
+
+    await publishPolicy(deps, 'alice', policy.id);
+
+    const records = await deps.auditRecords.listForProject(projectId);
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        action: 'policy.published',
+        actorId: 'alice',
+        targetType: 'Policy',
+        targetId: policy.id,
+        outcome: 'SUCCESS',
+      }),
+    );
+  });
+
   it('lists policies for a project and rejects non-members', async () => {
     await createPolicy(deps, 'alice', projectId, { key: 'listed', definition: VALID_DEFINITION });
 
@@ -163,6 +193,26 @@ describe('policy use cases', () => {
     expect(policies).toHaveLength(1);
 
     await expect(listPoliciesForProject(deps, 'mallory', projectId)).rejects.toThrow(NotFoundError);
+  });
+
+  it('rejects publishing by a non-owner member (DEVOS-082 RBAC hardening)', async () => {
+    const policy = await createPolicy(deps, 'alice', projectId, {
+      key: 'member-cannot-publish',
+      definition: VALID_DEFINITION,
+    });
+
+    await deps.memberships.create({
+      id: randomUUID() as Membership['id'],
+      organisationId,
+      projectId,
+      principalId: 'bob',
+      role: 'MEMBER',
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await expect(publishPolicy(deps, 'bob', policy.id)).rejects.toThrow(ForbiddenError);
   });
 
   it('gets a single policy by id for a member, and 404s for a non-member', async () => {

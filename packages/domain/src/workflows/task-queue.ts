@@ -9,8 +9,26 @@ export interface TaskFailure {
 
 export interface TaskQueue {
   claimNext: () => Promise<WorkflowTask | null>;
-  complete: (taskId: WorkflowTask['id'], output: Record<string, unknown>) => Promise<void>;
-  fail: (taskId: WorkflowTask['id'], failure: TaskFailure, retryable: boolean) => Promise<void>;
+  /**
+   * DEVOS-094: `attempt` is the fencing token — the attempt number the
+   * caller believes it still holds (from the `WorkflowTask` it was handed
+   * by `claimNext()`). Applied only if the row is still `RUNNING` under
+   * that exact attempt; otherwise the row has already moved on (reclaimed
+   * by another worker and resolved under a later attempt), and this call
+   * is a safe no-op rather than silently clobbering that later outcome.
+   */
+  complete: (
+    taskId: WorkflowTask['id'],
+    attempt: number,
+    output: Record<string, unknown>,
+  ) => Promise<void>;
+  /** DEVOS-094: see `complete()` — same fencing-token contract. */
+  fail: (
+    taskId: WorkflowTask['id'],
+    attempt: number,
+    failure: TaskFailure,
+    retryable: boolean,
+  ) => Promise<void>;
   /**
    * Recovers tasks left in RUNNING state by a worker that claimed them and
    * then crashed/was killed before calling complete()/fail() — without

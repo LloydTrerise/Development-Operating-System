@@ -4,6 +4,8 @@ import type {
   AgentRepository,
   AgentVersion,
   AgentVersionRepository,
+  AuditRecord,
+  AuditRecordRepository,
   Membership,
   MembershipRepository,
   OrganisationId,
@@ -17,7 +19,7 @@ import type { AgentUseCaseDeps } from '../src/agents/deps.js';
 import { getAgentForPrincipal } from '../src/agents/get-agent.js';
 import { listAgentsForProject } from '../src/agents/list-agents.js';
 import { publishAgentVersion } from '../src/agents/publish-agent-version.js';
-import { NotFoundError, ValidationError } from '../src/errors.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
 
 function createInMemoryDeps(): AgentUseCaseDeps {
   const projects = new Map<string, Project>();
@@ -94,6 +96,14 @@ function createInMemoryDeps(): AgentUseCaseDeps {
     },
   };
 
+  const auditRecordsStore: AuditRecord[] = [];
+  const auditRecords: AuditRecordRepository = {
+    create: async (record) => {
+      auditRecordsStore.push(record);
+    },
+    listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
+  };
+
   return {
     projects: projectRepository,
     memberships: membershipRepository,
@@ -103,6 +113,7 @@ function createInMemoryDeps(): AgentUseCaseDeps {
       await agents.create(agent);
       await agentVersions.create(version);
     },
+    auditRecords,
   };
 }
 
@@ -180,6 +191,48 @@ describe('agent use cases', () => {
     expect(published.publishedAt).toBeDefined();
 
     await expect(publishAgentVersion(deps, 'alice', agent.id)).rejects.toThrow(ValidationError);
+  });
+
+  it('DEVOS-086: writes an audit record when an agent version is published', async () => {
+    const { agent, version } = await createAgent(deps, 'alice', projectId, {
+      key: 'audited',
+      name: 'Audited',
+      configuration: VALID_CONFIGURATION,
+    });
+
+    await publishAgentVersion(deps, 'alice', agent.id);
+
+    const records = await deps.auditRecords.listForProject(projectId);
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        action: 'agent_version.published',
+        actorId: 'alice',
+        targetType: 'AgentVersion',
+        targetId: version.id,
+        outcome: 'SUCCESS',
+      }),
+    );
+  });
+
+  it('rejects publishing an agent version by a non-owner member (DEVOS-082 RBAC hardening)', async () => {
+    const { agent } = await createAgent(deps, 'alice', projectId, {
+      key: 'member-cannot-publish',
+      name: 'Member Cannot Publish',
+      configuration: VALID_CONFIGURATION,
+    });
+
+    await deps.memberships.create({
+      id: randomUUID() as Membership['id'],
+      organisationId,
+      projectId,
+      principalId: 'bob',
+      role: 'MEMBER',
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await expect(publishAgentVersion(deps, 'bob', agent.id)).rejects.toThrow(ForbiddenError);
   });
 
   it('lists agents for a project and rejects non-members with 404-equivalent NotFoundError', async () => {

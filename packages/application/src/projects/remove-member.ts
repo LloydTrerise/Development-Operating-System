@@ -1,4 +1,5 @@
-import type { MembershipId, ProjectId } from '@devos/contracts';
+import { randomUUID } from 'node:crypto';
+import type { AuditId, MembershipId, ProjectId } from '@devos/contracts';
 import { canManageMembers } from '@devos/domain';
 import { ForbiddenError, NotFoundError } from '../errors.js';
 import type { ProjectUseCaseDeps } from './deps.js';
@@ -25,4 +26,18 @@ export async function removeMember(
   }
 
   await deps.memberships.remove(target.id);
+
+  await deps.auditRecords.create({
+    id: randomUUID() as AuditId,
+    organisationId: project.organisationId,
+    projectId,
+    actorType: 'USER',
+    actorId: requesterPrincipalId,
+    action: 'membership.removed',
+    targetType: 'Membership',
+    targetId: target.id,
+    outcome: 'SUCCESS',
+    metadata: { principalId: target.principalId, role: target.role },
+    createdAt: new Date().toISOString(),
+  });
 }

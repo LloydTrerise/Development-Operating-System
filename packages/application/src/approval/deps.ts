@@ -16,6 +16,7 @@ import type {
 export type TransitionAfterApprovalDecision = (
   approvalId: string,
   workflowRunId: string,
+  approvalType: string,
   decision: 'APPROVED' | 'REJECTED',
   decidedBy: string,
   decisionReason: string | undefined,

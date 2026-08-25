@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { validateAgentOutput } from '@devos/agents';
+import { estimateCostUsd, validateAgentOutput } from '@devos/agents';
+import type { AuditId, ProjectId } from '@devos/contracts';
 import type {
   AgentExecution,
   ContextManifest,
@@ -8,6 +9,11 @@ import type {
 } from '@devos/domain';
 import { authorityLevelFor } from '@devos/knowledge';
 import type { AgentTaskHandlerDeps } from './deps.js';
+
+// Matches every other task handler's own SYSTEM_ACTOR_ID constant
+// (run-discovery-agent-task.ts and its siblings) — the agent runtime
+// acting on its own behalf, not impersonating any real user.
+const SYSTEM_ACTOR_ID = 'devos-agent-runtime';
 
 /**
  * Which recorded source types represent retrieved/authoritative content
@@ -58,6 +64,57 @@ function withProvenance(
 export interface AgentTaskAdditionalContext {
   input?: Record<string, unknown>;
   sources?: ContextManifestSourceInput[];
+}
+
+/**
+ * DEVOS-098: a real, checkable per-project budget threshold — not a payment
+ * system, no automatic spend cutoff, just a real, visible audit record when
+ * a project's real accumulated `estimatedCostUsd` first crosses its
+ * configured `budgetUsd`. Optional (see `AgentTaskHandlerDeps`): a no-op
+ * whenever `projects`/`auditRecords`/the repository's own optional
+ * `sumEstimatedCostUsdForProject` aren't all supplied, or the project has
+ * no configured budget, or this execution recorded no cost at all.
+ *
+ * Fires exactly once per crossing, not on every execution once already
+ * over budget: `totalCostUsd` (post-completion) minus this execution's own
+ * `estimatedCostUsd` gives the pre-completion total; the alert only fires
+ * when that pre-completion total was still under budget.
+ */
+async function maybeAlertOnBudgetExceeded(
+  deps: AgentTaskHandlerDeps,
+  projectId: ProjectId,
+  estimatedCostUsd: number | undefined,
+): Promise<void> {
+  if (
+    !deps.projects ||
+    !deps.auditRecords ||
+    !deps.agentExecutions.sumEstimatedCostUsdForProject ||
+    estimatedCostUsd === undefined
+  ) {
+    return;
+  }
+
+  const project = await deps.projects.getById(projectId);
+  if (!project || project.budgetUsd === undefined) return;
+
+  const totalCostUsd = await deps.agentExecutions.sumEstimatedCostUsdForProject(projectId);
+  const previousTotalCostUsd = totalCostUsd - estimatedCostUsd;
+  if (previousTotalCostUsd > project.budgetUsd || totalCostUsd <= project.budgetUsd) return;
+
+  const now = new Date().toISOString();
+  await deps.auditRecords.create({
+    id: randomUUID() as AuditId,
+    organisationId: project.organisationId,
+    projectId,
+    actorType: 'SYSTEM',
+    actorId: SYSTEM_ACTOR_ID,
+    action: 'project.budget_exceeded',
+    targetType: 'Project',
+    targetId: projectId,
+    outcome: 'FAILURE',
+    metadata: { budgetUsd: project.budgetUsd, accumulatedCostUsd: totalCostUsd },
+    createdAt: now,
+  });
 }
 
 /**
@@ -212,13 +269,19 @@ export async function runAgentTask(
   }
 
   const completedAt = new Date().toISOString();
+  const estimatedCostUsd =
+    invocation.usage !== undefined ? estimateCostUsd(invocation.usage) : undefined;
 
   await deps.agentExecutions.complete(
     execution.id,
     invocation.result ?? {},
     invocation.uncertainty,
     completedAt,
+    invocation.usage,
+    estimatedCostUsd,
   );
+
+  await maybeAlertOnBudgetExceeded(deps, run.projectId, estimatedCostUsd);
 
   return {
     status: 'SUCCEEDED',

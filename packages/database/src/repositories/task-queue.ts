@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { MAX_TASK_ATTEMPTS, type TaskFailure, type TaskQueue } from '@devos/domain';
 import type { Kysely } from 'kysely';
 import type { Database } from '../database.js';
-import { PLANNING_APPROVAL_POLICY_KEY } from '../seed-constants.js';
+import { PLANNING_APPROVAL_POLICY_KEY, RELEASE_APPROVAL_POLICY_KEY } from '../seed-constants.js';
 import { writeAuditRecord } from './audit-helper.js';
 import { withTransaction, type QueryExecutor } from './base.js';
 import { createEventEnvelope } from './event-envelope.js';
@@ -53,19 +53,36 @@ async function collectRunArtifactVersionIds(
 }
 
 /**
- * Stage 6 — Human Planning Approval (specs/workflows/software-change-workflow.md
- * §16): a run whose workflow version's definition carries the
- * `planning-approval` policy marker (DEVOS-047) does not complete
- * automatically — it transitions to `AWAITING_APPROVAL` (the existing
- * workflow-level state, specs/workflows/software-change-workflow.md §9) and
- * an approval request is created automatically, bound to every artifact the
- * run has produced. DEVOS-045's approve/reject API is what resolves it
- * (via `transitionAfterApprovalDecision`, decide-approval.ts).
+ * Maps a `WorkflowDefinition.policies` gate marker to the `approval_type`
+ * it requests. `planning-approval` -> `'PLANNING'` is DEVOS-047's original
+ * gate (Stage 6, specs/workflows/software-change-workflow.md §16);
+ * `release-approval` -> `'RELEASE'` is DEVOS-073's release-approval gate
+ * (Stage 11, §22) — the same mechanism, a second marker. `approval_type` is
+ * documented as free-form ("Planning/Release/etc.",
+ * specs/database/poc-database-schema.md §11.1), so adding a second entry
+ * here needs no schema change.
  */
-async function requestPlanningApproval(
+const APPROVAL_GATE_POLICIES: Record<string, string> = {
+  [PLANNING_APPROVAL_POLICY_KEY]: 'PLANNING',
+  [RELEASE_APPROVAL_POLICY_KEY]: 'RELEASE',
+};
+
+/**
+ * A human approval gate (Stage 6 — Human Planning Approval, §16; Stage 11 —
+ * Release, §22's required approval): a run whose workflow version's
+ * definition carries one of `APPROVAL_GATE_POLICIES`'s marker keys does not
+ * complete automatically — it transitions to `AWAITING_APPROVAL` (the
+ * existing workflow-level state, specs/workflows/software-change-workflow.md
+ * §9) and an approval request of the corresponding type is created
+ * automatically, bound to every artifact the run has produced. DEVOS-045's
+ * approve/reject API is what resolves it (via
+ * `transitionAfterApprovalDecision`, approval-run-transition.ts).
+ */
+async function requestApproval(
   trx: QueryExecutor,
   workflowRunId: string,
   projectId: string,
+  approvalType: string,
 ): Promise<void> {
   const artifactVersionIds = await collectRunArtifactVersionIds(trx, workflowRunId);
 
@@ -77,7 +94,7 @@ async function requestPlanningApproval(
       id: approvalId,
       project_id: projectId,
       workflow_run_id: workflowRunId,
-      approval_type: 'PLANNING',
+      approval_type: approvalType,
       status: 'PENDING',
       requested_by: SYSTEM_ACTOR_ID,
       decided_by: null,
@@ -102,7 +119,7 @@ async function requestPlanningApproval(
     'ApprovalRequested',
     'Approval',
     approvalId,
-    { workflowRunId, approvalType: 'PLANNING' },
+    { workflowRunId, approvalType },
     { projectId },
   );
   await createOutboxEventRepository(trx).create(organisationId, envelope);
@@ -141,8 +158,9 @@ async function maybeCompleteRun(trx: QueryExecutor, workflowRunId: string): Prom
     .where('id', '=', run.workflow_version_id)
     .executeTakeFirst();
   const policies = (version?.definition as { policies?: string[] } | undefined)?.policies ?? [];
-  if (policies.includes(PLANNING_APPROVAL_POLICY_KEY)) {
-    await requestPlanningApproval(trx, workflowRunId, run.project_id);
+  const gateMarker = policies.find((key) => key in APPROVAL_GATE_POLICIES);
+  if (gateMarker) {
+    await requestApproval(trx, workflowRunId, run.project_id, APPROVAL_GATE_POLICIES[gateMarker]!);
     return;
   }
 
@@ -338,9 +356,14 @@ export function createPostgresTaskQueue(db: Kysely<Database>): TaskQueue {
       });
     },
 
-    async complete(taskId, output) {
+    async complete(taskId, attempt, output) {
       await withTransaction(db, async (trx) => {
         const now = new Date().toISOString();
+        // DEVOS-094: fenced by attempt — only applies if this row is still
+        // RUNNING under the exact attempt the caller believes it holds. A
+        // row already reclaimed and resolved under a later attempt (or
+        // already terminal) matches neither condition, so this late/stale
+        // completion is a safe no-op rather than overwriting that outcome.
         const row = await trx
           .updateTable('workflow_tasks')
           .set({
@@ -350,8 +373,11 @@ export function createPostgresTaskQueue(db: Kysely<Database>): TaskQueue {
             updated_at: now,
           })
           .where('id', '=', taskId)
+          .where('status', '=', 'RUNNING')
+          .where('attempt', '=', attempt)
           .returningAll()
-          .executeTakeFirstOrThrow();
+          .executeTakeFirst();
+        if (!row) return;
         const task = toWorkflowTaskDomain(row);
 
         const run = await trx
@@ -387,14 +413,17 @@ export function createPostgresTaskQueue(db: Kysely<Database>): TaskQueue {
       });
     },
 
-    async fail(taskId, failure, retryable) {
+    async fail(taskId, attempt, failure, retryable) {
       await withTransaction(db, async (trx) => {
+        // DEVOS-094: same fencing-token contract as complete() — a stale
+        // worker's late fail() for a task already reclaimed/resolved under
+        // a later attempt must not corrupt that later outcome.
         const current = await trx
           .selectFrom('workflow_tasks')
-          .select(['attempt', 'workflow_run_id'])
+          .select(['attempt', 'workflow_run_id', 'status'])
           .where('id', '=', taskId)
           .executeTakeFirst();
-        if (!current) return;
+        if (!current || current.status !== 'RUNNING' || current.attempt !== attempt) return;
 
         await resolveTaskFailure(
           trx,

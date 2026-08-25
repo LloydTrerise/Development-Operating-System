@@ -3,6 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/main.ts",
@@ -17,6 +19,8 @@
     "@devos/config": "workspace:*",
     "@devos/database": "workspace:*",
     "@devos/domain": "workspace:*",
+    "@devos/integrations": "workspace:*",
+    "@devos/observability": "workspace:*",
     "@devos/storage": "workspace:*"
   },
   "devDependencies": {

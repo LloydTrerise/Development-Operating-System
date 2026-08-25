@@ -1,6 +1,8 @@
 import {
   runDiscoveryTask,
-  type AgentArtifactConsumerTaskHandlerDeps,
+  type ClosureUseCaseDeps,
+  type DevelopmentAgentTaskHandlerDeps,
+  type ReviewAgentTaskHandlerDeps,
   type TaskHandlerDeps,
 } from '@devos/application';
 import {
@@ -16,23 +18,43 @@ import {
   createAgentExecutionRepository,
   createAgentRepository,
   createAgentVersionRepository,
+  createApprovalRepository,
   createArtifactPublisher,
   createArtifactRepository,
   createArtifactVersionRepository,
+  createAuditRecordRepository,
   createContextManifestRecorder,
   createDatabaseClient,
+  createIntegrationRepository,
+  createKnowledgeSourceRepository,
+  createMembershipRepository,
+  createPolicyRepository,
   createPostgresTaskQueue,
+  createProjectRepository,
+  createToolCapabilityRepository,
+  createToolInvocationRepository,
+  createWorkflowDefinitionRepository,
+  createWorkflowDraftCreator,
   createWorkflowRunRepository,
+  createWorkflowRunStarter,
+  createWorkflowTaskRepository,
+  createWorkflowVersionRepository,
+  createWorkItemCloser,
   createWorkItemRepository,
 } from '@devos/database';
+import { createLocalPullRequestProvider } from '@devos/integrations';
+import { createMetricsRegistry } from '@devos/observability';
 import { createLocalFilesystemStorage } from '@devos/storage';
 import { routeAgentTask } from './agent-task-router.js';
 import { createTaskDispatcher } from './task-dispatcher.js';
+import { routeToolTask } from './tool-task-router.js';
 
 const config = loadConfig();
 const database = createDatabaseClient({ connectionString: config.database.url });
 const taskQueue = createPostgresTaskQueue(database.db);
-const dispatcher = createTaskDispatcher(taskQueue);
+/** DEVOS-087: workflow/agent/tool/queue metrics, recorded per claimed task. */
+export const metrics = createMetricsRegistry();
+const dispatcher = createTaskDispatcher(taskQueue, { metrics });
 
 const storage = createLocalFilesystemStorage(
   process.env.ARTIFACT_STORAGE_DIR ?? './data/artifacts',
@@ -73,17 +95,39 @@ dispatcher.registerHandler('TASK', (task) => runDiscoveryTask(taskHandlerDeps, t
 async function resolveAgentModelAdapter(): Promise<AgentModelAdapter | undefined> {
   if (process.env.AGENT_MODEL_ADAPTER === 'fixture') {
     const fixtures = createFilesystemFixtureRepository();
-    const [discovery, requirements, technicalDesign, planning] = await Promise.all([
+    // DEVOS-071: the development/review agents' real outputs are entirely
+    // determined by their fixtures (not reactive to input), so a rework
+    // loop can't be exercised end-to-end with single static fixtures — a
+    // real review must return CHANGES_REQUIRED once then PASS on the
+    // reworked attempt, and development must actually address the
+    // findings on that reworked attempt (a repeated, byte-identical
+    // proposal has nothing new to commit). DEVELOPMENT_FIXTURE_SEQUENCE/
+    // REVIEW_FIXTURE_SEQUENCE (comma-separated fixture references) let a
+    // test drive that; unset in every other case, where each agent always
+    // uses its own single default fixture.
+    const developmentFixtureReferences = process.env.DEVELOPMENT_FIXTURE_SEQUENCE?.split(',') ?? [
+      'developer-v1',
+    ];
+    const reviewFixtureReferences = process.env.REVIEW_FIXTURE_SEQUENCE?.split(',') ?? [
+      'review-v1',
+    ];
+    const [discovery, requirements, technicalDesign, planning, ...rest] = await Promise.all([
       fixtures.resolve('discovery-v1'),
       fixtures.resolve('requirements-v1'),
       fixtures.resolve('technical-design-v1'),
       fixtures.resolve('planning-v1'),
+      ...developmentFixtureReferences.map((reference) => fixtures.resolve(reference)),
+      ...reviewFixtureReferences.map((reference) => fixtures.resolve(reference)),
     ]);
+    const development = rest.slice(0, developmentFixtureReferences.length);
+    const review = rest.slice(developmentFixtureReferences.length);
     return createFixtureModelAdapter({
       DISCOVERY: discovery,
       REQUIREMENTS: requirements,
       TECHNICAL_DESIGN: technicalDesign,
       PLANNING: planning,
+      DEVELOPMENT: development.length === 1 ? development[0]! : development,
+      REVIEW: review.length === 1 ? review[0]! : review,
     });
   }
 
@@ -103,7 +147,9 @@ if (modelAdapter === undefined) {
     'GEMINI_API_KEY not configured (and AGENT_MODEL_ADAPTER is not "fixture") — AGENT_TASK (the planning-path agents) will not be handled.',
   );
 } else {
-  const agentTaskDeps: AgentArtifactConsumerTaskHandlerDeps = {
+  const agentTaskDeps: DevelopmentAgentTaskHandlerDeps &
+    ReviewAgentTaskHandlerDeps &
+    ClosureUseCaseDeps = {
     workflowRuns,
     workItems,
     agents: createAgentRepository(database.db),
@@ -117,16 +163,66 @@ if (modelAdapter === undefined) {
     publishArtifact,
     artifacts: createArtifactRepository(database.db),
     artifactVersions: createArtifactVersionRepository(database.db),
+    projects: createProjectRepository(database.db),
+    memberships: createMembershipRepository(database.db),
+    policies: createPolicyRepository(database.db),
+    toolCapabilities: createToolCapabilityRepository(database.db),
+    toolInvocations: createToolInvocationRepository(database.db),
+    auditRecords: createAuditRecordRepository(database.db),
+    integrations: createIntegrationRepository(database.db),
+    pullRequestProvider: createLocalPullRequestProvider(),
+    // DEVOS-065/067: the review agent's own extra needs — engineering
+    // standards retrieval, and starting a rework run on CHANGES_REQUIRED.
+    knowledgeSources: createKnowledgeSourceRepository(database.db),
+    workflowDefinitions: createWorkflowDefinitionRepository(database.db),
+    workflowVersions: createWorkflowVersionRepository(database.db),
+    workflowTasks: createWorkflowTaskRepository(database.db),
+    createDraft: createWorkflowDraftCreator(database.db),
+    startRun: createWorkflowRunStarter(database.db),
+    // DEVOS-079: the closure task's own extra needs — release approvals
+    // and the transactional work-item closer.
+    approvals: createApprovalRepository(database.db),
+    closeWorkItem: createWorkItemCloser(database.db),
   };
 
   dispatcher.registerHandler('AGENT_TASK', (task) => routeAgentTask(agentTaskDeps, task));
+  // DEVOS-064/073: Stage 8 (Automated Validation) and Stage 11's release-
+  // readiness re-check have no agent, so they're registered for the
+  // separate 'TOOL_TASK' node type instead of going through
+  // routeAgentTask's agentRef-keyed dispatch — routed internally by
+  // `routeToolTask`, mirroring `routeAgentTask`'s own pattern now that two
+  // different deterministic handlers share this one node type.
+  // `agentTaskDeps` is a structural superset of `ToolTaskHandlerDeps`
+  // (every field either handler needs is already present above), so the
+  // same object is reused rather than constructing a second one.
+  dispatcher.registerHandler('TOOL_TASK', (task) => routeToolTask(agentTaskDeps, task));
 }
 
 dispatcher.start();
 console.log('DevOS worker ready, dispatching workflow tasks');
 
+/**
+ * DEVOS-093: the real metrics registry (DEVOS-087) had no way to be read
+ * from outside the process it lives in — establishing a real performance
+ * baseline needs real numbers to actually be observable. A periodic log
+ * line is the minimal mechanism that makes that possible without a real
+ * metrics backend/export endpoint, which stays out of scope for this POC.
+ * Interval is configurable for tests/local tuning; disabled entirely when
+ * set to 0.
+ */
+const metricsSnapshotIntervalMs = Number(process.env.METRICS_SNAPSHOT_INTERVAL_MS ?? 30_000);
+let metricsSnapshotTimer: NodeJS.Timeout | undefined;
+if (metricsSnapshotIntervalMs > 0) {
+  metricsSnapshotTimer = setInterval(() => {
+    console.log('DevOS worker metrics snapshot', JSON.stringify(metrics.snapshot()));
+  }, metricsSnapshotIntervalMs);
+  metricsSnapshotTimer.unref();
+}
+
 async function shutdown(signal: string): Promise<void> {
   console.log(`DevOS worker received ${signal}, shutting down gracefully`);
+  if (metricsSnapshotTimer) clearInterval(metricsSnapshotTimer);
+  console.log('DevOS worker final metrics snapshot', JSON.stringify(metrics.snapshot()));
   await dispatcher.stop();
   await database.close();
   console.log('DevOS worker stopped');

@@ -3,9 +3,10 @@ import type {
   AgentExecutionStatus,
   AgentUncertainty,
   AgentVersionId,
+  ProjectId,
   WorkflowTaskId,
 } from '@devos/contracts';
-import type { AgentExecution, AgentExecutionRepository } from '@devos/domain';
+import type { AgentExecution, AgentExecutionRepository, AgentExecutionUsage } from '@devos/domain';
 import type { AgentExecutionsTable } from '../database.js';
 import type { QueryExecutor } from './base.js';
 
@@ -19,6 +20,10 @@ function toDomain(row: AgentExecutionsTable): AgentExecution {
     ...(row.output !== null ? { output: row.output as Record<string, unknown> } : {}),
     ...(row.uncertainty !== null ? { uncertainty: row.uncertainty as AgentUncertainty[] } : {}),
     ...(row.model_reference !== null ? { modelReference: row.model_reference } : {}),
+    ...(row.usage_metadata !== null ? { usage: row.usage_metadata as AgentExecutionUsage } : {}),
+    ...(row.estimated_cost_usd !== null
+      ? { estimatedCostUsd: Number(row.estimated_cost_usd) }
+      : {}),
     ...(row.started_at !== null ? { startedAt: row.started_at } : {}),
     ...(row.completed_at !== null ? { completedAt: row.completed_at } : {}),
     ...(row.error_code !== null ? { errorCode: row.error_code } : {}),
@@ -61,6 +66,8 @@ export function createAgentExecutionRepository(db: QueryExecutor): AgentExecutio
           uncertainty:
             execution.uncertainty !== undefined ? JSON.stringify(execution.uncertainty) : null,
           model_reference: execution.modelReference ?? null,
+          usage_metadata: execution.usage !== undefined ? JSON.stringify(execution.usage) : null,
+          estimated_cost_usd: execution.estimatedCostUsd?.toString() ?? null,
           started_at: execution.startedAt ?? null,
           completed_at: execution.completedAt ?? null,
           error_code: execution.errorCode ?? null,
@@ -70,13 +77,15 @@ export function createAgentExecutionRepository(db: QueryExecutor): AgentExecutio
         .execute();
     },
 
-    async complete(id, output, uncertainty, completedAt) {
+    async complete(id, output, uncertainty, completedAt, usage, estimatedCostUsd) {
       await db
         .updateTable('agent_executions')
         .set({
           status: 'SUCCEEDED',
           output: JSON.stringify(output),
           uncertainty: uncertainty !== undefined ? JSON.stringify(uncertainty) : null,
+          usage_metadata: usage !== undefined ? JSON.stringify(usage) : null,
+          estimated_cost_usd: estimatedCostUsd?.toString() ?? null,
           completed_at: completedAt,
         })
         .where('id', '=', id)
@@ -94,6 +103,22 @@ export function createAgentExecutionRepository(db: QueryExecutor): AgentExecutio
         })
         .where('id', '=', id)
         .execute();
+    },
+
+    // DEVOS-098: agent_executions carries no project_id of its own — joined
+    // through the same real workflow_task_id/workflow_run_id chain every
+    // other project-scoped query in this codebase uses.
+    async sumEstimatedCostUsdForProject(projectId: ProjectId) {
+      const result = await db
+        .selectFrom('agent_executions')
+        .innerJoin('workflow_tasks', 'workflow_tasks.id', 'agent_executions.workflow_task_id')
+        .innerJoin('workflow_runs', 'workflow_runs.id', 'workflow_tasks.workflow_run_id')
+        .where('workflow_runs.project_id', '=', projectId)
+        .select((eb) =>
+          eb.fn.coalesce(eb.fn.sum('agent_executions.estimated_cost_usd'), eb.val(0)).as('total'),
+        )
+        .executeTakeFirst();
+      return Number(result?.total ?? 0);
     },
   };
 }

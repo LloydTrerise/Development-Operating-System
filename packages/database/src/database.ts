@@ -15,6 +15,7 @@ export interface ProjectsTable {
   description: string | null;
   status: string;
   repository_id: string | null;
+  budget_usd: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -79,6 +80,8 @@ export interface AgentExecutionsTable {
   output: unknown | null;
   uncertainty: unknown | null;
   model_reference: string | null;
+  usage_metadata: unknown | null;
+  estimated_cost_usd: string | null;
   started_at: string | null;
   completed_at: string | null;
   error_code: string | null;
@@ -253,6 +256,45 @@ export interface ApprovalsTable {
   decided_at: string | null;
 }
 
+export interface ToolCapabilitiesTable {
+  id: string;
+  project_id: string;
+  key: string;
+  name: string;
+  risk_class: string;
+  input_schema: unknown;
+  output_schema: unknown;
+  status: string;
+  created_at: string;
+}
+
+export interface ToolInvocationsTable {
+  id: string;
+  workflow_task_id: string;
+  tool_capability_id: string;
+  status: string;
+  input_metadata: unknown;
+  output_metadata: unknown | null;
+  provider_reference: string | null;
+  idempotency_key: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  error_code: string | null;
+  created_at: string;
+}
+
+export interface IntegrationsTable {
+  id: string;
+  project_id: string;
+  type: string;
+  provider: string;
+  name: string;
+  status: string;
+  configuration: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Database {
   organisations: OrganisationsTable;
   projects: ProjectsTable;
@@ -274,4 +316,7 @@ export interface Database {
   knowledge_references: KnowledgeReferencesTable;
   policies: PoliciesTable;
   approvals: ApprovalsTable;
+  tool_capabilities: ToolCapabilitiesTable;
+  tool_invocations: ToolInvocationsTable;
+  integrations: IntegrationsTable;
 }

@@ -34,6 +34,31 @@ describe('createFixtureModelAdapter', () => {
     expect(result.modelReference).toContain('gemini:gemini-3.6-flash');
   });
 
+  it('DEVOS-071: consumes an array of fixtures in sequence, holding on the last once exhausted', async () => {
+    const firstFixture: AgentFixture = { ...discoveryFixture, result: { summary: 'first' } };
+    const secondFixture: AgentFixture = { ...discoveryFixture, result: { summary: 'second' } };
+    const adapter = createFixtureModelAdapter({ DISCOVERY: [firstFixture, secondFixture] });
+
+    const request = {
+      configuration: {
+        role: 'DISCOVERY',
+        provider: 'gemini',
+        modelRef: 'gemini-3.6-flash',
+        allowedCapabilities: [],
+      },
+      objective: 'irrelevant to the replay',
+      input: {},
+    };
+
+    const first = await adapter.invoke(request);
+    const second = await adapter.invoke(request);
+    const third = await adapter.invoke(request);
+
+    expect(first.result).toEqual({ summary: 'first' });
+    expect(second.result).toEqual({ summary: 'second' });
+    expect(third.result).toEqual({ summary: 'second' });
+  });
+
   it('fails clearly for a role with no recorded fixture', async () => {
     const adapter = createFixtureModelAdapter({ DISCOVERY: discoveryFixture });
 

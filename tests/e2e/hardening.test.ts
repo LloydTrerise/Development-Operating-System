@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Project, WorkflowRun, WorkflowTask, WorkflowVersion, WorkItem } from '@devos/domain';
 import {
   createDatabaseClient,
@@ -17,6 +17,7 @@ import {
   SEED_ORGANISATION_ID,
   type DatabaseClient,
 } from '@devos/database';
+import { createTaskDispatcher } from '@devos/worker';
 
 /**
  * DEVOS-024 — hardening proofs for two properties that are specific to the
@@ -201,7 +202,7 @@ describe('Sprint 1 hardening: duplicate delivery', () => {
     // inspection — claimNext() is global, so an uncompleted RUNNING task
     // here would otherwise be eligible for reclaimStale() in a later test.
     for (const task of tasks) {
-      await queue.complete(task.id, {});
+      await queue.complete(task.id, task.attempt, {});
     }
   });
 });
@@ -233,7 +234,7 @@ describe('Sprint 1 hardening: restart safety (stale task reclaim)', () => {
     expect(reClaimed?.id).toBe(claimed!.id);
     expect(reClaimed?.attempt).toBe(2);
 
-    await queue.complete(reClaimed!.id, {});
+    await queue.complete(reClaimed!.id, reClaimed!.attempt, {});
     const runAfter = await createWorkflowRunRepository(database.db).getById(run.id);
     expect(runAfter?.status).toBe('COMPLETED');
   });
@@ -270,5 +271,185 @@ describe('Sprint 1 hardening: restart safety (stale task reclaim)', () => {
       .execute();
     expect(audit).toHaveLength(1);
     expect(audit[0]?.outcome).toBe('FAILURE');
+  });
+});
+
+/**
+ * DEVOS-092 — extends DEVOS-024's own coverage (above) with two genuinely
+ * new operational-recovery scenarios, using the real `TaskDispatcher`
+ * (`@devos/worker`), not just `TaskQueue` primitives directly:
+ *
+ *  - a worker crashing mid-task (never calling complete()/fail()) has its
+ *    task recovered and finished by a second, independent worker instance,
+ *    through each dispatcher's own real, timer-driven reclaim loop — not a
+ *    manually-invoked reclaimStale() call, the way DEVOS-024's own restart-
+ *    safety test exercises the queue primitive in isolation.
+ *  - a transient failure at the queue level itself (simulating a dropped DB
+ *    connection) does not permanently wedge the dispatch loop.
+ */
+describe('DEVOS-092: operational recovery — real TaskDispatcher instances', () => {
+  it('recovers a task from a worker that crashes mid-task, completed by a second worker', async () => {
+    const version = await createPublishedTwoNodeWorkflow();
+    version.definition.nodes.length = 1;
+    const workItem = await createWorkItemFixture();
+    const run = await startRunFixture(version, workItem);
+
+    const queue = createPostgresTaskQueue(database.db);
+
+    // "Worker A" claims the task via a handler that never resolves —
+    // indistinguishable, from the queue's perspective, from a process that
+    // crashed while holding it: the task stays RUNNING, complete()/fail()
+    // is never called, and workerA is simply abandoned afterward (real
+    // crash recovery never gets a graceful stop() call either).
+    const workerA = createTaskDispatcher(queue, {
+      pollIntervalMs: 20,
+      staleThresholdMs: 200,
+      reclaimIntervalMs: 100_000,
+    });
+    workerA.registerHandler('TASK', () => new Promise(() => {}));
+    workerA.start();
+
+    await vi.waitFor(async () => {
+      const tasks = await createWorkflowTaskRepository(database.db).listForRun(run.id);
+      expect(tasks[0]?.status).toBe('RUNNING');
+    });
+
+    // "Worker B" — a second, independent dispatcher instance pointed at the
+    // same real queue, with a short reclaim interval so it recovers the
+    // task on its own real timer, not via a manual reclaimStale() call.
+    const workerB = createTaskDispatcher(queue, {
+      pollIntervalMs: 20,
+      staleThresholdMs: 200,
+      reclaimIntervalMs: 50,
+    });
+    workerB.registerHandler('TASK', async () => ({ recoveredBy: 'workerB' }));
+    workerB.start();
+
+    await vi.waitFor(
+      async () => {
+        const runAfter = await createWorkflowRunRepository(database.db).getById(run.id);
+        expect(runAfter?.status).toBe('COMPLETED');
+      },
+      { timeout: 5000 },
+    );
+
+    const tasks = await createWorkflowTaskRepository(database.db).listForRun(run.id);
+    expect(tasks[0]?.status).toBe('SUCCEEDED');
+    // Reclaimed at least once (attempt incremented past workerA's original claim).
+    expect(tasks[0]?.attempt).toBeGreaterThanOrEqual(2);
+
+    await workerB.stop();
+    // workerA is intentionally never stopped — it is standing in for a
+    // crashed process; nothing calls stop() on a real one either.
+  }, 15_000);
+
+  it('survives a transient queue-level failure without ever wedging the dispatch loop', async () => {
+    const version = await createPublishedTwoNodeWorkflow();
+    version.definition.nodes.length = 1;
+    const workItem = await createWorkItemFixture();
+    const run = await startRunFixture(version, workItem);
+
+    const realQueue = createPostgresTaskQueue(database.db);
+    let claimAttempts = 0;
+    // Wraps the real queue, injecting exactly one transient failure into
+    // the first claimNext() call — simulating a dropped DB connection —
+    // then behaving normally. Real Postgres underneath throughout.
+    const flakyQueue: ReturnType<typeof createPostgresTaskQueue> = {
+      ...realQueue,
+      claimNext: async () => {
+        claimAttempts += 1;
+        if (claimAttempts === 1) throw new Error('connection terminated unexpectedly');
+        return realQueue.claimNext();
+      },
+    };
+
+    const worker = createTaskDispatcher(flakyQueue, { pollIntervalMs: 20 });
+    worker.registerHandler('TASK', async () => ({}));
+    worker.start();
+
+    await vi.waitFor(
+      async () => {
+        const runAfter = await createWorkflowRunRepository(database.db).getById(run.id);
+        expect(runAfter?.status).toBe('COMPLETED');
+      },
+      { timeout: 5000 },
+    );
+
+    await worker.stop();
+    expect(claimAttempts).toBeGreaterThanOrEqual(2);
+  }, 15_000);
+});
+
+/**
+ * DEVOS-094 — reproduces the exact race `reclaimStale()`'s pure
+ * started_at-based staleness check creates: worker A claims a task and
+ * keeps genuinely working on it past `staleThresholdMs` (a slow build, a
+ * slow real model call — not a crash); a restarted worker reclaims it as
+ * stale and completes it under a new attempt; A, unaware, eventually
+ * finishes its own (superseded) attempt and calls complete()/fail() late.
+ * Before DEVOS-094, that late call updated the row by id alone and would
+ * have silently overwritten worker B's real outcome. `complete()`/`fail()`
+ * now take the caller's believed attempt as a fencing token and only apply
+ * if the row is still RUNNING under that exact attempt — proven here
+ * against real Postgres, not simulated.
+ */
+describe('DEVOS-094: completion fencing against a stale reclaim', () => {
+  it("ignores worker A's late complete() after worker B has already completed the reclaimed task", async () => {
+    const version = await createPublishedTwoNodeWorkflow();
+    version.definition.nodes.length = 1;
+    const workItem = await createWorkItemFixture();
+    const run = await startRunFixture(version, workItem);
+    const queue = createPostgresTaskQueue(database.db);
+
+    // Worker A claims the task (attempt 1) and is genuinely still "working"
+    // — no crash, just slow.
+    const claimedByA = await queue.claimNext();
+    expect(claimedByA).not.toBeNull();
+    expect(claimedByA?.attempt).toBe(1);
+
+    // A restarted worker's reclaim pass judges A's task stale purely by
+    // elapsed time (threshold 0 => immediately stale) and resets it to
+    // PENDING, exactly as reclaimStale() does in production when a
+    // genuinely-alive worker merely runs long.
+    const reclaimedCount = await queue.reclaimStale(0);
+    expect(reclaimedCount).toBe(1);
+
+    // Worker B claims the same task (attempt 2) and finishes it first.
+    const claimedByB = await queue.claimNext();
+    expect(claimedByB).not.toBeNull();
+    expect(claimedByB?.id).toBe(claimedByA!.id);
+    expect(claimedByB?.attempt).toBe(2);
+    await queue.complete(claimedByB!.id, claimedByB!.attempt, { completedBy: 'workerB' });
+
+    const afterB = await createWorkflowTaskRepository(database.db).getById(claimedByA!.id);
+    expect(afterB?.status).toBe('SUCCEEDED');
+    expect(afterB?.output).toEqual({ completedBy: 'workerB' });
+    const runAfterB = await createWorkflowRunRepository(database.db).getById(run.id);
+    expect(runAfterB?.status).toBe('COMPLETED');
+
+    // Worker A, unaware it was ever reclaimed, now finishes its own
+    // (superseded) attempt-1 work and calls complete() late. Fenced by
+    // attempt, this must be a safe no-op: it must not resurrect/overwrite
+    // worker B's already-recorded outcome or the run's completed status.
+    await queue.complete(claimedByA!.id, claimedByA!.attempt, { completedBy: 'workerA-late' });
+
+    const afterLateA = await createWorkflowTaskRepository(database.db).getById(claimedByA!.id);
+    expect(afterLateA?.status).toBe('SUCCEEDED');
+    expect(afterLateA?.output).toEqual({ completedBy: 'workerB' });
+    expect(afterLateA?.attempt).toBe(2);
+    const runAfterLateA = await createWorkflowRunRepository(database.db).getById(run.id);
+    expect(runAfterLateA?.status).toBe('COMPLETED');
+
+    // Worker A's late fail() must be equally fenced and equally inert.
+    await queue.fail(
+      claimedByA!.id,
+      claimedByA!.attempt,
+      { message: 'workerA-late-failure' },
+      true,
+    );
+
+    const afterLateFailA = await createWorkflowTaskRepository(database.db).getById(claimedByA!.id);
+    expect(afterLateFailA?.status).toBe('SUCCEEDED');
+    expect(afterLateFailA?.output).toEqual({ completedBy: 'workerB' });
   });
 });

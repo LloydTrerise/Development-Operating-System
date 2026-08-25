@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AgentModelAdapter, PromptRepository, SchemaRepository } from '@devos/agents';
 import {
+  SEED_DEVELOPMENT_AGENT_KEY,
   SEED_DISCOVERY_AGENT_KEY,
   SEED_PLANNING_AGENT_KEY,
   SEED_REQUIREMENTS_AGENT_KEY,
+  SEED_REVIEW_AGENT_KEY,
   SEED_TECHNICAL_DESIGN_AGENT_KEY,
 } from '@devos/database';
 import type {
@@ -318,6 +320,86 @@ describe('routeAgentTask', () => {
 
     await expect(routeAgentTask(deps, scenario.buildTask('not-a-real-agent'))).rejects.toThrow(
       'No planning-path agent handler registered',
+    );
+  });
+
+  it('routes agentRef "development-agent" to runDevelopmentAgentTask (DEVOS-061)', async () => {
+    const scenario = buildScenario();
+    // A minimal, deliberately-incomplete DevelopmentAgentTaskHandlerDeps —
+    // proving the switch case actually dispatches to
+    // `runDevelopmentAgentTask` (which fails on "no IMPLEMENTATION_PLAN
+    // artifact" specifically, since this scenario's project has none) is
+    // enough here; that function's own real behavior is already
+    // exhaustively covered by run-development-agent-task.test.ts.
+    const deps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agentRepository,
+      agentVersions: scenario.agentVersionRepository,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async () => {},
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+      projects: { getById: async () => null } as never,
+      memberships: {} as never,
+      policies: {} as never,
+      toolCapabilities: {} as never,
+      toolInvocations: {} as never,
+      auditRecords: {} as never,
+      integrations: { listForProject: async () => [] } as never,
+      pullRequestProvider: {} as never,
+    };
+
+    await expect(
+      routeAgentTask(deps, scenario.buildTask(SEED_DEVELOPMENT_AGENT_KEY)),
+    ).rejects.toThrow('No IMPLEMENTATION_PLAN artifact found');
+  });
+
+  it('routes agentRef "review-agent" to runReviewAgentTask (DEVOS-065/067)', async () => {
+    const scenario = buildScenario();
+    // Same minimal, deliberately-incomplete deps pattern as the
+    // development-agent case above — proving the switch case dispatches to
+    // `runReviewAgentTask` (which fails on "no CODE_CHANGE artifact"
+    // specifically, since this scenario's project has none) is enough
+    // here; that function's own real behavior is already exhaustively
+    // covered by run-review-agent-task.test.ts.
+    const deps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agentRepository,
+      agentVersions: scenario.agentVersionRepository,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async () => {},
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+      projects: { getById: async () => null } as never,
+      memberships: {} as never,
+      policies: {} as never,
+      toolCapabilities: {} as never,
+      toolInvocations: {} as never,
+      auditRecords: {} as never,
+      integrations: { listForProject: async () => [] } as never,
+      pullRequestProvider: {} as never,
+      knowledgeSources: {} as never,
+      workflowDefinitions: {} as never,
+      workflowVersions: {} as never,
+      workflowTasks: {} as never,
+      createDraft: async () => {},
+      startRun: async () => {},
+    };
+
+    await expect(routeAgentTask(deps, scenario.buildTask(SEED_REVIEW_AGENT_KEY))).rejects.toThrow(
+      'No CODE_CHANGE artifact found',
     );
   });
 });

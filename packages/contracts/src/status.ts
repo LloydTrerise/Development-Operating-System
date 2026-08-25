@@ -116,6 +116,47 @@ export type ApprovalStatus = (typeof approvalStatuses)[number];
 export const agentExecutionStatuses = ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED'] as const;
 export type AgentExecutionStatus = (typeof agentExecutionStatuses)[number];
 
+/**
+ * Source of truth: specs/database/poc-database-schema.md §14.1 —
+ * tool_capabilities.risk_class is documented directly as "R0–R4", matching
+ * specs/workflows/software-change-workflow.md §27's Risk Model table
+ * (R0 automatic through R4 explicit-approval-required).
+ */
+export const toolCapabilityRiskClasses = ['R0', 'R1', 'R2', 'R3', 'R4'] as const;
+export type ToolCapabilityRiskClass = (typeof toolCapabilityRiskClasses)[number];
+
+/**
+ * Source of truth: specs/database/poc-database-schema.md §14.1 —
+ * tool_capabilities.status is documented as "Active/Disabled", a simpler
+ * two-state lifecycle than policies/agent_versions (no draft/publish step:
+ * a capability definition is either usable or not).
+ */
+export const toolCapabilityStatuses = ['ACTIVE', 'DISABLED'] as const;
+export type ToolCapabilityStatus = (typeof toolCapabilityStatuses)[number];
+
+/**
+ * PROVISIONAL — specs/database/poc-database-schema.md §14.2 documents
+ * `tool_invocations.status` only as "Execution state" with no enumerated
+ * table (the same gap workflowTaskStatuses/agentExecutionStatuses already
+ * flag for their own tables). `REJECTED` covers everything the Tool
+ * Gateway's Typed Validation/Project Scope/Policy/Capability Permission
+ * steps stop before the provider adapter (specs/api/poc-api-contracts.md
+ * §56); `SUCCEEDED`/`FAILED` cover the provider adapter's own outcome.
+ */
+export const toolInvocationStatuses = ['REJECTED', 'SUCCEEDED', 'FAILED'] as const;
+export type ToolInvocationStatus = (typeof toolInvocationStatuses)[number];
+
+/**
+ * Source of truth: specs/database/poc-database-schema.md §13.1 —
+ * integrations.status is documented as "Active/Disabled/etc." (explicitly
+ * non-exhaustive, the same hedge artifactStatuses' source column already
+ * uses). Collapsed to the two named values, matching
+ * `ToolCapabilityStatus`'s identical shape for the same reason: no
+ * draft/publish lifecycle is described for an integration.
+ */
+export const integrationStatuses = ['ACTIVE', 'DISABLED'] as const;
+export type IntegrationStatus = (typeof integrationStatuses)[number];
+
 export const workflowNodeTypes = [
   'TRIGGER',
   'TASK',

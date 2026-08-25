@@ -34,3 +34,14 @@ export class AuthorizationError extends HttpError {
     super(403, 'DEVOS_FORBIDDEN', message);
   }
 }
+
+/**
+ * DEVOS-091: closes a real, previously-unaddressed gap the security review
+ * found — specs/api/poc-api-contracts.md §41 requires the API to
+ * "rate-limit expensive endpoints," and no rate limiting existed anywhere.
+ */
+export class RateLimitError extends HttpError {
+  constructor() {
+    super(429, 'DEVOS_RATE_LIMITED', 'Too many requests. Please slow down and try again shortly.');
+  }
+}

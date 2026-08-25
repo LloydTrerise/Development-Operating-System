@@ -29,6 +29,7 @@ function createDeps(): {
   transitionCalls: Array<{
     approvalId: string;
     workflowRunId: string;
+    approvalType: string;
     decision: 'APPROVED' | 'REJECTED';
   }>;
 } {
@@ -176,6 +177,7 @@ function createDeps(): {
   const transitionCalls: Array<{
     approvalId: string;
     workflowRunId: string;
+    approvalType: string;
     decision: 'APPROVED' | 'REJECTED';
   }> = [];
 
@@ -186,8 +188,13 @@ function createDeps(): {
       workflowRuns,
       artifactVersions,
       approvals,
-      transitionAfterApprovalDecision: async (approvalId, workflowRunId, decision) => {
-        transitionCalls.push({ approvalId, workflowRunId, decision });
+      transitionAfterApprovalDecision: async (
+        approvalId,
+        workflowRunId,
+        approvalType,
+        decision,
+      ) => {
+        transitionCalls.push({ approvalId, workflowRunId, approvalType, decision });
       },
     },
     run,
@@ -278,7 +285,12 @@ describe('approval use cases', () => {
     });
 
     expect(transitionCalls).toEqual([
-      { approvalId: requested.id, workflowRunId: run.id, decision: 'APPROVED' },
+      {
+        approvalId: requested.id,
+        workflowRunId: run.id,
+        approvalType: 'PLANNING',
+        decision: 'APPROVED',
+      },
     ]);
   });
 

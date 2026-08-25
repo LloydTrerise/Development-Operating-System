@@ -1,19 +1,6 @@
-export class ApplicationError extends Error {}
-
-export class NotFoundError extends ApplicationError {
-  constructor(resource: string) {
-    super(`${resource} not found.`);
-  }
-}
-
-export class ForbiddenError extends ApplicationError {
-  constructor(message = 'You do not have permission to perform this action.') {
-    super(message);
-  }
-}
-
-export class ValidationError extends ApplicationError {
-  constructor(message: string) {
-    super(message);
-  }
-}
+/**
+ * Re-exported from `@devos/domain` (moved there while fixing a circular
+ * dependency DEVOS-057 introduced) so every existing import of these
+ * classes from `@devos/application` continues to work unchanged.
+ */
+export { ApplicationError, ForbiddenError, NotFoundError, ValidationError } from '@devos/domain';

@@ -29,6 +29,12 @@ function matchesCondition(rule: PolicyRule, request: PolicyEvaluationRequest): b
   ) {
     return false;
   }
+  if (
+    rule.condition.environment !== undefined &&
+    rule.condition.environment !== request.environment
+  ) {
+    return false;
+  }
   return true;
 }
 

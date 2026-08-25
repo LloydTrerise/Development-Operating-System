@@ -1,8 +1,7 @@
 import type { WorkflowRunId } from '@devos/contracts';
-import type { WorkflowRun, WorkflowRunRepository } from '@devos/domain';
+import type { ProjectRepository, WorkflowRun, WorkflowRunRepository } from '@devos/domain';
 import { NotFoundError } from '../errors.js';
-import { resolveMembership } from '../projects/membership-access.js';
-import type { ProjectUseCaseDeps } from '../projects/deps.js';
+import { resolveMembership, type MembershipAccessDeps } from '../projects/membership-access.js';
 
 /**
  * Narrower than WorkflowUseCaseDeps (the only fields this function actually
@@ -11,8 +10,12 @@ import type { ProjectUseCaseDeps } from '../projects/deps.js';
  * reuse it without satisfying WorkflowUseCaseDeps's unrelated fields
  * (workItems, workflowDefinitions, etc). WorkflowUseCaseDeps itself still
  * satisfies this shape structurally, so every existing caller is unaffected.
+ * DEVOS-086: deliberately not `extends ProjectUseCaseDeps` any more, for the
+ * same reason — that would also pull in `auditRecords`, which nothing here
+ * needs.
  */
-export interface GetWorkflowRunDeps extends ProjectUseCaseDeps {
+export interface GetWorkflowRunDeps extends MembershipAccessDeps {
+  projects: ProjectRepository;
   workflowRuns: WorkflowRunRepository;
 }
 

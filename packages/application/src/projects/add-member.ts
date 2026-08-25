@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ProjectId } from '@devos/contracts';
+import type { AuditId, ProjectId } from '@devos/contracts';
 import { canManageMembers, type Membership, type MembershipRole } from '@devos/domain';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.js';
 import type { ProjectUseCaseDeps } from './deps.js';
@@ -39,6 +39,20 @@ export async function addMember(
   };
 
   await deps.memberships.create(membership);
+
+  await deps.auditRecords.create({
+    id: randomUUID() as AuditId,
+    organisationId: project.organisationId,
+    projectId,
+    actorType: 'USER',
+    actorId: requesterPrincipalId,
+    action: 'membership.added',
+    targetType: 'Membership',
+    targetId: membership.id,
+    outcome: 'SUCCESS',
+    metadata: { principalId: input.principalId, role: input.role },
+    createdAt: now,
+  });
 
   return membership;
 }

@@ -162,6 +162,39 @@ describe('evaluatePolicies', () => {
     );
   });
 
+  it('DEVOS-072: only matches an environment-conditioned rule when the request environment matches', () => {
+    const policy = makePolicy({
+      key: 'release-policy',
+      definition: {
+        rules: [
+          { action: 'deploy', effect: 'ALLOW', condition: { environment: 'staging' } },
+          { action: 'deploy', effect: 'DENY', condition: { environment: 'production' } },
+        ],
+      },
+    });
+
+    const staging = evaluatePolicies([policy], { action: 'deploy', environment: 'staging' });
+    expect(staging.decision).toBe('ALLOW');
+
+    const production = evaluatePolicies([policy], { action: 'deploy', environment: 'production' });
+    expect(production.decision).toBe('DENY');
+  });
+
+  it('DEVOS-072: an environment with no matching rule falls through to the policy default effect', () => {
+    const policy = makePolicy({
+      key: 'release-policy',
+      definition: {
+        rules: [{ action: 'deploy', effect: 'ALLOW', condition: { environment: 'staging' } }],
+        defaultEffect: 'REQUIRE_APPROVAL',
+      },
+    });
+
+    const result = evaluatePolicies([policy], { action: 'deploy', environment: 'production' });
+
+    expect(result.decision).toBe('REQUIRE_APPROVAL');
+    expect(result.matchedPolicyKey).toBe('release-policy');
+  });
+
   it('does not report a conflict when multiple matching policies agree on the same effect', () => {
     const first = makePolicy({
       key: 'release-a',

@@ -11,6 +11,7 @@ function toDomain(row: ProjectsTable): Project {
     slug: row.slug,
     ...(row.description !== null ? { description: row.description } : {}),
     status: row.status,
+    ...(row.budget_usd !== null ? { budgetUsd: Number(row.budget_usd) } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -47,6 +48,7 @@ export function createProjectRepository(db: QueryExecutor): ProjectRepository {
           description: project.description ?? null,
           status: project.status,
           repository_id: null,
+          budget_usd: project.budgetUsd?.toString() ?? null,
           created_at: project.createdAt,
           updated_at: project.updatedAt,
         })
@@ -60,6 +62,7 @@ export function createProjectRepository(db: QueryExecutor): ProjectRepository {
           ...(changes.name !== undefined ? { name: changes.name } : {}),
           ...(changes.description !== undefined ? { description: changes.description } : {}),
           ...(changes.status !== undefined ? { status: changes.status } : {}),
+          ...(changes.budgetUsd !== undefined ? { budget_usd: changes.budgetUsd.toString() } : {}),
           updated_at: updatedAt,
         })
         .where('id', '=', id)

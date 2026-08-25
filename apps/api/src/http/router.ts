@@ -5,6 +5,13 @@ export interface RouteContext {
   principal: Principal | null;
   params: Record<string, string>;
   body: unknown;
+  /**
+   * DEVOS-088: the same id already returned to the caller as
+   * `meta.requestId` (and the `x-correlation-id` response header) — made
+   * available to route handlers too, so it can be threaded into a workflow
+   * run and, from there, into the agent/tool activity it causes.
+   */
+  correlationId: string;
 }
 
 export type RouteHandler = (context: RouteContext) => unknown | Promise<unknown>;

@@ -2,8 +2,10 @@ import type { ProjectId, WorkItemId } from '@devos/contracts';
 import {
   createWorkItem,
   getWorkItemForPrincipal,
+  getWorkflowRunsForWorkItem,
   listWorkItemsForProject,
   updateWorkItem,
+  type GetWorkflowRunsForWorkItemDeps,
   type WorkItemUseCaseDeps,
 } from '@devos/application';
 import {
@@ -11,9 +13,13 @@ import {
   parseUpdateWorkItemBody,
   toWorkItemDto,
 } from '../dto/work-item.js';
+import { toWorkflowRunDto } from '../dto/workflow-run.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
-export function createWorkItemRoutes(prefix: string, deps: WorkItemUseCaseDeps): Route[] {
+export function createWorkItemRoutes(
+  prefix: string,
+  deps: WorkItemUseCaseDeps & GetWorkflowRunsForWorkItemDeps,
+): Route[] {
   return [
     {
       method: 'GET',
@@ -68,6 +74,23 @@ export function createWorkItemRoutes(prefix: string, deps: WorkItemUseCaseDeps):
           changes,
         );
         return toWorkItemDto(workItem);
+      },
+    },
+    {
+      // DEVOS-080: closes the gap DEVOS-071 flagged — "no API exposes a
+      // work item's runs" — needed once one work item's change genuinely
+      // spans multiple runs (planning, development, release).
+      method: 'GET',
+      pattern: `${prefix}/work-items/:workItemId/workflow-runs`,
+      protected: true,
+      handler: async ({ principal, params }) => {
+        const user = requirePrincipal(principal);
+        const runs = await getWorkflowRunsForWorkItem(
+          deps,
+          user.id,
+          params.workItemId as WorkItemId,
+        );
+        return runs.map(toWorkflowRunDto);
       },
     },
   ];

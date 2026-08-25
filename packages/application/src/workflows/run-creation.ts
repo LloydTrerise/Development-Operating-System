@@ -9,6 +9,15 @@ export interface StartRunInput {
   workItemId: WorkItemId;
   inputs: Record<string, unknown>;
   idempotencyKey: string;
+  /**
+   * DEVOS-088: the API request's correlation id, if the caller supplied
+   * one. Folded into the run's own `input` and every task's `input` under
+   * a reserved key — the same extensibility point `node.agentRef` already
+   * uses — rather than a new database column, so it can be traced from the
+   * API request through the workflow into whatever agent/tool activity it
+   * causes.
+   */
+  correlationId?: string;
 }
 
 export async function startRunForVersion(
@@ -48,7 +57,10 @@ export async function startRunForVersion(
     workflowVersionId: version.id,
     workItemId: input.workItemId,
     status: 'PENDING',
-    input: input.inputs,
+    input:
+      input.correlationId !== undefined
+        ? { ...input.inputs, correlationId: input.correlationId }
+        : input.inputs,
     idempotencyKey: input.idempotencyKey,
     createdAt: now,
     updatedAt: now,
@@ -66,7 +78,10 @@ export async function startRunForVersion(
     // handler needs to resolve which agent to run — carried through the
     // task's generic `input` blob rather than a new column, the same
     // extensibility point runAgentTask reads from.
-    input: node.agentRef !== undefined ? { agentRef: node.agentRef } : {},
+    input: {
+      ...(node.agentRef !== undefined ? { agentRef: node.agentRef } : {}),
+      ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+    },
     // DEVOS-035: sibling tasks in one run previously all shared the exact
     // same `createdAt`, so claimNext()'s `ORDER BY created_at ASC` gave no
     // guarantee about which claimed first — harmless while every Sprint 1

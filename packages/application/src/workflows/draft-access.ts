@@ -1,5 +1,5 @@
 import type { WorkflowId } from '@devos/contracts';
-import type { WorkflowDefinition, WorkflowVersion } from '@devos/domain';
+import type { Membership, WorkflowDefinition, WorkflowVersion } from '@devos/domain';
 import { NotFoundError, ValidationError } from '../errors.js';
 import { resolveMembership } from '../projects/membership-access.js';
 import type { WorkflowUseCaseDeps } from './deps.js';
@@ -8,7 +8,7 @@ export async function requireDraftVersion(
   deps: WorkflowUseCaseDeps,
   principalId: string,
   workflowId: WorkflowId,
-): Promise<{ definition: WorkflowDefinition; draft: WorkflowVersion }> {
+): Promise<{ definition: WorkflowDefinition; draft: WorkflowVersion; membership: Membership }> {
   const definition = await deps.workflowDefinitions.getById(workflowId);
   if (!definition) throw new NotFoundError('Workflow');
 
@@ -27,5 +27,5 @@ export async function requireDraftVersion(
     );
   }
 
-  return { definition, draft: latest };
+  return { definition, draft: latest, membership };
 }

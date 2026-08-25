@@ -27,12 +27,24 @@ export interface AgentInvocationRequest {
   input: Record<string, unknown>;
 }
 
+/**
+ * DEVOS-089: token counts as the real provider reports them — Gemini's
+ * `generateContent` response includes a `usageMetadata` object with exactly
+ * these three fields on every real call.
+ */
+export interface AgentInvocationUsage {
+  promptTokens: number;
+  candidatesTokens: number;
+  totalTokens: number;
+}
+
 export interface AgentInvocationResult {
   status: 'SUCCEEDED' | 'FAILED';
   result?: Record<string, unknown>;
   uncertainty?: AgentUncertainty[];
   errorMessage?: string;
   modelReference?: string;
+  usage?: AgentInvocationUsage;
 }
 
 export interface AgentModelAdapter {

@@ -31,6 +31,23 @@ export function toArtifactVersionDto(version: ArtifactVersion) {
   };
 }
 
+/** DEVOS-095: an artifact version plus its owning artifact's name/type, so
+ * a caller that only holds a bare `artifactVersionId` (e.g. an approval's
+ * evidence) can show something more meaningful than a raw id. */
+export function toArtifactVersionWithArtifactDto({
+  version,
+  artifact,
+}: {
+  version: ArtifactVersion;
+  artifact: Artifact;
+}) {
+  return {
+    ...toArtifactVersionDto(version),
+    artifactName: artifact.name,
+    artifactType: artifact.artifactType,
+  };
+}
+
 export interface CreateArtifactBody {
   artifactType: string;
   name: string;

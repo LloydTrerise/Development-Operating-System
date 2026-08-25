@@ -11,18 +11,29 @@ export interface ApprovalRunTransition {
   /**
    * Records the human decision itself as an audit event, then — only if
    * the run this approval gates is still `AWAITING_APPROVAL` (DEVOS-047) —
-   * transitions it: `APPROVED` completes the run (there is no development
-   * stage yet to hand off to, per this sprint's own scope boundary);
-   * `REJECTED` fails it, since the re-planning loop
-   * (specs/workflows/software-change-workflow.md §16: "Changes Requested ->
-   * appropriate planning stage -> new artifact version -> re-approval") is
-   * not implemented — flagged as a known limitation, not fabricated.
-   * A no-op on the run if it wasn't (or is no longer) `AWAITING_APPROVAL`,
-   * so deciding a non-gating approval never corrupts run state.
+   * transitions it: `APPROVED` completes the run (there is no further stage
+   * *within this run* to hand off to — the gated run's only job was to
+   * reach the gate; whatever comes after, if anything, is started as its
+   * own separate run, per the same "a gate needs a separate run" pattern
+   * DEVOS-061/067/073 all use); `REJECTED` fails it, since neither the
+   * planning re-planning loop (specs/workflows/software-change-workflow.md
+   * §16: "Changes Requested -> appropriate planning stage -> new artifact
+   * version -> re-approval") nor an equivalent release loop is implemented
+   * — flagged as a known limitation, not fabricated. A no-op on the run if
+   * it wasn't (or is no longer) `AWAITING_APPROVAL`, so deciding a
+   * non-gating approval never corrupts run state.
+   *
+   * `approvalType` (DEVOS-073) only shapes the *rejection* error
+   * code/message — `DEVOS_${approvalType}_APPROVAL_REJECTED` and
+   * "${Titlecased approvalType} approval was rejected." — since that's the
+   * only place DEVOS-047's original implementation had "Planning" baked in
+   * as a literal string; the completion path was already approval-type
+   * agnostic.
    */
   transitionAfterApprovalDecision: (
     approvalId: string,
     workflowRunId: string,
+    approvalType: string,
     decision: 'APPROVED' | 'REJECTED',
     decidedBy: string,
     decisionReason: string | undefined,
@@ -35,6 +46,7 @@ export function createApprovalRunTransition(db: Kysely<Database>): ApprovalRunTr
     async transitionAfterApprovalDecision(
       approvalId,
       workflowRunId,
+      approvalType,
       decision,
       decidedBy,
       decisionReason,
@@ -102,12 +114,15 @@ export function createApprovalRunTransition(db: Kysely<Database>): ApprovalRunTr
             correlationId: envelope.correlationId,
           });
         } else {
-          const message = 'Planning approval was rejected.';
+          const titleCasedType =
+            approvalType.charAt(0).toUpperCase() + approvalType.slice(1).toLowerCase();
+          const message = `${titleCasedType} approval was rejected.`;
+          const errorCode = `DEVOS_${approvalType.toUpperCase()}_APPROVAL_REJECTED`;
           await trx
             .updateTable('workflow_runs')
             .set({
               status: 'FAILED',
-              error_code: 'DEVOS_PLANNING_APPROVAL_REJECTED',
+              error_code: errorCode,
               error_message: decisionReason ?? message,
               completed_at: decidedAt,
               updated_at: decidedAt,

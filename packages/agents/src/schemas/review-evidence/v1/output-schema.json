@@ -1,0 +1,9 @@
+{
+  "name": "review-evidence",
+  "version": 1,
+  "fields": {
+    "summary": { "type": "string" },
+    "decision": { "type": "string" },
+    "findings": { "type": "array" }
+  }
+}

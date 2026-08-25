@@ -9,6 +9,7 @@ export function toProjectDto(project: Project) {
     slug: project.slug,
     description: project.description,
     status: project.status,
+    budgetUsd: project.budgetUsd,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
   };
@@ -61,10 +62,11 @@ export interface UpdateProjectBody {
   name?: string;
   description?: string;
   status?: string;
+  budgetUsd?: number;
 }
 
 export function parseUpdateProjectBody(body: unknown): UpdateProjectBody {
-  const { name, description, status } = asRecord(body);
+  const { name, description, status, budgetUsd } = asRecord(body);
 
   if (name !== undefined && typeof name !== 'string') {
     throw new BadRequestError('name must be a string.');
@@ -75,11 +77,15 @@ export function parseUpdateProjectBody(body: unknown): UpdateProjectBody {
   if (status !== undefined && typeof status !== 'string') {
     throw new BadRequestError('status must be a string.');
   }
+  if (budgetUsd !== undefined && (typeof budgetUsd !== 'number' || budgetUsd < 0)) {
+    throw new BadRequestError('budgetUsd must be a non-negative number.');
+  }
 
   return {
     ...(name !== undefined ? { name } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(status !== undefined ? { status } : {}),
+    ...(budgetUsd !== undefined ? { budgetUsd } : {}),
   };
 }
 

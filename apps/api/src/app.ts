@@ -24,6 +24,8 @@ import {
   createMembershipRepository,
   createPolicyRepository,
   createProjectRepository,
+  createToolCapabilityRepository,
+  createToolInvocationRepository,
   createWorkItemRepository,
   createWorkflowDefinitionRepository,
   createWorkflowDraftCreator,
@@ -44,10 +46,19 @@ import type {
   KnowledgeUseCaseDeps,
   PolicyUseCaseDeps,
   ProjectUseCaseDeps,
+  ReleaseReadinessUseCaseDeps,
+  ToolInvocationSummaryUseCaseDeps,
   WorkItemUseCaseDeps,
   WorkflowUseCaseDeps,
 } from '@devos/application';
-import { AuthenticationError, BadRequestError, HttpError, NotFoundError } from './http/errors.js';
+import {
+  AuthenticationError,
+  BadRequestError,
+  HttpError,
+  NotFoundError,
+  RateLimitError,
+} from './http/errors.js';
+import { createRateLimiter, type RateLimiter } from './http/rate-limiter.js';
 import { findRoute, type Route } from './http/router.js';
 import { createAgentExecutionSummaryRoutes } from './routes/agent-execution-summaries.js';
 import { createAgentRoutes } from './routes/agents.js';
@@ -59,6 +70,8 @@ import { createKnowledgeSourceRoutes } from './routes/knowledge-sources.js';
 import { createMeRoutes } from './routes/me.js';
 import { createPolicyRoutes } from './routes/policies.js';
 import { createProjectRoutes } from './routes/projects.js';
+import { createReleaseReadinessRoutes } from './routes/release-readiness.js';
+import { createToolInvocationSummaryRoutes } from './routes/tool-invocation-summaries.js';
 import { createWorkItemRoutes } from './routes/work-items.js';
 import { createWorkflowRoutes } from './routes/workflows.js';
 import { createWorkflowRunRoutes } from './routes/workflow-runs.js';
@@ -165,9 +178,13 @@ export interface CreateAppOptions {
   auditDeps?: AuditUseCaseDeps;
   agentDeps?: AgentUseCaseDeps;
   agentExecutionSummaryDeps?: AgentExecutionSummaryUseCaseDeps;
+  toolInvocationSummaryDeps?: ToolInvocationSummaryUseCaseDeps;
+  releaseReadinessDeps?: ReleaseReadinessUseCaseDeps;
   knowledgeDeps?: KnowledgeUseCaseDeps;
   policyDeps?: PolicyUseCaseDeps;
   approvalDeps?: ApprovalUseCaseDeps;
+  /** DEVOS-091: overridable so tests can exercise a real 429 without firing 60+ requests. */
+  mutationRateLimiter?: RateLimiter;
 }
 
 export function createApp(options: CreateAppOptions = {}): DevosApi {
@@ -175,9 +192,16 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   const database =
     options.database ?? createDatabaseClient({ connectionString: config.database.url });
   const authProvider = options.authProvider ?? createLocalAuthProvider();
+  // DEVOS-091: only mutating requests count as "expensive" for rate-limiting
+  // purposes — a read has no write/agent/tool-invocation cost behind it.
+  // 60 requests per 10s per principal is generous enough not to interfere
+  // with real usage or this app's own test suites while still being real.
+  const mutationRateLimiter = options.mutationRateLimiter ?? createRateLimiter(60, 10_000);
+  const auditRecordRepository = createAuditRecordRepository(database.db);
   const projectDeps: ProjectUseCaseDeps = options.projectDeps ?? {
     projects: createProjectRepository(database.db),
     memberships: createMembershipRepository(database.db),
+    auditRecords: auditRecordRepository,
   };
   const workItemDeps: WorkItemUseCaseDeps = options.workItemDeps ?? {
     projects: projectDeps.projects,
@@ -206,7 +230,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   const auditDeps: AuditUseCaseDeps = options.auditDeps ?? {
     projects: projectDeps.projects,
     memberships: projectDeps.memberships,
-    auditRecords: createAuditRecordRepository(database.db),
+    auditRecords: auditRecordRepository,
   };
   const agentDeps: AgentUseCaseDeps = options.agentDeps ?? {
     projects: projectDeps.projects,
@@ -214,6 +238,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     agents: createAgentRepository(database.db),
     agentVersions: createAgentVersionRepository(database.db),
     createDraft: createAgentDraftCreator(database.db),
+    auditRecords: auditRecordRepository,
   };
   const agentExecutionSummaryDeps: AgentExecutionSummaryUseCaseDeps =
     options.agentExecutionSummaryDeps ?? {
@@ -225,6 +250,21 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
       agentVersions: agentDeps.agentVersions,
       contextManifests: createContextManifestRepository(database.db),
     };
+  const toolInvocationSummaryDeps: ToolInvocationSummaryUseCaseDeps =
+    options.toolInvocationSummaryDeps ?? {
+      projects: projectDeps.projects,
+      memberships: projectDeps.memberships,
+      workflowRuns: workflowDeps.workflowRuns,
+      workflowTasks: workflowDeps.workflowTasks,
+      toolInvocations: createToolInvocationRepository(database.db),
+      toolCapabilities: createToolCapabilityRepository(database.db),
+    };
+  const releaseReadinessDeps: ReleaseReadinessUseCaseDeps = options.releaseReadinessDeps ?? {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    artifacts: artifactDeps.artifacts,
+    artifactVersions: artifactDeps.artifactVersions,
+  };
   const knowledgeDeps: KnowledgeUseCaseDeps = options.knowledgeDeps ?? {
     projects: projectDeps.projects,
     memberships: projectDeps.memberships,
@@ -234,6 +274,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     projects: projectDeps.projects,
     memberships: projectDeps.memberships,
     policies: createPolicyRepository(database.db),
+    auditRecords: auditRecordRepository,
   };
   const approvalDeps: ApprovalUseCaseDeps = options.approvalDeps ?? {
     projects: projectDeps.projects,
@@ -249,13 +290,18 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createHealthRoutes(API_PREFIX, database),
     ...createMeRoutes(API_PREFIX),
     ...createProjectRoutes(API_PREFIX, projectDeps),
-    ...createWorkItemRoutes(API_PREFIX, workItemDeps),
+    ...createWorkItemRoutes(API_PREFIX, {
+      ...workItemDeps,
+      workflowRuns: workflowDeps.workflowRuns,
+    }),
     ...createWorkflowRoutes(API_PREFIX, workflowDeps),
     ...createWorkflowRunRoutes(API_PREFIX, workflowDeps),
     ...createArtifactRoutes(API_PREFIX, artifactDeps),
     ...createAuditRoutes(API_PREFIX, auditDeps),
     ...createAgentRoutes(API_PREFIX, agentDeps),
     ...createAgentExecutionSummaryRoutes(API_PREFIX, agentExecutionSummaryDeps),
+    ...createToolInvocationSummaryRoutes(API_PREFIX, toolInvocationSummaryDeps),
+    ...createReleaseReadinessRoutes(API_PREFIX, releaseReadinessDeps),
     ...createKnowledgeSourceRoutes(API_PREFIX, knowledgeDeps),
     ...createPolicyRoutes(API_PREFIX, policyDeps),
     ...createApprovalRoutes(API_PREFIX, approvalDeps),
@@ -283,7 +329,18 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
       const principal = authProvider.authenticate(req.headers.authorization);
       if (match.route.protected && principal === null) throw new AuthenticationError();
 
-      const data = await match.route.handler({ principal, params: match.params, body });
+      const isMutatingMethod =
+        req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE';
+      if (isMutatingMethod && principal !== null) {
+        if (!mutationRateLimiter.tryAcquire(principal.id)) throw new RateLimitError();
+      }
+
+      const data = await match.route.handler({
+        principal,
+        params: match.params,
+        body,
+        correlationId: requestId,
+      });
       send(res, 200, requestId, { data, meta: { requestId } });
     } catch (error) {
       const { status, body } = toErrorBody(error);

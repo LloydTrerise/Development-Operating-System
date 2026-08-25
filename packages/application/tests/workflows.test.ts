@@ -24,7 +24,7 @@ import { publishWorkflowVersion } from '../src/workflows/publish-workflow-versio
 import { startWorkflowRunFromActiveVersion } from '../src/workflows/start-run-from-active-version.js';
 import { updateDraftWorkflow } from '../src/workflows/update-draft-workflow.js';
 import { validateDraftWorkflow } from '../src/workflows/validate-draft-workflow.js';
-import { ValidationError } from '../src/errors.js';
+import { ForbiddenError, ValidationError } from '../src/errors.js';
 
 function createInMemoryDeps(): WorkflowUseCaseDeps {
   const projects = new Map<string, Project>();
@@ -245,6 +245,29 @@ describe('workflow use cases', () => {
     );
   });
 
+  it('rejects publishing a workflow version by a non-owner member (DEVOS-082 RBAC hardening)', async () => {
+    const { definition } = await createWorkflowDefinition(deps, 'alice', projectId, {
+      key: 'member-cannot-publish',
+      name: 'Member Cannot Publish',
+      definition: VALID_GRAPH,
+    });
+
+    await deps.memberships.create({
+      id: randomUUID() as Membership['id'],
+      organisationId,
+      projectId,
+      principalId: 'bob',
+      role: 'MEMBER',
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await expect(publishWorkflowVersion(deps, 'bob', definition.id)).rejects.toThrow(
+      ForbiddenError,
+    );
+  });
+
   it('rejects starting a run against a draft (unpublished) version', async () => {
     const { definition } = await createWorkflowDefinition(deps, 'alice', projectId, {
       key: 'no-publish',
@@ -307,6 +330,40 @@ describe('workflow use cases', () => {
     const tasks = await deps.workflowTasks.listForRun(run.id);
     expect(tasks).toHaveLength(1);
     expect(tasks[0]).toMatchObject({ taskKey: 'discovery', taskType: 'TASK', status: 'PENDING' });
+  });
+
+  it("DEVOS-088: folds a supplied correlationId into the run's and every task's own input", async () => {
+    const { definition } = await createWorkflowDefinition(deps, 'alice', projectId, {
+      key: 'correlated',
+      name: 'Correlated',
+      definition: VALID_GRAPH,
+    });
+    await publishWorkflowVersion(deps, 'alice', definition.id);
+
+    const workItem: WorkItem = {
+      id: randomUUID() as WorkItem['id'],
+      projectId,
+      title: 'Test item',
+      type: 'GENERAL',
+      status: 'OPEN',
+      priority: 'MEDIUM',
+      metadata: {},
+      createdBy: 'alice',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    await deps.workItems.create(workItem);
+
+    const run = await startWorkflowRunFromActiveVersion(deps, 'alice', definition.id, {
+      workItemId: workItem.id,
+      inputs: { foo: 'bar' },
+      idempotencyKey: 'key-correlated',
+      correlationId: 'trace-abcd',
+    });
+
+    expect(run.input).toEqual({ foo: 'bar', correlationId: 'trace-abcd' });
+    const tasks = await deps.workflowTasks.listForRun(run.id);
+    expect(tasks[0]?.input).toMatchObject({ correlationId: 'trace-abcd' });
   });
 
   it('is idempotent: starting a run twice with the same key returns the same run', async () => {

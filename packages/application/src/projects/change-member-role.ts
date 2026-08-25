@@ -1,4 +1,5 @@
-import type { MembershipId, ProjectId } from '@devos/contracts';
+import { randomUUID } from 'node:crypto';
+import type { AuditId, MembershipId, ProjectId } from '@devos/contracts';
 import { canManageMembers, type Membership, type MembershipRole } from '@devos/domain';
 import { ForbiddenError, NotFoundError } from '../errors.js';
 import type { ProjectUseCaseDeps } from './deps.js';
@@ -25,8 +26,23 @@ export async function changeMemberRole(
     await assertNotLastOwner(deps, projectId, target.id);
   }
 
+  const previousRole = target.role;
   const updatedAt = new Date().toISOString();
   await deps.memberships.updateRole(target.id, role, updatedAt);
+
+  await deps.auditRecords.create({
+    id: randomUUID() as AuditId,
+    organisationId: project.organisationId,
+    projectId,
+    actorType: 'USER',
+    actorId: requesterPrincipalId,
+    action: 'membership.role_changed',
+    targetType: 'Membership',
+    targetId: target.id,
+    outcome: 'SUCCESS',
+    metadata: { principalId: target.principalId, previousRole, role },
+    createdAt: updatedAt,
+  });
 
   return { ...target, role, updatedAt };
 }

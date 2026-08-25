@@ -1,5 +1,5 @@
 import type { AgentId } from '@devos/contracts';
-import type { Agent, AgentVersion } from '@devos/domain';
+import type { Agent, AgentVersion, Membership } from '@devos/domain';
 import { NotFoundError, ValidationError } from '../errors.js';
 import { resolveMembership } from '../projects/membership-access.js';
 import type { AgentUseCaseDeps } from './deps.js';
@@ -8,7 +8,7 @@ export async function requireDraftAgentVersion(
   deps: AgentUseCaseDeps,
   principalId: string,
   agentId: AgentId,
-): Promise<{ agent: Agent; draft: AgentVersion }> {
+): Promise<{ agent: Agent; draft: AgentVersion; membership: Membership }> {
   const agent = await deps.agents.getById(agentId);
   if (!agent) throw new NotFoundError('Agent');
 
@@ -27,5 +27,5 @@ export async function requireDraftAgentVersion(
     );
   }
 
-  return { agent, draft: latest };
+  return { agent, draft: latest, membership };
 }

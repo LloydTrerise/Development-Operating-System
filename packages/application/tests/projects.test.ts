@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { OrganisationId, ProjectId } from '@devos/contracts';
-import type { Membership, MembershipRepository, Project, ProjectRepository } from '@devos/domain';
+import type {
+  AuditRecord,
+  AuditRecordRepository,
+  Membership,
+  MembershipRepository,
+  Project,
+  ProjectRepository,
+} from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { addMember } from '../src/projects/add-member.js';
 import { changeMemberRole } from '../src/projects/change-member-role.js';
@@ -54,7 +61,15 @@ function createInMemoryDeps(): ProjectUseCaseDeps {
     },
   };
 
-  return { projects: projectRepository, memberships: membershipRepository };
+  const auditRecordsStore: AuditRecord[] = [];
+  const auditRecords: AuditRecordRepository = {
+    create: async (record) => {
+      auditRecordsStore.push(record);
+    },
+    listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
+  };
+
+  return { projects: projectRepository, memberships: membershipRepository, auditRecords };
 }
 
 describe('project use cases', () => {
@@ -184,5 +199,31 @@ describe('project use cases', () => {
     const changed = await changeMemberRole(deps, 'bob', project.id, aliceMembership.id, 'MEMBER');
     expect(changed.role).toBe('MEMBER');
     expect(bobMembership.role).toBe('OWNER');
+  });
+
+  it('DEVOS-086: writes an audit record for membership add, role change, and remove', async () => {
+    const project = await createProject(deps, 'alice', {
+      organisationId,
+      name: 'Audited Project',
+      slug: 'audited-project',
+    });
+
+    const bobMembership = await addMember(deps, 'alice', project.id, {
+      principalId: 'bob',
+      role: 'MEMBER',
+    });
+    await changeMemberRole(deps, 'alice', project.id, bobMembership.id, 'OWNER');
+    await removeMember(deps, 'alice', project.id, bobMembership.id);
+
+    const records = await deps.auditRecords.listForProject(project.id);
+    expect(records).toContainEqual(
+      expect.objectContaining({ action: 'membership.added', targetId: bobMembership.id }),
+    );
+    expect(records).toContainEqual(
+      expect.objectContaining({ action: 'membership.role_changed', targetId: bobMembership.id }),
+    );
+    expect(records).toContainEqual(
+      expect.objectContaining({ action: 'membership.removed', targetId: bobMembership.id }),
+    );
   });
 });

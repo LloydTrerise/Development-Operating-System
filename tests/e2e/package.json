@@ -12,6 +12,7 @@
     "@devos/api": "workspace:*",
     "@devos/database": "workspace:*",
     "@devos/domain": "workspace:*",
+    "@devos/integrations": "workspace:*",
     "@devos/worker": "workspace:*",
     "@types/node": "^24.13.3",
     "tsx": "^4.20.3",

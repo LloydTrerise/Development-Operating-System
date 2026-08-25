@@ -15,14 +15,14 @@ export function createWorkflowRunRoutes(prefix: string, deps: WorkflowUseCaseDep
       method: 'POST',
       pattern: `${prefix}/workflows/:workflowId/runs`,
       protected: true,
-      handler: async ({ principal, params, body }) => {
+      handler: async ({ principal, params, body, correlationId }) => {
         const user = requirePrincipal(principal);
         const input = parseStartRunBody(body);
         const run = await startWorkflowRunFromActiveVersion(
           deps,
           user.id,
           params.workflowId as WorkflowId,
-          { ...input, workItemId: input.workItemId as WorkItemId },
+          { ...input, workItemId: input.workItemId as WorkItemId, correlationId },
         );
         return toWorkflowRunDto(run);
       },
@@ -31,14 +31,14 @@ export function createWorkflowRunRoutes(prefix: string, deps: WorkflowUseCaseDep
       method: 'POST',
       pattern: `${prefix}/workflow-versions/:workflowVersionId/runs`,
       protected: true,
-      handler: async ({ principal, params, body }) => {
+      handler: async ({ principal, params, body, correlationId }) => {
         const user = requirePrincipal(principal);
         const input = parseStartRunBody(body);
         const run = await startWorkflowRunFromVersion(
           deps,
           user.id,
           params.workflowVersionId as WorkflowVersionId,
-          { ...input, workItemId: input.workItemId as WorkItemId },
+          { ...input, workItemId: input.workItemId as WorkItemId, correlationId },
         );
         return toWorkflowRunDto(run);
       },

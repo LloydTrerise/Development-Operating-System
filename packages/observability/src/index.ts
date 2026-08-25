@@ -1,2 +1,1 @@
-/** Bootstrap entry point for @devos/observability. */
-export {};
+export * from './metrics/registry.js';

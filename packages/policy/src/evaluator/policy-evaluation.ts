@@ -12,6 +12,14 @@ import type { PolicyId } from '@devos/contracts';
  * `condition`, when present, must match every listed field of the
  * evaluation request exactly for the rule to apply; an absent `condition`
  * matches any request for the given `action`.
+ *
+ * `environment` (DEVOS-072) is the same kind of condition field as
+ * `actorRole`/`resourceType` — added for "environment-specific release
+ * authority" (specs/sprints/sprint-06/DEVOS-072.md), so a published policy
+ * can express e.g. "staging: ALLOW, production: DENY" for a release-shaped
+ * action. No release-specific rule shape is specified anywhere in the spec
+ * corpus; this reuses the exact same condition-matching mechanism DEVOS-048
+ * already extended once, rather than introducing a parallel model.
  */
 export type PolicyEffect = 'ALLOW' | 'DENY' | 'REQUIRE_APPROVAL';
 
@@ -21,6 +29,7 @@ export interface PolicyRule {
   condition?: {
     actorRole?: string;
     resourceType?: string;
+    environment?: string;
   };
 }
 
@@ -34,6 +43,7 @@ export interface PolicyEvaluationRequest {
   action: string;
   actorRole?: string;
   resourceType?: string;
+  environment?: string;
 }
 
 /**

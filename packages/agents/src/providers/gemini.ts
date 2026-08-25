@@ -19,9 +19,16 @@ interface GeminiCandidate {
   finishReason?: string;
 }
 
+interface GeminiUsageMetadata {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  totalTokenCount?: number;
+}
+
 interface GeminiGenerateContentResponse {
   candidates?: GeminiCandidate[];
   promptFeedback?: { blockReason?: string };
+  usageMetadata?: GeminiUsageMetadata;
 }
 
 function buildPrompt(request: AgentInvocationRequest): string {
@@ -136,6 +143,21 @@ export function createGeminiModelAdapter(options: GeminiAdapterOptions): AgentMo
         invocationResult = {
           ...invocationResult,
           uncertainty: uncertaintyRaw as AgentUncertainty[],
+        };
+      }
+      const usage = body.usageMetadata;
+      if (
+        usage?.promptTokenCount !== undefined &&
+        usage.candidatesTokenCount !== undefined &&
+        usage.totalTokenCount !== undefined
+      ) {
+        invocationResult = {
+          ...invocationResult,
+          usage: {
+            promptTokens: usage.promptTokenCount,
+            candidatesTokens: usage.candidatesTokenCount,
+            totalTokens: usage.totalTokenCount,
+          },
         };
       }
       return invocationResult;

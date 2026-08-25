@@ -6,7 +6,13 @@ import type {
   AgentExecutionSummaryUseCaseDeps,
   AgentUseCaseDeps,
   ArtifactUseCaseDeps,
+  AuditUseCaseDeps,
+  ApprovalUseCaseDeps,
+  KnowledgeUseCaseDeps,
+  PolicyUseCaseDeps,
   ProjectUseCaseDeps,
+  ReleaseReadinessUseCaseDeps,
+  ToolInvocationSummaryUseCaseDeps,
   WorkItemUseCaseDeps,
   WorkflowUseCaseDeps,
 } from '@devos/application';
@@ -18,16 +24,28 @@ import type {
   AgentRepository,
   AgentVersion,
   AgentVersionRepository,
+  Approval,
+  ApprovalRepository,
   Artifact,
   ArtifactRepository,
   ArtifactVersion,
   ArtifactVersionRepository,
+  AuditRecord,
+  AuditRecordRepository,
   ContextManifest,
   ContextManifestRepository,
+  KnowledgeSource,
+  KnowledgeSourceRepository,
   Membership,
   MembershipRepository,
+  Policy,
+  PolicyRepository,
   Project,
   ProjectRepository,
+  ToolCapability,
+  ToolCapabilityRepository,
+  ToolInvocation,
+  ToolInvocationRepository,
   WorkItem,
   WorkItemRepository,
   WorkflowDefinition,
@@ -42,6 +60,7 @@ import type {
 import { createLocalFilesystemStorage } from '@devos/storage';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp, type CreateAppOptions, type DevosApi } from '../src/app.js';
+import { createRateLimiter } from '../src/http/rate-limiter.js';
 
 const TEST_ENV = { NODE_ENV: 'test', DATABASE_URL: 'postgresql://localhost/devos-test' };
 
@@ -50,6 +69,16 @@ function createFakeDatabaseClient(healthy: boolean): DatabaseClient {
     db: null as unknown as DatabaseClient['db'],
     checkHealth: async () => healthy,
     close: async () => {},
+  };
+}
+
+function createInMemoryAuditRecordRepository(): AuditRecordRepository {
+  const store: AuditRecord[] = [];
+  return {
+    create: async (record) => {
+      store.push(record);
+    },
+    listForProject: async (projectId) => store.filter((r) => r.projectId === projectId),
   };
 }
 
@@ -94,7 +123,11 @@ function createInMemoryProjectDeps(): ProjectUseCaseDeps {
     },
   };
 
-  return { projects: projectRepository, memberships: membershipRepository };
+  return {
+    projects: projectRepository,
+    memberships: membershipRepository,
+    auditRecords: createInMemoryAuditRecordRepository(),
+  };
 }
 
 function createInMemoryWorkItemDeps(projectDeps: ProjectUseCaseDeps): WorkItemUseCaseDeps {
@@ -174,6 +207,10 @@ function createInMemoryWorkflowDeps(
       [...runs.values()].find(
         (r) => r.workflowVersionId === workflowVersionId && r.idempotencyKey === idempotencyKey,
       ) ?? null,
+    listForWorkItem: async (workItemId) =>
+      [...runs.values()]
+        .filter((r) => r.workItemId === workItemId)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     create: async (run) => {
       runs.set(run.id, run);
     },
@@ -290,6 +327,7 @@ function createInMemoryAgentDeps(projectDeps: ProjectUseCaseDeps): AgentUseCaseD
       await agents.create(agent);
       await agentVersions.create(version);
     },
+    auditRecords: projectDeps.auditRecords,
   };
 }
 
@@ -370,6 +408,178 @@ function createInMemoryAgentExecutionSummaryDeps(
     agentExecutions,
     agentVersions,
     contextManifests,
+  };
+}
+
+function createInMemoryToolInvocationSummaryDeps(
+  projectDeps: ProjectUseCaseDeps,
+  workflowDeps: WorkflowUseCaseDeps,
+): ToolInvocationSummaryUseCaseDeps {
+  const capabilitiesStore = new Map<string, ToolCapability>();
+  const invocationsStore = new Map<string, ToolInvocation>();
+
+  const toolCapabilities: ToolCapabilityRepository = {
+    getById: async (id) => capabilitiesStore.get(id) ?? null,
+    getByProjectAndKey: async (projectId, key) =>
+      [...capabilitiesStore.values()].find((c) => c.projectId === projectId && c.key === key) ??
+      null,
+    listForProject: async (projectId) =>
+      [...capabilitiesStore.values()].filter((c) => c.projectId === projectId),
+    create: async (capability) => {
+      capabilitiesStore.set(capability.id, capability);
+    },
+  };
+
+  const toolInvocations: ToolInvocationRepository = {
+    getById: async (id) => invocationsStore.get(id) ?? null,
+    getByCapabilityAndIdempotencyKey: async (toolCapabilityId, idempotencyKey) =>
+      [...invocationsStore.values()].find(
+        (i) => i.toolCapabilityId === toolCapabilityId && i.idempotencyKey === idempotencyKey,
+      ) ?? null,
+    listForTask: async (taskId) =>
+      [...invocationsStore.values()].filter((i) => i.workflowTaskId === taskId),
+    create: async (invocation) => {
+      invocationsStore.set(invocation.id, invocation);
+    },
+  };
+
+  return {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    workflowRuns: workflowDeps.workflowRuns,
+    workflowTasks: workflowDeps.workflowTasks,
+    toolInvocations,
+    toolCapabilities,
+  };
+}
+
+function createInMemoryReleaseReadinessDeps(
+  projectDeps: ProjectUseCaseDeps,
+  artifactDeps: ArtifactUseCaseDeps,
+): ReleaseReadinessUseCaseDeps {
+  return {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    artifacts: artifactDeps.artifacts,
+    artifactVersions: artifactDeps.artifactVersions,
+  };
+}
+
+// DEVOS-084: policies, approvals, knowledge sources, and audit had no
+// tenant-isolation coverage at the API layer at all (confirmed by grep
+// before this task) — these four helpers plus their tests below close that
+// gap, following the exact in-memory-fake pattern every helper above uses.
+function createInMemoryPolicyDeps(projectDeps: ProjectUseCaseDeps): PolicyUseCaseDeps {
+  const policiesStore = new Map<string, Policy>();
+
+  const policies: PolicyRepository = {
+    getById: async (id) => policiesStore.get(id) ?? null,
+    getByProjectAndKeyAndVersion: async (projectId, key, version) =>
+      [...policiesStore.values()].find(
+        (p) => p.projectId === projectId && p.key === key && p.version === version,
+      ) ?? null,
+    getLatestForProjectAndKey: async (projectId, key) =>
+      [...policiesStore.values()]
+        .filter((p) => p.projectId === projectId && p.key === key)
+        .sort((a, b) => b.version - a.version)[0] ?? null,
+    listForProject: async (projectId) =>
+      [...policiesStore.values()].filter((p) => p.projectId === projectId),
+    create: async (policy) => {
+      policiesStore.set(policy.id, policy);
+    },
+    publish: async (id, publishedAt) => {
+      const existing = policiesStore.get(id);
+      if (!existing) return;
+      policiesStore.set(id, { ...existing, status: 'PUBLISHED', publishedAt });
+    },
+  };
+
+  return {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    policies,
+    auditRecords: projectDeps.auditRecords,
+  };
+}
+
+function createInMemoryKnowledgeDeps(projectDeps: ProjectUseCaseDeps): KnowledgeUseCaseDeps {
+  const sourcesStore = new Map<string, KnowledgeSource>();
+
+  const knowledgeSources: KnowledgeSourceRepository = {
+    getById: async (id) => sourcesStore.get(id) ?? null,
+    getByProjectAndKey: async (projectId, key) =>
+      [...sourcesStore.values()].find((s) => s.projectId === projectId && s.key === key) ?? null,
+    listForProject: async (projectId) =>
+      [...sourcesStore.values()].filter((s) => s.projectId === projectId),
+    create: async (source) => {
+      sourcesStore.set(source.id, source);
+    },
+  };
+
+  return {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    knowledgeSources,
+  };
+}
+
+function createInMemoryAuditDeps(projectDeps: ProjectUseCaseDeps): AuditUseCaseDeps {
+  const recordsStore = new Map<string, AuditRecord>();
+
+  const auditRecords: AuditRecordRepository = {
+    create: async (record) => {
+      recordsStore.set(record.id, record);
+    },
+    listForProject: async (projectId, limit) =>
+      [...recordsStore.values()].filter((r) => r.projectId === projectId).slice(0, limit),
+  };
+
+  return { projects: projectDeps.projects, memberships: projectDeps.memberships, auditRecords };
+}
+
+function createInMemoryApprovalDeps(
+  projectDeps: ProjectUseCaseDeps,
+  workflowDeps: WorkflowUseCaseDeps,
+  artifactDeps: ArtifactUseCaseDeps,
+): ApprovalUseCaseDeps {
+  const approvalsStore = new Map<string, Approval>();
+
+  const approvals: ApprovalRepository = {
+    getById: async (id) => approvalsStore.get(id) ?? null,
+    listForProject: async (projectId) =>
+      [...approvalsStore.values()].filter((a) => a.projectId === projectId),
+    listForRun: async (workflowRunId) =>
+      [...approvalsStore.values()].filter((a) => a.workflowRunId === workflowRunId),
+    getPendingForRunAndType: async (workflowRunId, approvalType) =>
+      [...approvalsStore.values()].find(
+        (a) =>
+          a.workflowRunId === workflowRunId &&
+          a.approvalType === approvalType &&
+          a.status === 'PENDING',
+      ) ?? null,
+    create: async (approval) => {
+      approvalsStore.set(approval.id, approval);
+    },
+    decide: async (id, status, decidedBy, decisionReason, decidedAt) => {
+      const existing = approvalsStore.get(id);
+      if (!existing) return;
+      approvalsStore.set(id, {
+        ...existing,
+        status,
+        decidedBy,
+        ...(decisionReason !== undefined ? { decisionReason } : {}),
+        decidedAt,
+      });
+    },
+  };
+
+  return {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    workflowRuns: workflowDeps.workflowRuns,
+    artifactVersions: artifactDeps.artifactVersions,
+    approvals,
+    transitionAfterApprovalDecision: async () => {},
   };
 }
 
@@ -1060,6 +1270,56 @@ describe('workflow run routes', () => {
     expect((await getResponse.json()).data.id).toBe(body.data.id);
   });
 
+  it('DEVOS-080: lists every run for a work item, oldest first, and rejects a non-member', async () => {
+    const localWorkItemResponse = await authed(
+      `/api/v1/projects/${projectId}/work-items`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Has multiple runs' }),
+      },
+    );
+    const localWorkItemId = (await localWorkItemResponse.json()).data.id;
+
+    const firstRunResponse = await authed(`/api/v1/workflows/${workflowId}/runs`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workItemId: localWorkItemId,
+        inputs: {},
+        idempotencyKey: 'devos-080-run-1',
+      }),
+    });
+    const firstRun = (await firstRunResponse.json()).data;
+
+    const secondRunResponse = await authed(`/api/v1/workflows/${workflowId}/runs`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workItemId: localWorkItemId,
+        inputs: {},
+        idempotencyKey: 'devos-080-run-2',
+      }),
+    });
+    const secondRun = (await secondRunResponse.json()).data;
+
+    const listResponse = await authed(
+      `/api/v1/work-items/${localWorkItemId}/workflow-runs`,
+      'alice',
+    );
+    const listBody = await listResponse.json();
+
+    expect(listResponse.status).toBe(200);
+    expect(listBody.data.map((r: { id: string }) => r.id)).toEqual([firstRun.id, secondRun.id]);
+
+    const deniedResponse = await authed(
+      `/api/v1/work-items/${localWorkItemId}/workflow-runs`,
+      'mallory',
+    );
+    expect(deniedResponse.status).toBe(404);
+  });
+
   it('rejects a work item from a different project', async () => {
     const otherProjectResponse = await authed('/api/v1/projects', 'alice', {
       method: 'POST',
@@ -1098,6 +1358,25 @@ describe('workflow run routes', () => {
       body: JSON.stringify({ workItemId, inputs: {}, idempotencyKey: 'run-mallory' }),
     });
     expect(response.status).toBe(404);
+  });
+
+  it('DEVOS-088: the correlation id returned to the caller is the same one stored on the run it started', async () => {
+    const suppliedCorrelationId = 'devos-088-test-correlation-id';
+    const response = await authed(`/api/v1/workflows/${workflowId}/runs`, 'alice', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-correlation-id': suppliedCorrelationId,
+      },
+      body: JSON.stringify({ workItemId, inputs: { foo: 'bar' }, idempotencyKey: 'run-devos-088' }),
+    });
+    const body = await response.json();
+
+    expect(response.headers.get('x-correlation-id')).toBe(suppliedCorrelationId);
+    expect(body.meta.requestId).toBe(suppliedCorrelationId);
+    // The run's own stored input carries the correlation id alongside the
+    // caller-supplied inputs, not in place of them.
+    expect(body.data.input).toEqual({ foo: 'bar', correlationId: suppliedCorrelationId });
   });
 });
 
@@ -1257,6 +1536,271 @@ describe('agent execution summary routes', () => {
   });
 });
 
+describe('tool invocation summary routes', () => {
+  let server: Server;
+  let baseUrl: string;
+  let projectId: string;
+  let workflowId: string;
+  let workItemId: string;
+  let toolInvocationSummaryDeps: ToolInvocationSummaryUseCaseDeps;
+
+  const validGraph = {
+    name: 'Development Path',
+    nodes: [{ id: 'development', type: 'AGENT_TASK', agentRef: 'development-agent' }],
+    edges: [],
+  };
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const workItemDeps = createInMemoryWorkItemDeps(projectDeps);
+    const workflowDeps = createInMemoryWorkflowDeps(projectDeps, workItemDeps);
+    toolInvocationSummaryDeps = createInMemoryToolInvocationSummaryDeps(projectDeps, workflowDeps);
+    const started = await startServer({
+      projectDeps,
+      workItemDeps,
+      workflowDeps,
+      toolInvocationSummaryDeps,
+    });
+    server = started.server;
+    baseUrl = started.baseUrl;
+
+    async function authedSetup(path: string, init: RequestInit = {}) {
+      return fetch(`${baseUrl}${path}`, {
+        ...init,
+        headers: { ...init.headers, authorization: 'Bearer alice' },
+      });
+    }
+
+    const projectResponse = await authedSetup('/api/v1/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Tool Invocation Project', slug: 'tool-invocation-project' }),
+    });
+    projectId = (await projectResponse.json()).data.id;
+
+    const workflowResponse = await authedSetup(`/api/v1/projects/${projectId}/workflows`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        key: 'development-path',
+        name: 'Development Path',
+        definition: validGraph,
+      }),
+    });
+    workflowId = (await workflowResponse.json()).data.id;
+    await authedSetup(`/api/v1/workflows/${workflowId}/publish`, { method: 'POST' });
+
+    const workItemResponse = await authedSetup(`/api/v1/projects/${projectId}/work-items`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Implement me' }),
+    });
+    workItemId = (await workItemResponse.json()).data.id;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it("shows a development task's tool invocations, their outcome, and commit/PR evidence", async () => {
+    const runResponse = await authed(`/api/v1/workflows/${workflowId}/runs`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workItemId, inputs: {}, idempotencyKey: 'tool-summary-run-1' }),
+    });
+    const runId = (await runResponse.json()).data.id;
+
+    const tasksResponse = await authed(`/api/v1/runs/${runId}/tasks`, 'alice');
+    const taskId = (await tasksResponse.json()).data[0].id;
+
+    const now = new Date(0).toISOString();
+    const gitCommitCapability: ToolCapability = {
+      id: 'capability-1',
+      projectId,
+      key: 'git-commit',
+      name: 'Create Git Commit',
+      riskClass: 'R2',
+      inputSchema: { type: 'object' },
+      outputSchema: { type: 'object' },
+      status: 'ACTIVE',
+      createdAt: now,
+    };
+    await toolInvocationSummaryDeps.toolCapabilities.create(gitCommitCapability);
+
+    const invocation: ToolInvocation = {
+      id: 'invocation-1',
+      workflowTaskId: taskId,
+      toolCapabilityId: gitCommitCapability.id,
+      status: 'SUCCEEDED',
+      inputMetadata: {},
+      outputMetadata: { commitSha: 'deadbeef' },
+      providerReference: 'deadbeef',
+      createdAt: now,
+    };
+    await toolInvocationSummaryDeps.toolInvocations.create(invocation);
+
+    const summaryResponse = await authed(
+      `/api/v1/runs/${runId}/tool-invocation-summaries`,
+      'alice',
+    );
+    const summaryBody = await summaryResponse.json();
+
+    expect(summaryResponse.status).toBe(200);
+    expect(summaryBody.data).toHaveLength(1);
+    expect(summaryBody.data[0]).toMatchObject({
+      taskId,
+      invocationId: invocation.id,
+      capabilityKey: 'git-commit',
+      status: 'SUCCEEDED',
+      outputMetadata: { commitSha: 'deadbeef' },
+      providerReference: 'deadbeef',
+    });
+  });
+
+  it('denies a non-member from reading tool invocation summaries', async () => {
+    const runResponse = await authed(`/api/v1/workflows/${workflowId}/runs`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workItemId, inputs: {}, idempotencyKey: 'tool-summary-run-2' }),
+    });
+    const runId = (await runResponse.json()).data.id;
+
+    const response = await authed(`/api/v1/runs/${runId}/tool-invocation-summaries`, 'mallory');
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('release readiness routes', () => {
+  let server: Server;
+  let baseUrl: string;
+  let projectId: string;
+  let storageDir: string;
+  let releaseReadinessDeps: ReleaseReadinessUseCaseDeps;
+  let artifactDeps: ArtifactUseCaseDeps;
+
+  beforeAll(async () => {
+    storageDir = await mkdtemp(path.join(tmpdir(), 'devos-api-release-readiness-'));
+    const projectDeps = createInMemoryProjectDeps();
+    artifactDeps = createInMemoryArtifactDeps(projectDeps, storageDir);
+    releaseReadinessDeps = createInMemoryReleaseReadinessDeps(projectDeps, artifactDeps);
+    const started = await startServer({ projectDeps, artifactDeps, releaseReadinessDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+
+    async function authedSetup(path: string, init: RequestInit = {}) {
+      return fetch(`${baseUrl}${path}`, {
+        ...init,
+        headers: { ...init.headers, authorization: 'Bearer alice' },
+      });
+    }
+
+    const projectResponse = await authedSetup('/api/v1/projects', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Release Readiness Project',
+        slug: 'release-readiness-project',
+      }),
+    });
+    projectId = (await projectResponse.json()).data.id;
+  });
+
+  afterAll(async () => {
+    server.close();
+    await rm(storageDir, { recursive: true, force: true });
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('is not ready when neither test nor review evidence exists', async () => {
+    const response = await authed(`/api/v1/projects/${projectId}/release-readiness`, 'alice');
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toMatchObject({
+      ready: false,
+      reasons: ['No test evidence found.', 'No review evidence found.'],
+    });
+  });
+
+  it('is ready once passing test evidence and a PASS review with no findings both exist', async () => {
+    const now = new Date(0).toISOString();
+    const testEvidenceArtifact: Artifact = {
+      id: 'release-readiness-test-evidence',
+      projectId,
+      artifactType: 'TEST_EVIDENCE',
+      name: 'Test Evidence',
+      status: 'GENERATED',
+      createdBy: 'devos-agent-runtime',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await artifactDeps.publishArtifact(testEvidenceArtifact, {
+      id: 'release-readiness-test-evidence-v1',
+      artifactId: testEvidenceArtifact.id,
+      version: 1,
+      contentType: 'application/json',
+      contentUri: 'file:///test-evidence.json',
+      contentHash: 'a'.repeat(64),
+      metadata: { passed: true },
+      createdBy: 'devos-agent-runtime',
+      createdAt: now,
+    });
+
+    const reviewEvidenceArtifact: Artifact = {
+      id: 'release-readiness-review-evidence',
+      projectId,
+      artifactType: 'REVIEW_EVIDENCE',
+      name: 'Review Evidence',
+      status: 'GENERATED',
+      createdBy: 'devos-agent-runtime',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await artifactDeps.publishArtifact(reviewEvidenceArtifact, {
+      id: 'release-readiness-review-evidence-v1',
+      artifactId: reviewEvidenceArtifact.id,
+      version: 1,
+      contentType: 'application/json',
+      contentUri: 'file:///review-evidence.json',
+      contentHash: 'b'.repeat(64),
+      metadata: { decision: 'PASS', findings: [] },
+      createdBy: 'devos-agent-runtime',
+      createdAt: now,
+    });
+
+    const response = await authed(`/api/v1/projects/${projectId}/release-readiness`, 'alice');
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toMatchObject({
+      ready: true,
+      reasons: [],
+      evidence: {
+        testEvidence: { artifactId: testEvidenceArtifact.id, passed: true },
+        reviewEvidence: { artifactId: reviewEvidenceArtifact.id, decision: 'PASS' },
+      },
+    });
+  });
+
+  it('denies a non-member from reading release readiness', async () => {
+    const response = await authed(`/api/v1/projects/${projectId}/release-readiness`, 'mallory');
+    expect(response.status).toBe(404);
+  });
+});
+
 describe('artifact routes', () => {
   let server: Server;
   let baseUrl: string;
@@ -1343,6 +1887,49 @@ describe('artifact routes', () => {
     expect(provenanceResponse.status).toBe(200);
   });
 
+  // DEVOS-095: a bare artifact-version id (all an approval's evidence
+  // reference carries) resolves to its owning artifact's name/type.
+  it('resolves an artifact version by its own id to its owning artifact name/type', async () => {
+    const createResponse = await authed(`/api/v1/projects/${projectId}/artifacts`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        artifactType: 'DISCOVERY_REPORT',
+        name: 'Resolvable Report',
+        content: 'plain text content',
+      }),
+    });
+    const artifactId = (await createResponse.json()).data.id;
+
+    const versionsResponse = await authed(`/api/v1/artifacts/${artifactId}/versions`, 'alice');
+    const versionId = (await versionsResponse.json()).data[0].id;
+
+    const response = await authed(`/api/v1/artifact-versions/${versionId}`, 'alice');
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toMatchObject({
+      id: versionId,
+      artifactId,
+      artifactName: 'Resolvable Report',
+      artifactType: 'DISCOVERY_REPORT',
+    });
+  });
+
+  it('denies a non-member from resolving an artifact version by id', async () => {
+    const createResponse = await authed(`/api/v1/projects/${projectId}/artifacts`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ artifactType: 'DISCOVERY_REPORT', name: 'Secret', content: 'x' }),
+    });
+    const artifactId = (await createResponse.json()).data.id;
+    const versionsResponse = await authed(`/api/v1/artifacts/${artifactId}/versions`, 'alice');
+    const versionId = (await versionsResponse.json()).data[0].id;
+
+    const response = await authed(`/api/v1/artifact-versions/${versionId}`, 'mallory');
+    expect(response.status).toBe(404);
+  });
+
   it('denies a non-member from reading an artifact', async () => {
     const createResponse = await authed(`/api/v1/projects/${projectId}/artifacts`, 'alice', {
       method: 'POST',
@@ -1353,5 +1940,206 @@ describe('artifact routes', () => {
 
     const response = await authed(`/api/v1/artifacts/${artifactId}`, 'mallory');
     expect(response.status).toBe(404);
+  });
+});
+
+// DEVOS-084: systematic tenant-isolation coverage for the four resource
+// families that had none at the API layer at all (confirmed by grep before
+// this task: policies, approvals, knowledge sources, audit).
+describe('DEVOS-084: tenant isolation — policies, approvals, knowledge sources, audit', () => {
+  let server: Server;
+  let baseUrl: string;
+  let projectId: string;
+  let approvalDeps: ApprovalUseCaseDeps;
+  let auditDeps: AuditUseCaseDeps;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const workItemDeps = createInMemoryWorkItemDeps(projectDeps);
+    const workflowDeps = createInMemoryWorkflowDeps(projectDeps, workItemDeps);
+    const artifactDeps = createInMemoryArtifactDeps(
+      projectDeps,
+      await mkdtemp(path.join(tmpdir(), 'devos-api-isolation-')),
+    );
+    const policyDeps = createInMemoryPolicyDeps(projectDeps);
+    const knowledgeDeps = createInMemoryKnowledgeDeps(projectDeps);
+    auditDeps = createInMemoryAuditDeps(projectDeps);
+    approvalDeps = createInMemoryApprovalDeps(projectDeps, workflowDeps, artifactDeps);
+
+    const started = await startServer({
+      projectDeps,
+      workItemDeps,
+      workflowDeps,
+      artifactDeps,
+      policyDeps,
+      knowledgeDeps,
+      auditDeps,
+      approvalDeps,
+    });
+    server = started.server;
+    baseUrl = started.baseUrl;
+
+    const projectResponse = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer alice', 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Isolation Project', slug: 'isolation-project' }),
+    });
+    projectId = (await projectResponse.json()).data.id;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('denies a non-member from listing or reading policies in another project', async () => {
+    const createResponse = await authed(`/api/v1/projects/${projectId}/policies`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'isolation-policy', definition: { rule: 'deny-all' } }),
+    });
+    const policyId = (await createResponse.json()).data.id;
+
+    const listResponse = await authed(`/api/v1/projects/${projectId}/policies`, 'mallory');
+    expect(listResponse.status).toBe(404);
+
+    const getResponse = await authed(`/api/v1/policies/${policyId}`, 'mallory');
+    expect(getResponse.status).toBe(404);
+
+    const publishResponse = await authed(`/api/v1/policies/${policyId}/publish`, 'mallory', {
+      method: 'POST',
+    });
+    expect(publishResponse.status).toBe(404);
+  });
+
+  it('denies a non-member from listing or reading knowledge sources in another project', async () => {
+    const createResponse = await authed(
+      `/api/v1/projects/${projectId}/knowledge-sources`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          key: 'isolation-source',
+          name: 'Isolation Source',
+          sourceType: 'DOCUMENT',
+          content: 'confidential',
+        }),
+      },
+    );
+    const sourceId = (await createResponse.json()).data.id;
+
+    const listResponse = await authed(`/api/v1/projects/${projectId}/knowledge-sources`, 'mallory');
+    expect(listResponse.status).toBe(404);
+
+    const getResponse = await authed(`/api/v1/knowledge-sources/${sourceId}`, 'mallory');
+    expect(getResponse.status).toBe(404);
+  });
+
+  it('denies a non-member from listing or reading approvals in another project', async () => {
+    const now = new Date().toISOString();
+    await approvalDeps.approvals.create({
+      id: 'isolation-approval' as Approval['id'],
+      projectId: projectId as Approval['projectId'],
+      workflowRunId: 'isolation-run' as Approval['workflowRunId'],
+      approvalType: 'PLANNING',
+      status: 'PENDING',
+      requestedBy: 'alice',
+      evidenceReference: { artifactVersionIds: [], scopeHash: 'a'.repeat(64) },
+      requestedAt: now,
+    });
+
+    const listResponse = await authed(`/api/v1/projects/${projectId}/approvals`, 'mallory');
+    expect(listResponse.status).toBe(404);
+
+    const getResponse = await authed(`/api/v1/approvals/isolation-approval`, 'mallory');
+    expect(getResponse.status).toBe(404);
+
+    const decideResponse = await authed(`/api/v1/approvals/isolation-approval/approve`, 'mallory', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scopeHash: 'a'.repeat(64) }),
+    });
+    expect(decideResponse.status).toBe(404);
+  });
+
+  it('denies a non-member from reading the audit trail for another project', async () => {
+    await auditDeps.auditRecords.create({
+      id: 'isolation-audit' as AuditRecord['id'],
+      organisationId: 'isolation-org' as AuditRecord['organisationId'],
+      projectId: projectId as AuditRecord['projectId'],
+      actorType: 'USER',
+      actorId: 'alice',
+      action: 'policy.publish',
+      targetType: 'Policy',
+      targetId: 'isolation-policy',
+      outcome: 'SUCCESS',
+      metadata: {},
+      createdAt: new Date().toISOString(),
+    });
+
+    const response = await authed(`/api/v1/projects/${projectId}/audit`, 'mallory');
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('DEVOS-091: rate limiting', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const mutationRateLimiter = createRateLimiter(2, 10_000);
+    const started = await startServer({ projectDeps, mutationRateLimiter });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('rejects a mutating request with 429 once the per-principal limit is exceeded, but never limits reads', async () => {
+    const create = () =>
+      authed('/api/v1/projects', 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Rate Limited', slug: `rl-${Math.random()}` }),
+      });
+
+    const first = await create();
+    const second = await create();
+    const third = await create();
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(third.status).toBe(429);
+    const thirdBody = await third.json();
+    expect(thirdBody.error.code).toBe('DEVOS_RATE_LIMITED');
+
+    // A different principal has its own, unaffected budget.
+    const bobResponse = await authed('/api/v1/projects', 'bob', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Bob Project', slug: `rl-bob-${Math.random()}` }),
+    });
+    expect(bobResponse.status).toBe(200);
+
+    // Reads are never rate-limited, even after the mutation budget is spent.
+    const listResponse = await authed('/api/v1/projects', 'alice');
+    expect(listResponse.status).toBe(200);
   });
 });

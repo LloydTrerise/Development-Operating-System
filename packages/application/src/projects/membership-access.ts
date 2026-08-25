@@ -1,9 +1,20 @@
-import type { Membership, Project } from '@devos/domain';
+import type { Membership, MembershipRepository, Project } from '@devos/domain';
 import { ValidationError } from '../errors.js';
-import type { ProjectUseCaseDeps } from './deps.js';
+
+/**
+ * DEVOS-086: narrowed to only what these two functions actually touch
+ * (`memberships`), not the full `ProjectUseCaseDeps` — every one of the
+ * ~20 unrelated use-case deps interfaces that call `resolveMembership`
+ * structurally satisfies this without needing `ProjectUseCaseDeps`'s own
+ * fields (like the new `auditRecords`), which are irrelevant to membership
+ * resolution.
+ */
+export interface MembershipAccessDeps {
+  memberships: MembershipRepository;
+}
 
 export async function resolveMembership(
-  deps: ProjectUseCaseDeps,
+  deps: MembershipAccessDeps,
   principalId: string,
   project: Project,
 ): Promise<Membership | null> {
@@ -19,7 +30,7 @@ export async function resolveMembership(
 }
 
 export async function assertNotLastOwner(
-  deps: ProjectUseCaseDeps,
+  deps: MembershipAccessDeps,
   projectId: Project['id'],
   excludingMembershipId: Membership['id'],
 ): Promise<void> {

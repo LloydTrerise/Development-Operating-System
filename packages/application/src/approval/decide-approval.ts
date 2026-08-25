@@ -1,5 +1,5 @@
 import type { ApprovalId } from '@devos/contracts';
-import type { Approval } from '@devos/domain';
+import { canDecideApproval, type Approval } from '@devos/domain';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.js';
 import { resolveMembership } from '../projects/membership-access.js';
 import type { ApprovalUseCaseDeps } from './deps.js';
@@ -48,7 +48,7 @@ async function decideApproval(
 
   const membership = await resolveMembership(deps, principalId, project);
   if (!membership) throw new NotFoundError('Approval');
-  if (membership.role !== 'OWNER') {
+  if (!canDecideApproval(membership.role)) {
     throw new ForbiddenError('Only a project owner may decide an approval.');
   }
 
@@ -73,6 +73,7 @@ async function decideApproval(
   await deps.transitionAfterApprovalDecision(
     approval.id,
     approval.workflowRunId,
+    approval.approvalType,
     status,
     principalId,
     input.comment,

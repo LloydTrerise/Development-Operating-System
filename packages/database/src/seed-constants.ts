@@ -74,6 +74,49 @@ export const SEED_PLANNING_AGENT_CONFIGURATION = {
 };
 export const SEED_PLANNING_AGENT_PROMPT_REFERENCE = 'planning/v1';
 
+export const SEED_DEVELOPMENT_AGENT_ID = '00000000-0000-4000-8000-000000000014';
+export const SEED_DEVELOPMENT_AGENT_VERSION_ID = '00000000-0000-4000-8000-000000000015';
+export const SEED_DEVELOPMENT_AGENT_KEY = 'development-agent';
+export const SEED_DEVELOPMENT_AGENT_CONFIGURATION = {
+  role: 'DEVELOPMENT',
+  provider: 'gemini',
+  modelRef: 'gemini-3.6-flash',
+  outputSchemaRef: 'proposed-change-v1',
+  // DEVOS-085: the only three capabilities `runDevelopmentAgentTask` ever
+  // invokes on this agent version's behalf (repo-write, git-commit,
+  // pull-request-create) — now enforced by the Tool Gateway, so this list
+  // must actually match reality rather than being vestigial.
+  allowedCapabilities: ['repo-write', 'git-commit', 'pull-request-create'],
+};
+export const SEED_DEVELOPMENT_AGENT_PROMPT_REFERENCE = 'developer/v1';
+
+export const SEED_REVIEW_AGENT_ID = '00000000-0000-4000-8000-00000000001b';
+export const SEED_REVIEW_AGENT_VERSION_ID = '00000000-0000-4000-8000-00000000001c';
+export const SEED_REVIEW_AGENT_KEY = 'review-agent';
+export const SEED_REVIEW_AGENT_CONFIGURATION = {
+  role: 'REVIEW',
+  provider: 'gemini',
+  modelRef: 'gemini-3.6-flash',
+  outputSchemaRef: 'review-evidence-v1',
+  allowedCapabilities: [],
+};
+export const SEED_REVIEW_AGENT_PROMPT_REFERENCE = 'review/v1';
+
+/**
+ * DEVOS-052's Tool Gateway is the first machinery in this codebase to
+ * require a real project membership for "Project Scope" authorization —
+ * every earlier system-actor write (publish-artifact.ts,
+ * record-context-manifest.ts) only ever used `devos-agent-runtime` for
+ * audit actor-type classification, never an authorization check. A
+ * system-executed development task genuinely needs a real membership
+ * grant to invoke tools on the project's behalf (Constitution Principle 6:
+ * authority comes from an explicit grant, not an implicit bypass), so this
+ * seeds one rather than special-casing the Tool Gateway around this
+ * specific string constant.
+ */
+export const SEED_AGENT_RUNTIME_MEMBERSHIP_ID = '00000000-0000-4000-8000-000000000016';
+export const SEED_AGENT_RUNTIME_PRINCIPAL_ID = 'devos-agent-runtime';
+
 export const SEED_PLANNING_PATH_WORKFLOW_DEFINITION_ID = '00000000-0000-4000-8000-00000000000e';
 export const SEED_PLANNING_PATH_WORKFLOW_VERSION_ID = '00000000-0000-4000-8000-00000000000f';
 export const SEED_PLANNING_PATH_WORKFLOW_KEY = 'planning-path';
@@ -128,3 +171,345 @@ export const SEED_PLANNING_PATH_WORKFLOW_GRAPH = {
 /** The marker `WorkflowDefinition.policies` entry that gates run completion
  * behind a human planning approval (DEVOS-047). */
 export const PLANNING_APPROVAL_POLICY_KEY = 'planning-approval';
+
+export const SEED_DEVELOPMENT_PATH_WORKFLOW_DEFINITION_ID = '00000000-0000-4000-8000-000000000017';
+export const SEED_DEVELOPMENT_PATH_WORKFLOW_VERSION_ID = '00000000-0000-4000-8000-000000000018';
+export const SEED_DEVELOPMENT_PATH_WORKFLOW_KEY = 'development-path';
+
+/**
+ * DEVOS-061: a separate one-node workflow rather than a fifth node on
+ * SEED_PLANNING_PATH_WORKFLOW_GRAPH — the task queue's maybeCompleteRun
+ * (packages/database/src/repositories/task-queue.ts) only advances a run's
+ * approval gate once *every* task in that run has succeeded, so a
+ * development node co-located with the planning nodes would block the
+ * planning-approval gate on development also completing, inverting the
+ * intended "approve the plan, then develop" order. This workflow instead
+ * runs as its own separate run, consuming an earlier planning-path run's
+ * approved plan via a project-scoped artifact lookup (see
+ * run-development-agent-task.ts) — so it carries no `policies` marker of
+ * its own; there is nothing to gate.
+ */
+export const SEED_DEVELOPMENT_PATH_WORKFLOW_GRAPH = {
+  name: 'Development Path',
+  description:
+    'Implements an approved plan through controlled repository actions and opens a pull request (Sprint 4).',
+  trigger: { type: 'WORK_ITEM_MANUAL' },
+  inputs: [{ name: 'workItemId', type: 'WORK_ITEM', required: true }],
+  nodes: [
+    {
+      id: 'development',
+      type: 'AGENT_TASK',
+      name: 'Development',
+      agentRef: SEED_DEVELOPMENT_AGENT_KEY,
+    },
+  ],
+  edges: [],
+  outputs: [],
+};
+
+export const SEED_DEVELOPMENT_PATH_WORKFLOW_V2_VERSION_ID = '00000000-0000-4000-8000-00000000001d';
+
+/**
+ * DEVOS-067: version 2 of the same `development-path` definition — not an
+ * edit to `SEED_DEVELOPMENT_PATH_WORKFLOW_GRAPH` above, since "published
+ * workflow versions are immutable" (Workflow Principle 8,
+ * specs/workflows/software-change-workflow.md §8) and DEVOS-061's own E2E
+ * test targets that exact version by id. Extends development with the two
+ * stages Sprint 5 adds — validation (build+test, a `TOOL_TASK`, no agent)
+ * and review (`AGENT_TASK`, `review-agent`) — as two more nodes in the
+ * *same* run, not a further split into separate workflows: unlike
+ * planning -> development (which crosses a human approval gate),
+ * development -> validation -> review has no gate between them anywhere
+ * in the spec's own flow diagram (§7), so the existing "materialize every
+ * node up front, complete once all succeed" engine model already fits
+ * without further changes. A `CHANGES_REQUIRED` review outcome doesn't
+ * loop *within* this run — `runReviewAgentTask` starts an entirely new run
+ * of this same version instead (see its own doc comment), since the
+ * engine has no "insert a task into an already-running run" mechanism.
+ */
+export const SEED_DEVELOPMENT_PATH_WORKFLOW_V2_GRAPH = {
+  name: 'Development Path',
+  description:
+    'Implements an approved plan, validates it (build + test), and reviews it — with automatic rework on CHANGES_REQUIRED (Sprint 5).',
+  trigger: { type: 'WORK_ITEM_MANUAL' },
+  inputs: [{ name: 'workItemId', type: 'WORK_ITEM', required: true }],
+  nodes: [
+    {
+      id: 'development',
+      type: 'AGENT_TASK',
+      name: 'Development',
+      agentRef: SEED_DEVELOPMENT_AGENT_KEY,
+    },
+    {
+      id: 'validation',
+      type: 'TOOL_TASK',
+      name: 'Automated Validation',
+    },
+    {
+      id: 'review',
+      type: 'AGENT_TASK',
+      name: 'Engineering Review',
+      agentRef: SEED_REVIEW_AGENT_KEY,
+    },
+  ],
+  edges: [
+    { from: 'development', to: 'validation' },
+    { from: 'validation', to: 'review' },
+  ],
+  outputs: [],
+};
+
+export const SEED_RELEASE_PATH_WORKFLOW_DEFINITION_ID = '00000000-0000-4000-8000-00000000001e';
+export const SEED_RELEASE_PATH_WORKFLOW_VERSION_ID = '00000000-0000-4000-8000-00000000001f';
+export const SEED_RELEASE_PATH_WORKFLOW_KEY = 'release-path';
+
+/** The marker `WorkflowDefinition.policies` entry that gates run completion
+ * behind a human release approval (DEVOS-073) — the release-shaped analogue
+ * of `PLANNING_APPROVAL_POLICY_KEY` above, both now read by the same
+ * generalized `APPROVAL_GATE_POLICIES` map in
+ * `packages/database/src/repositories/task-queue.ts`. */
+export const RELEASE_APPROVAL_POLICY_KEY = 'release-approval';
+
+/**
+ * DEVOS-073: a third, separate one-node workflow — the same reasoning
+ * DEVOS-061 already applied to `SEED_DEVELOPMENT_PATH_WORKFLOW_GRAPH`
+ * governs here too: a gate (this one, release approval) still needs a run
+ * of its own, since `maybeCompleteRun` only advances a gate once every task
+ * in *that* run has succeeded, and the engine has no mechanism to insert a
+ * task into an already-running run. The single node re-checks release
+ * readiness (`runReleaseReadinessCheckTask`, reusing DEVOS-069's evaluator)
+ * against whatever `TEST_EVIDENCE`/`REVIEW_EVIDENCE` the project's most
+ * recent development-path run produced; only once that task succeeds does
+ * `maybeCompleteRun` see this version's `release-approval` marker and
+ * request a human release approval instead of completing outright.
+ */
+export const SEED_RELEASE_PATH_WORKFLOW_GRAPH = {
+  name: 'Release Path',
+  description:
+    'Re-checks release readiness and gates release behind a human release approval (Sprint 6).',
+  trigger: { type: 'WORK_ITEM_MANUAL' },
+  inputs: [{ name: 'workItemId', type: 'WORK_ITEM', required: true }],
+  nodes: [
+    {
+      id: 'release-readiness-check',
+      type: 'TOOL_TASK',
+      name: 'Release Readiness Check',
+    },
+  ],
+  edges: [],
+  policies: [RELEASE_APPROVAL_POLICY_KEY],
+  outputs: [],
+};
+
+export const SEED_RELEASE_PATH_WORKFLOW_V2_VERSION_ID = '00000000-0000-4000-8000-000000000022';
+
+/**
+ * DEVOS-079: version 2 of the same `release-path` definition — not an edit
+ * to `SEED_RELEASE_PATH_WORKFLOW_GRAPH` above (Workflow Principle 8,
+ * "published workflow versions are immutable," and DEVOS-073's own live
+ * verification already targets v1 by exact version id). This version has
+ * no `policies` marker of its own — it carries no gate, because it exists
+ * to run *after* a v1 run's release approval was already granted: the same
+ * "a gate needs a run of its own, but what happens after isn't itself
+ * re-gated" pattern DEVOS-061 established for planning -> development.
+ * `release` (deploy + post-release validation + evidence, DEVOS-076) and
+ * `closure` (DEVOS-078) are two nodes in the same run rather than two more
+ * separate runs, since no gate sits between them either — the same
+ * reasoning DEVOS-067 applied to development -> validation -> review.
+ */
+export const SEED_RELEASE_PATH_WORKFLOW_V2_GRAPH = {
+  name: 'Release Path',
+  description:
+    'Deploys the approved release, validates it, and closes the work item with its full linked evidence (Sprint 6).',
+  trigger: { type: 'WORK_ITEM_MANUAL' },
+  inputs: [{ name: 'workItemId', type: 'WORK_ITEM', required: true }],
+  nodes: [
+    {
+      id: 'release',
+      type: 'TOOL_TASK',
+      name: 'Release',
+    },
+    {
+      id: 'closure',
+      type: 'TOOL_TASK',
+      name: 'Closure',
+    },
+  ],
+  edges: [{ from: 'release', to: 'closure' }],
+  outputs: [],
+};
+
+/**
+ * Seed rows for `tool_capabilities` (DEVOS-051). `packages/database` cannot
+ * depend on `packages/tools` (package-boundary direction: tools sits
+ * downstream of domain/application, database is a peer leaf — see
+ * DEVOS-SPRINT4-DECISIONS.md), so these literal definitions are duplicated
+ * here rather than imported, the same way the agent seed configurations
+ * above are inlined rather than imported from wherever agent role logic
+ * lives. `packages/tools/src/capabilities/*.ts` remains the canonical,
+ * in-code source DEVOS-052's Tool Gateway actually consults.
+ */
+export const SEED_REPO_READ_CAPABILITY_ID = '00000000-0000-4000-8000-000000000010';
+export const SEED_REPO_WRITE_CAPABILITY_ID = '00000000-0000-4000-8000-000000000011';
+export const SEED_GIT_COMMIT_CAPABILITY_ID = '00000000-0000-4000-8000-000000000012';
+export const SEED_PULL_REQUEST_CREATE_CAPABILITY_ID = '00000000-0000-4000-8000-000000000013';
+export const SEED_BUILD_RUN_CAPABILITY_ID = '00000000-0000-4000-8000-000000000019';
+export const SEED_TEST_RUN_CAPABILITY_ID = '00000000-0000-4000-8000-00000000001a';
+export const SEED_DEPLOY_CAPABILITY_ID = '00000000-0000-4000-8000-000000000020';
+export const SEED_HEALTH_CHECK_CAPABILITY_ID = '00000000-0000-4000-8000-000000000021';
+
+export const SEED_TOOL_CAPABILITIES = [
+  {
+    id: SEED_REPO_READ_CAPABILITY_ID,
+    key: 'repo-read',
+    name: 'Read Repository File',
+    riskClass: 'R0',
+    inputSchema: {
+      type: 'object',
+      properties: { path: { type: 'string' }, ref: { type: 'string' } },
+      required: ['path'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: { path: { type: 'string' }, content: { type: 'string' } },
+      required: ['path', 'content'],
+    },
+  },
+  {
+    id: SEED_REPO_WRITE_CAPABILITY_ID,
+    key: 'repo-write',
+    name: 'Write Repository File',
+    riskClass: 'R2',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+        content: { type: 'string' },
+        branch: { type: 'string' },
+      },
+      required: ['path', 'content', 'branch'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+    },
+  },
+  {
+    id: SEED_GIT_COMMIT_CAPABILITY_ID,
+    key: 'git-commit',
+    name: 'Create Git Commit',
+    riskClass: 'R2',
+    inputSchema: {
+      type: 'object',
+      properties: { branch: { type: 'string' }, message: { type: 'string' } },
+      required: ['branch', 'message'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: { commitSha: { type: 'string' }, branch: { type: 'string' } },
+      required: ['commitSha', 'branch'],
+    },
+  },
+  {
+    id: SEED_PULL_REQUEST_CREATE_CAPABILITY_ID,
+    key: 'pull-request-create',
+    name: 'Create Pull Request',
+    riskClass: 'R3',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sourceBranch: { type: 'string' },
+        targetBranch: { type: 'string' },
+        title: { type: 'string' },
+        description: { type: 'string' },
+      },
+      required: ['sourceBranch', 'targetBranch', 'title'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: { pullRequestReference: { type: 'string' }, url: { type: 'string' } },
+      required: ['pullRequestReference'],
+    },
+  },
+  {
+    id: SEED_BUILD_RUN_CAPABILITY_ID,
+    key: 'build-run',
+    name: 'Run Build',
+    riskClass: 'R2',
+    inputSchema: {
+      type: 'object',
+      properties: { command: { type: 'string' } },
+      required: ['command'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        exitCode: { type: 'number' },
+        stdout: { type: 'string' },
+        stderr: { type: 'string' },
+      },
+      required: ['exitCode', 'stdout', 'stderr'],
+    },
+  },
+  {
+    id: SEED_TEST_RUN_CAPABILITY_ID,
+    key: 'test-run',
+    name: 'Run Tests',
+    riskClass: 'R2',
+    inputSchema: {
+      type: 'object',
+      properties: { command: { type: 'string' } },
+      required: ['command'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        exitCode: { type: 'number' },
+        stdout: { type: 'string' },
+        stderr: { type: 'string' },
+      },
+      required: ['exitCode', 'stdout', 'stderr'],
+    },
+  },
+  {
+    id: SEED_DEPLOY_CAPABILITY_ID,
+    key: 'deploy',
+    name: 'Deploy to Environment',
+    riskClass: 'R3',
+    inputSchema: {
+      type: 'object',
+      properties: { revision: { type: 'string' } },
+      required: ['revision'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        deploymentId: { type: 'string' },
+        deployedPath: { type: 'string' },
+        revision: { type: 'string' },
+      },
+      required: ['deploymentId', 'deployedPath', 'revision'],
+    },
+  },
+  {
+    id: SEED_HEALTH_CHECK_CAPABILITY_ID,
+    key: 'health-check',
+    name: 'Run Post-Release Health Check',
+    riskClass: 'R2',
+    inputSchema: {
+      type: 'object',
+      properties: { command: { type: 'string' } },
+      required: ['command'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        exitCode: { type: 'number' },
+        stdout: { type: 'string' },
+        stderr: { type: 'string' },
+      },
+      required: ['exitCode', 'stdout', 'stderr'],
+    },
+  },
+] as const;

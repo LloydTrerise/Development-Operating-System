@@ -129,6 +129,42 @@ describe('createGeminiModelAdapter', () => {
     expect(result.errorMessage).toContain('MAX_TOKENS');
   });
 
+  it("DEVOS-089: records real token usage from the response's usageMetadata", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        candidates: [
+          {
+            content: { parts: [{ text: '{"summary":"A validated PRD."}' }] },
+            finishReason: 'STOP',
+          },
+        ],
+        usageMetadata: {
+          promptTokenCount: 123,
+          candidatesTokenCount: 45,
+          totalTokenCount: 168,
+        },
+      }),
+    );
+
+    const adapter = createGeminiModelAdapter({ apiKey: 'test-key', fetchImpl });
+    const result = await adapter.invoke(REQUEST);
+
+    expect(result.usage).toEqual({ promptTokens: 123, candidatesTokens: 45, totalTokens: 168 });
+  });
+
+  it('DEVOS-089: omits usage when the response has no usageMetadata', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        candidates: [{ content: { parts: [{ text: '{}' }] }, finishReason: 'STOP' }],
+      }),
+    );
+
+    const adapter = createGeminiModelAdapter({ apiKey: 'test-key', fetchImpl });
+    const result = await adapter.invoke(REQUEST);
+
+    expect(result.usage).toBeUndefined();
+  });
+
   it('reports FAILED when fetch itself rejects', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error('DNS lookup failed'));
 

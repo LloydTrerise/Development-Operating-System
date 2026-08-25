@@ -1,0 +1,10 @@
+{
+  "name": "proposed-change",
+  "version": 1,
+  "fields": {
+    "summary": { "type": "string" },
+    "branchName": { "type": "string" },
+    "commitMessage": { "type": "string" },
+    "files": { "type": "array" }
+  }
+}

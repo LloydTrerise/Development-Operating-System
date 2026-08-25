@@ -1,9 +1,10 @@
-import type { ArtifactId, ProjectId } from '@devos/contracts';
+import type { ArtifactId, ArtifactVersionId, ProjectId } from '@devos/contracts';
 import {
   createArtifact,
   getArtifactForPrincipal,
   getArtifactProvenance,
   getArtifactVersionByNumber,
+  getArtifactVersionById,
   listArtifactVersions,
   listArtifactsForProject,
   type ArtifactUseCaseDeps,
@@ -13,6 +14,7 @@ import {
   parseVersionNumber,
   toArtifactDto,
   toArtifactVersionDto,
+  toArtifactVersionWithArtifactDto,
 } from '../dto/artifact.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
@@ -86,6 +88,28 @@ export function createArtifactRoutes(prefix: string, deps: ArtifactUseCaseDeps):
           versionNumber,
         );
         return toArtifactVersionDto(version);
+      },
+    },
+    {
+      // DEVOS-095: resolves a bare artifact-version id (all an approval's
+      // evidence reference carries, DEVOS-045) to its owning artifact's
+      // name/type — not in specs/api/poc-api-contracts.md's own route
+      // table (§29-30 keys evidence purely by artifactVersionId, with no
+      // by-id lookup route defined), added to close the real usability gap
+      // this task's acceptance criterion requires, per the DEVOS-046/060/
+      // 070/080/090 "build to the task's own acceptance criterion when no
+      // spec/wireframe defines the exact surface" precedent.
+      method: 'GET',
+      pattern: `${prefix}/artifact-versions/:artifactVersionId`,
+      protected: true,
+      handler: async ({ principal, params }) => {
+        const user = requirePrincipal(principal);
+        const result = await getArtifactVersionById(
+          deps,
+          user.id,
+          params.artifactVersionId as ArtifactVersionId,
+        );
+        return toArtifactVersionWithArtifactDto(result);
       },
     },
     {

@@ -16,8 +16,10 @@
     "@devos/agents": "workspace:*",
     "@devos/contracts": "workspace:*",
     "@devos/domain": "workspace:*",
+    "@devos/integrations": "workspace:*",
     "@devos/knowledge": "workspace:*",
-    "@devos/storage": "workspace:*"
+    "@devos/storage": "workspace:*",
+    "@devos/tools": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

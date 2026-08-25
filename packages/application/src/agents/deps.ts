@@ -3,6 +3,7 @@ import type {
   AgentRepository,
   AgentVersion,
   AgentVersionRepository,
+  AuditRecordRepository,
   MembershipRepository,
   ProjectRepository,
 } from '@devos/domain';
@@ -15,4 +16,6 @@ export interface AgentUseCaseDeps {
   agents: AgentRepository;
   agentVersions: AgentVersionRepository;
   createDraft: CreateAgentDraft;
+  /** DEVOS-086: agent version publish is audited. */
+  auditRecords: AuditRecordRepository;
 }

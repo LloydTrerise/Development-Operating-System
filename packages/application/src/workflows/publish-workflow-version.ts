@@ -1,6 +1,6 @@
 import type { WorkflowId } from '@devos/contracts';
-import { validateWorkflowGraph, type WorkflowVersion } from '@devos/domain';
-import { ValidationError } from '../errors.js';
+import { canPublishWorkflow, validateWorkflowGraph, type WorkflowVersion } from '@devos/domain';
+import { ForbiddenError, ValidationError } from '../errors.js';
 import { requireDraftVersion } from './draft-access.js';
 import type { WorkflowUseCaseDeps } from './deps.js';
 
@@ -9,7 +9,10 @@ export async function publishWorkflowVersion(
   principalId: string,
   workflowId: WorkflowId,
 ): Promise<WorkflowVersion> {
-  const { draft } = await requireDraftVersion(deps, principalId, workflowId);
+  const { draft, membership } = await requireDraftVersion(deps, principalId, workflowId);
+  if (!canPublishWorkflow(membership.role)) {
+    throw new ForbiddenError('Only a project owner may publish a workflow version.');
+  }
 
   const issues = validateWorkflowGraph(draft.definition);
   if (issues.length > 0) {

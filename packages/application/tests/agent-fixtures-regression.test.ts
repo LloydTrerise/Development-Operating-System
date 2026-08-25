@@ -277,6 +277,21 @@ describe('agent fixtures regression (no live API calls)', () => {
       return (version?.metadata ?? {}) as Record<string, unknown>;
     }
 
+    /**
+     * DEVOS-097: every other assertion in this test is a status/type/shape
+     * check — none of them would catch a regression where a prompt/schema
+     * change made the model produce correctly-shaped but generic output
+     * (e.g. "Implement the requested feature" instead of anything actually
+     * about a CSV export). This checks the stored output for real,
+     * work-item-specific detail from the fixture's own recorded content.
+     */
+    function assertContentRelevant(metadata: Record<string, unknown>, requiredPhrases: string[]) {
+      const text = JSON.stringify(metadata).toLowerCase();
+      for (const phrase of requiredPhrases) {
+        expect(text).toContain(phrase.toLowerCase());
+      }
+    }
+
     const discoveryOutput = await runDiscoveryAgentTask(
       deps,
       buildTask('discovery', 'discovery-agent'),
@@ -288,6 +303,13 @@ describe('agent fixtures regression (no live API calls)', () => {
     expect(storedMetadata(discoveryOutput.artifactId as string)).toMatchObject(
       discoveryFixture.result,
     );
+    // DEVOS-097: real detail from this specific work item (CSV export, the
+    // analytics team), not a generic "a feature was requested" summary.
+    assertContentRelevant(storedMetadata(discoveryOutput.artifactId as string), [
+      'CSV',
+      'analytics team',
+      'reporting dashboard',
+    ]);
 
     const requirementsOutput = await runRequirementsAgentTask(
       deps,
@@ -297,6 +319,12 @@ describe('agent fixtures regression (no live API calls)', () => {
     expect(storedMetadata(requirementsOutput.artifactId as string)).toMatchObject(
       requirementsFixture.result,
     );
+    // DEVOS-097: real requirement language tied to this feature, not a
+    // generic "the system shall meet the requirements" placeholder.
+    assertContentRelevant(storedMetadata(requirementsOutput.artifactId as string), [
+      'CSV export mechanism',
+      'analytics team',
+    ]);
 
     const technicalDesignOutput = await runTechnicalDesignAgentTask(
       deps,
@@ -309,6 +337,12 @@ describe('agent fixtures regression (no live API calls)', () => {
     expect(storedMetadata(technicalDesignOutput.artifactId as string)).toMatchObject(
       technicalDesignFixture.result,
     );
+    // DEVOS-097: a specific, verifiable technical decision (the RFC 4180
+    // CSV spec) a generic-but-schema-valid design would not name.
+    assertContentRelevant(storedMetadata(technicalDesignOutput.artifactId as string), [
+      'RFC 4180',
+      'Export CSV',
+    ]);
 
     const planningOutput = await runPlanningAgentTask(
       deps,
@@ -321,6 +355,13 @@ describe('agent fixtures regression (no live API calls)', () => {
     expect(storedMetadata(planningOutput.artifactId as string)).toMatchObject(
       planningFixture.result,
     );
+    // DEVOS-097: real, actionable implementation tasks tied to this
+    // feature's own technical design (RFC 4180, the analytics role gate),
+    // not generic "implement the feature" placeholders.
+    assertContentRelevant(storedMetadata(planningOutput.artifactId as string), [
+      'RFC 4180',
+      'analytics',
+    ]);
 
     // Every stage after the first is genuinely chained to the one before it.
     expect(requirementsOutput.derivedFromArtifactId).toBe(discoveryOutput.artifactId);

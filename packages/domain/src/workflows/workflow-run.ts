@@ -28,5 +28,10 @@ export interface WorkflowRunRepository {
     workflowVersionId: WorkflowVersionId,
     idempotencyKey: string,
   ) => Promise<WorkflowRun | null>;
+  /** DEVOS-080: the read-side lookup DEVOS-071 flagged as missing — "no
+   * API exposes a work item's runs." Needed once one work item's change
+   * genuinely spans multiple runs (planning, development, release), so a
+   * single run's own timeline is no longer the complete picture. */
+  listForWorkItem: (workItemId: WorkItemId) => Promise<WorkflowRun[]>;
   create: (run: WorkflowRun) => Promise<void>;
 }

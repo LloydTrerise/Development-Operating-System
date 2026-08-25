@@ -48,6 +48,16 @@ export function createWorkflowRunRepository(db: QueryExecutor): WorkflowRunRepos
       return row ? toDomain(row) : null;
     },
 
+    async listForWorkItem(workItemId) {
+      const rows = await db
+        .selectFrom('workflow_runs')
+        .selectAll()
+        .where('work_item_id', '=', workItemId)
+        .orderBy('created_at', 'asc')
+        .execute();
+      return rows.map(toDomain);
+    },
+
     async create(run) {
       await db
         .insertInto('workflow_runs')

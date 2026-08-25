@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { AgentModelAdapter, PromptRepository, SchemaRepository } from '@devos/agents';
+import {
+  estimateCostUsd,
+  type AgentModelAdapter,
+  type PromptRepository,
+  type SchemaRepository,
+} from '@devos/agents';
+import type { OrganisationId } from '@devos/contracts';
 import type {
   Agent,
   AgentExecution,
@@ -7,8 +13,12 @@ import type {
   AgentRepository,
   AgentVersion,
   AgentVersionRepository,
+  AuditRecord,
+  AuditRecordRepository,
   ContextManifest,
+  Project,
   ProjectId,
+  ProjectRepository,
   WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
@@ -132,13 +142,15 @@ function buildScenario() {
     create: async (execution) => {
       executions.push(execution);
     },
-    complete: async (id, output, uncertainty, completedAt) => {
+    complete: async (id, output, uncertainty, completedAt, usage, estimatedCostUsd) => {
       const index = executions.findIndex((e) => e.id === id);
       executions[index] = {
         ...executions[index]!,
         status: 'SUCCEEDED',
         output,
         ...(uncertainty !== undefined ? { uncertainty } : {}),
+        ...(usage !== undefined ? { usage } : {}),
+        ...(estimatedCostUsd !== undefined ? { estimatedCostUsd } : {}),
         completedAt,
       };
     },
@@ -159,6 +171,16 @@ function buildScenario() {
     contextManifests.push(manifest);
   };
 
+  const project: Project = {
+    id: projectId,
+    organisationId: randomUUID() as OrganisationId,
+    name: 'Test Project',
+    slug: 'test-project',
+    status: 'ACTIVE',
+    createdAt: now,
+    updatedAt: now,
+  };
+
   return {
     projectId,
     workItem,
@@ -166,6 +188,7 @@ function buildScenario() {
     agent,
     version,
     task,
+    project,
     workflowRuns,
     workItems,
     agents,
@@ -331,6 +354,39 @@ describe('runAgentTask', () => {
     });
   });
 
+  it('DEVOS-089: records real token usage and an estimated cost when the model adapter reports usage', async () => {
+    const scenario = buildScenario();
+    const modelAdapter: AgentModelAdapter = {
+      invoke: async () => ({
+        status: 'SUCCEEDED',
+        result: { summary: 'A validated PRD.' },
+        modelReference: 'fake-model@1',
+        usage: { promptTokens: 100, candidatesTokens: 50, totalTokens: 150 },
+      }),
+    };
+
+    const deps: AgentTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agents,
+      agentVersions: scenario.agentVersions,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+    };
+
+    await runAgentTask(deps, scenario.task);
+
+    expect(scenario.executions[0]?.usage).toEqual({
+      promptTokens: 100,
+      candidatesTokens: 50,
+      totalTokens: 150,
+    });
+    expect(scenario.executions[0]?.estimatedCostUsd).toBeGreaterThan(0);
+  });
+
   it('records a FAILED execution and throws when the model adapter reports failure', async () => {
     const scenario = buildScenario();
     const modelAdapter: AgentModelAdapter = {
@@ -472,6 +528,176 @@ describe('runAgentTask', () => {
     expect(scenario.executions[0]).toMatchObject({
       status: 'FAILED',
       errorCode: 'DEVOS_SCHEMA_VALIDATION_FAILED',
+    });
+  });
+
+  describe('DEVOS-098: cost-budget alerting', () => {
+    const USAGE = { promptTokens: 100, candidatesTokens: 50, totalTokens: 150 };
+    // The real per-execution estimated cost this usage produces (via the
+    // same estimateCostUsd this handler itself calls) — deriving test
+    // budget/total values relative to it, rather than hardcoding numbers
+    // that would silently drift if the pricing table ever changes.
+    const PER_EXECUTION_COST_USD = estimateCostUsd(USAGE);
+
+    function withUsage(scenario: ReturnType<typeof buildScenario>, budgetUsd: number) {
+      const modelAdapter: AgentModelAdapter = {
+        invoke: async () => ({ status: 'SUCCEEDED', result: {}, usage: USAGE }),
+      };
+      const projects: ProjectRepository = {
+        getById: async (id) =>
+          id === scenario.projectId ? { ...scenario.project, budgetUsd } : null,
+        listForOrganisation: async () => [],
+        create: async () => {},
+        update: async () => {},
+      };
+      const auditRecords: AuditRecord[] = [];
+      const auditRecordRepository: AuditRecordRepository = {
+        create: async (record) => {
+          auditRecords.push(record);
+        },
+        listForProject: async () => auditRecords,
+      };
+      return { modelAdapter, projects, auditRecordRepository, auditRecords };
+    }
+
+    it('writes a real FAILURE-outcome audit record the first time accumulated cost crosses the configured budget', async () => {
+      const scenario = buildScenario();
+      const budgetUsd = PER_EXECUTION_COST_USD * 1.5;
+      const totalCostUsd = PER_EXECUTION_COST_USD * 2;
+      const { modelAdapter, projects, auditRecordRepository, auditRecords } = withUsage(
+        scenario,
+        budgetUsd,
+      );
+      const agentExecutions: AgentExecutionRepository = {
+        ...scenario.agentExecutions,
+        // Pre-completion total (this execution's own cost subtracted back
+        // out) was under budget; post-completion total is over — a real
+        // first crossing.
+        sumEstimatedCostUsdForProject: async () => totalCostUsd,
+      };
+
+      const deps: AgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        projects,
+        auditRecords: auditRecordRepository,
+      };
+
+      await runAgentTask(deps, scenario.task);
+
+      expect(auditRecords).toHaveLength(1);
+      expect(auditRecords[0]).toMatchObject({
+        organisationId: scenario.project.organisationId,
+        projectId: scenario.projectId,
+        actorType: 'SYSTEM',
+        action: 'project.budget_exceeded',
+        targetType: 'Project',
+        targetId: scenario.projectId,
+        outcome: 'FAILURE',
+        metadata: { budgetUsd, accumulatedCostUsd: totalCostUsd },
+      });
+    });
+
+    it('does not alert while accumulated cost stays under the configured budget', async () => {
+      const scenario = buildScenario();
+      const { modelAdapter, projects, auditRecordRepository, auditRecords } = withUsage(
+        scenario,
+        PER_EXECUTION_COST_USD * 100,
+      );
+      const agentExecutions: AgentExecutionRepository = {
+        ...scenario.agentExecutions,
+        sumEstimatedCostUsdForProject: async () => PER_EXECUTION_COST_USD * 2,
+      };
+
+      const deps: AgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        projects,
+        auditRecords: auditRecordRepository,
+      };
+
+      await runAgentTask(deps, scenario.task);
+
+      expect(auditRecords).toHaveLength(0);
+    });
+
+    it('does not re-alert on a later execution once the budget was already exceeded', async () => {
+      const scenario = buildScenario();
+      const { modelAdapter, projects, auditRecordRepository, auditRecords } = withUsage(
+        scenario,
+        PER_EXECUTION_COST_USD * 1.5,
+      );
+      const agentExecutions: AgentExecutionRepository = {
+        ...scenario.agentExecutions,
+        // Even this execution's own cost subtracted back out, the
+        // pre-completion total was already over budget — not a new crossing.
+        sumEstimatedCostUsdForProject: async () => PER_EXECUTION_COST_USD * 1_000,
+      };
+
+      const deps: AgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        projects,
+        auditRecords: auditRecordRepository,
+      };
+
+      await runAgentTask(deps, scenario.task);
+
+      expect(auditRecords).toHaveLength(0);
+    });
+
+    it('is a no-op when the project has no configured budget', async () => {
+      const scenario = buildScenario();
+      const { modelAdapter, auditRecordRepository, auditRecords } = withUsage(scenario, 10);
+      const projectsWithoutBudget: ProjectRepository = {
+        getById: async (id) => (id === scenario.projectId ? scenario.project : null),
+        listForOrganisation: async () => [],
+        create: async () => {},
+        update: async () => {},
+      };
+      const agentExecutions: AgentExecutionRepository = {
+        ...scenario.agentExecutions,
+        sumEstimatedCostUsdForProject: async () => 1_000_000,
+      };
+
+      const deps: AgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        projects: projectsWithoutBudget,
+        auditRecords: auditRecordRepository,
+      };
+
+      await runAgentTask(deps, scenario.task);
+
+      expect(auditRecords).toHaveLength(0);
     });
   });
 });

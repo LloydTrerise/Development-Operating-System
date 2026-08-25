@@ -19,6 +19,8 @@ export interface AgentExecutionSummary {
   promptReference?: string;
   output?: Record<string, unknown>;
   errorMessage?: string;
+  usage?: { promptTokens: number; candidatesTokens: number; totalTokens: number };
+  estimatedCostUsd?: number;
   contextManifest?: {
     sourceCount: number;
     sources: { type: string; ref: string }[];
@@ -55,6 +57,10 @@ export async function getAgentExecutionSummariesForRun(
         : {}),
       ...(latest.output !== undefined ? { output: latest.output } : {}),
       ...(latest.errorMessage !== undefined ? { errorMessage: latest.errorMessage } : {}),
+      ...(latest.usage !== undefined ? { usage: latest.usage } : {}),
+      ...(latest.estimatedCostUsd !== undefined
+        ? { estimatedCostUsd: latest.estimatedCostUsd }
+        : {}),
       ...(manifest !== null
         ? { contextManifest: { sourceCount: manifest.sources.length, sources: manifest.sources } }
         : {}),

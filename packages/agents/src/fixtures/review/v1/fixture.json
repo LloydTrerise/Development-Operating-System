@@ -1,0 +1,51 @@
+{
+  "role": "REVIEW",
+  "recordedAt": "2026-08-24T07:36:54.653Z",
+  "provider": "gemini",
+  "modelRef": "gemini-3.6-flash",
+  "objective": "Perform the \"REVIEW\" role for work item \"Add a STATUS.md file documenting project status\".",
+  "input": {
+    "workItemTitle": "Add a STATUS.md file documenting project status",
+    "workItemDescription": "The repository has no top-level status document. Add a short STATUS.md at the repository root stating the project is under active development.",
+    "runInput": {},
+    "prd": {
+      "summary": "Add a STATUS.md file documenting the project is under active development.",
+      "requirements": ["A STATUS.md file must exist at the repository root."]
+    },
+    "technicalDesign": {
+      "summary": "A plain Markdown file, no code changes to existing modules."
+    },
+    "implementationPlan": {
+      "summary": "Add a STATUS.md documenting current project status.",
+      "tasks": ["Create a STATUS.md file at the repository root with a short status statement."]
+    },
+    "codeChange": {
+      "summary": "Create a STATUS.md file at the repository root stating the project is under active development.",
+      "branchName": "devos/add-status-md",
+      "commitMessage": "docs: add STATUS.md to document project status",
+      "files": [
+        {
+          "path": "STATUS.md",
+          "content": "# Project Status\n\nThis project is currently under active development.\n"
+        }
+      ]
+    },
+    "testEvidence": {
+      "passed": true,
+      "build": {
+        "command": "echo build",
+        "exitCode": 0
+      },
+      "test": {
+        "command": "echo test",
+        "exitCode": 0
+      }
+    },
+    "engineeringStandards": []
+  },
+  "result": {
+    "summary": "The proposed change successfully fulfills the approved requirements, technical design, and implementation plan by creating a STATUS.md file at the repository root stating that the project is under active development. Test evidence is passing, and no issues were identified.",
+    "decision": "PASS",
+    "findings": []
+  }
+}
