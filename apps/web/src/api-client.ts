@@ -94,6 +94,17 @@ export interface AgentExecutionSummary {
   };
 }
 
+export interface ToolInvocationSummary {
+  taskId: string;
+  invocationId: string;
+  capabilityKey: string;
+  status: string;
+  outputMetadata?: Record<string, unknown>;
+  providerReference?: string;
+  errorCode?: string;
+  createdAt: string;
+}
+
 export interface Artifact {
   id: string;
   projectId: string;
@@ -106,6 +117,29 @@ export interface Artifact {
   };
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ArtifactVersion {
+  id: string;
+  artifactId: string;
+  version: number;
+  contentType: string;
+  metadata?: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface ReleaseReadiness {
+  ready: boolean;
+  reasons: string[];
+  evidence: {
+    testEvidence?: { artifactId: string; passed: boolean };
+    reviewEvidence?: {
+      artifactId: string;
+      decision: string;
+      findings: { severity: string; description?: string }[];
+    };
+  };
 }
 
 export type ApiResult<T> =
@@ -195,6 +229,13 @@ export function listRunTasks(runId: string): Promise<ApiResult<WorkflowTask[]>> 
   return request<WorkflowTask[]>(`/api/v1/runs/${runId}/tasks`);
 }
 
+/** DEVOS-080: every run a work item's change has gone through (planning,
+ * development, release, ...), oldest first — closes the gap DEVOS-071
+ * flagged ("no API exposes a work item's runs"). */
+export function listWorkflowRunsForWorkItem(workItemId: string): Promise<ApiResult<WorkflowRun[]>> {
+  return request<WorkflowRun[]>(`/api/v1/work-items/${workItemId}/workflow-runs`);
+}
+
 export function listArtifacts(projectId: string): Promise<ApiResult<Artifact[]>> {
   return request<Artifact[]>(`/api/v1/projects/${projectId}/artifacts`);
 }
@@ -203,6 +244,36 @@ export function listAgentExecutionSummaries(
   runId: string,
 ): Promise<ApiResult<AgentExecutionSummary[]>> {
   return request<AgentExecutionSummary[]>(`/api/v1/runs/${runId}/agent-execution-summaries`);
+}
+
+export function listToolInvocationSummaries(
+  runId: string,
+): Promise<ApiResult<ToolInvocationSummary[]>> {
+  return request<ToolInvocationSummary[]>(`/api/v1/runs/${runId}/tool-invocation-summaries`);
+}
+
+export function getArtifactVersion(
+  artifactId: string,
+  version: number,
+): Promise<ApiResult<ArtifactVersion>> {
+  return request<ArtifactVersion>(`/api/v1/artifacts/${artifactId}/versions/${version}`);
+}
+
+/** DEVOS-095: resolves a bare artifact-version id to its owning artifact's
+ * name/type — what an approval's evidence reference actually carries. */
+export interface ArtifactVersionWithArtifact extends ArtifactVersion {
+  artifactName: string;
+  artifactType: string;
+}
+
+export function getArtifactVersionById(
+  artifactVersionId: string,
+): Promise<ApiResult<ArtifactVersionWithArtifact>> {
+  return request<ArtifactVersionWithArtifact>(`/api/v1/artifact-versions/${artifactVersionId}`);
+}
+
+export function getReleaseReadiness(projectId: string): Promise<ApiResult<ReleaseReadiness>> {
+  return request<ReleaseReadiness>(`/api/v1/projects/${projectId}/release-readiness`);
 }
 
 export const RUN_TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
@@ -246,4 +317,47 @@ export function rejectApproval(
     method: 'POST',
     body: input,
   });
+}
+
+/** DEVOS-090: for the governance dashboard's "Policies" section. */
+export interface Policy {
+  id: string;
+  organisationId: string;
+  projectId: string;
+  key: string;
+  version: number;
+  status: string;
+  definition: Record<string, unknown>;
+  createdBy: string;
+  publishedAt?: string;
+  createdAt: string;
+}
+
+export function listPoliciesForProject(projectId: string): Promise<ApiResult<Policy[]>> {
+  return request<Policy[]>(`/api/v1/projects/${projectId}/policies`);
+}
+
+/** DEVOS-090: for the governance dashboard's "Risk activity" section — a
+ * REJECTED/FAILED-outcome audit record is exactly a denied or failed
+ * security-significant action (policy denial, capability denial, a failed
+ * tool invocation), the same real signal invoke-tool.ts's own audit calls
+ * already produce. No separate "denied invocations" endpoint exists or is
+ * needed — the audit trail already carries this. */
+export interface AuditRecord {
+  id: string;
+  organisationId: string;
+  projectId?: string;
+  actorType: string;
+  actorId: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  outcome: string;
+  metadata?: Record<string, unknown>;
+  correlationId?: string;
+  createdAt: string;
+}
+
+export function listAuditRecordsForProject(projectId: string): Promise<ApiResult<AuditRecord[]>> {
+  return request<AuditRecord[]>(`/api/v1/projects/${projectId}/audit`);
 }

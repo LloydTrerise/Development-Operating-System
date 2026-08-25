@@ -1,5 +1,8 @@
 import { useState, type FormEvent } from 'react';
+import { Button, List, ListItemButton, ListItemText, Stack, TextField, Typography } from '@mui/material';
 import { createProject } from '../api-client.js';
+import { ErrorAlert } from '../components/ErrorAlert.js';
+import { LoadingState } from '../components/LoadingState.js';
 import { useProjectContext } from '../project-context.js';
 
 export function ProjectsPage() {
@@ -31,43 +34,51 @@ export function ProjectsPage() {
 
   return (
     <section>
-      <h2>Projects</h2>
+      <Typography variant="h4" component="h2" gutterBottom>
+        Projects
+      </Typography>
 
-      {loading && <p>Loading projects…</p>}
-      {error && <p role="alert">Failed to load projects: {error}</p>}
+      {loading && <LoadingState label="Loading projects…" />}
+      {error && <ErrorAlert message={`Failed to load projects: ${error}`} />}
 
       {!loading && !error && (
-        <ul>
+        <List dense>
           {projects.map((project) => (
-            <li key={project.id}>
-              <button
-                type="button"
-                onClick={() => selectProject(project.id)}
-                aria-current={project.id === selectedProjectId}
-              >
-                {project.name} ({project.slug})
-              </button>
-            </li>
+            <ListItemButton
+              key={project.id}
+              selected={project.id === selectedProjectId}
+              onClick={() => selectProject(project.id)}
+            >
+              <ListItemText primary={`${project.name} (${project.slug})`} />
+            </ListItemButton>
           ))}
-          {projects.length === 0 && <li>No projects yet.</li>}
-        </ul>
+          {projects.length === 0 && <ListItemText primary="No projects yet." />}
+        </List>
       )}
 
-      <h3>New project</h3>
-      <form onSubmit={handleSubmit}>
-        <label>
-          Name
-          <input value={name} onChange={(event) => setName(event.target.value)} required />
-        </label>
-        <label>
-          Slug
-          <input value={slug} onChange={(event) => setSlug(event.target.value)} required />
-        </label>
-        <button type="submit" disabled={submitting}>
+      <Typography variant="h6" component="h3" sx={{ mt: 4 }} gutterBottom>
+        New project
+      </Typography>
+      <Stack component="form" onSubmit={handleSubmit} spacing={2} sx={{ maxWidth: 360 }}>
+        <TextField
+          label="Name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          required
+          size="small"
+        />
+        <TextField
+          label="Slug"
+          value={slug}
+          onChange={(event) => setSlug(event.target.value)}
+          required
+          size="small"
+        />
+        <Button type="submit" variant="contained" disabled={submitting} sx={{ alignSelf: 'flex-start' }}>
           {submitting ? 'Creating…' : 'Create project'}
-        </button>
-        {submitError && <p role="alert">{submitError}</p>}
-      </form>
+        </Button>
+        {submitError && <ErrorAlert message={submitError} />}
+      </Stack>
     </section>
   );
 }

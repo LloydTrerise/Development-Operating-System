@@ -1,10 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Button,
+  Card,
+  CardContent,
+  List,
+  ListItem,
+  ListItemText,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import {
   approveApproval,
+  getArtifactVersionById,
   listApprovalsForProject,
   rejectApproval,
   type Approval,
 } from '../api-client.js';
+import { ErrorAlert } from '../components/ErrorAlert.js';
+import { StatusChip } from '../components/StatusChip.js';
 import { useProjectContext } from '../project-context.js';
 
 /**
@@ -16,11 +30,13 @@ import { useProjectContext } from '../project-context.js';
  * implementation choice, mirroring RunsPage's established structure rather
  * than inventing a new pattern.
  *
- * Evidence is shown as the raw `artifactVersionIds` the approval is scoped
- * to (DEVOS-045) — resolving those into full artifact names/content would
- * need a new artifact-version lookup endpoint this task doesn't add;
- * flagged as a real, if minor, gap rather than fabricated detail.
+ * DEVOS-095: evidence is now resolved from the raw `artifactVersionIds`
+ * (DEVOS-045) into each version's owning artifact name/type via the new
+ * `GET /artifact-versions/:id` endpoint, closing the gap this file's own
+ * doc comment used to flag here.
  */
+type EvidenceDetail = { artifactName: string; artifactType: string } | 'error';
+
 export function ApprovalsPage() {
   const { selectedProjectId } = useProjectContext();
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -28,6 +44,8 @@ export function ApprovalsPage() {
   const [comments, setComments] = useState<Record<string, string>>({});
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [evidenceDetails, setEvidenceDetails] = useState<Record<string, EvidenceDetail>>({});
+  const requestedEvidenceIds = useRef<Set<string>>(new Set());
 
   function refresh() {
     if (!selectedProjectId) {
@@ -45,6 +63,28 @@ export function ApprovalsPage() {
   }
 
   useEffect(refresh, [selectedProjectId]);
+
+  // DEVOS-095: resolve each not-yet-seen evidence artifact-version id to
+  // its owning artifact's name/type, once per id (tracked in a ref so a
+  // re-render triggered by the fetch itself doesn't re-request the same
+  // id), across every approval currently loaded, not just pending ones.
+  useEffect(() => {
+    const idsToFetch = approvals
+      .flatMap((approval) => approval.evidenceReference.artifactVersionIds)
+      .filter((id) => !requestedEvidenceIds.current.has(id));
+
+    for (const id of idsToFetch) {
+      requestedEvidenceIds.current.add(id);
+      getArtifactVersionById(id).then((result) => {
+        setEvidenceDetails((current) => ({
+          ...current,
+          [id]: result.ok
+            ? { artifactName: result.data.artifactName, artifactType: result.data.artifactType }
+            : 'error',
+        }));
+      });
+    }
+  }, [approvals]);
 
   async function handleDecide(approval: Approval, decision: 'approve' | 'reject') {
     setDecidingId(approval.id);
@@ -68,8 +108,10 @@ export function ApprovalsPage() {
   if (!selectedProjectId) {
     return (
       <section>
-        <h2>Approvals</h2>
-        <p>Select a project to review approvals.</p>
+        <Typography variant="h4" component="h2" gutterBottom>
+          Approvals
+        </Typography>
+        <Typography color="text.secondary">Select a project to review approvals.</Typography>
       </section>
     );
   }
@@ -79,69 +121,107 @@ export function ApprovalsPage() {
 
   return (
     <section>
-      <h2>Approvals</h2>
+      <Typography variant="h4" component="h2" gutterBottom>
+        Approvals
+      </Typography>
 
-      {loadError && <p role="alert">Failed to load approvals: {loadError}</p>}
-      {decisionError && <p role="alert">{decisionError}</p>}
+      {loadError && <ErrorAlert message={`Failed to load approvals: ${loadError}`} />}
+      {decisionError && <ErrorAlert message={decisionError} />}
 
-      <h3>Pending</h3>
-      <ul>
+      <Typography variant="h6" component="h3" gutterBottom>
+        Pending
+      </Typography>
+      <Stack spacing={2} sx={{ mb: 4 }}>
         {pending.map((approval) => (
-          <li key={approval.id}>
-            <p>
-              <strong>{approval.approvalType}</strong> for run <code>{approval.workflowRunId}</code>{' '}
-              — requested by {approval.requestedBy} at {approval.requestedAt}
-            </p>
+          <Card key={approval.id} variant="outlined">
+            <CardContent>
+              <Typography gutterBottom>
+                <strong>{approval.approvalType}</strong> for run{' '}
+                <code>{approval.workflowRunId}</code> — requested by {approval.requestedBy} at{' '}
+                {approval.requestedAt}
+              </Typography>
 
-            <h4>Evidence</h4>
-            <ul>
-              {approval.evidenceReference.artifactVersionIds.map((artifactVersionId) => (
-                <li key={artifactVersionId}>
-                  <code>{artifactVersionId}</code>
-                </li>
-              ))}
-            </ul>
+              <Typography variant="subtitle2" sx={{ mt: 2 }}>
+                Evidence
+              </Typography>
+              <List dense disablePadding>
+                {approval.evidenceReference.artifactVersionIds.map((artifactVersionId) => {
+                  const detail = evidenceDetails[artifactVersionId];
+                  return (
+                    <ListItem key={artifactVersionId} disableGutters>
+                      <ListItemText
+                        primary={
+                          detail && detail !== 'error' ? (
+                            <>
+                              <strong>{detail.artifactName}</strong> ({detail.artifactType})
+                            </>
+                          ) : (
+                            <code>{artifactVersionId}</code>
+                          )
+                        }
+                      />
+                    </ListItem>
+                  );
+                })}
+              </List>
 
-            <label>
-              Comment
-              <input
-                type="text"
-                value={comments[approval.id] ?? ''}
-                onChange={(event) =>
-                  setComments((current) => ({ ...current, [approval.id]: event.target.value }))
-                }
-              />
-            </label>
-            <button
-              type="button"
-              disabled={decidingId === approval.id}
-              onClick={() => handleDecide(approval, 'approve')}
-            >
-              Approve
-            </button>
-            <button
-              type="button"
-              disabled={decidingId === approval.id}
-              onClick={() => handleDecide(approval, 'reject')}
-            >
-              Reject
-            </button>
-          </li>
+              <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 2 }}>
+                <TextField
+                  label="Comment"
+                  size="small"
+                  value={comments[approval.id] ?? ''}
+                  onChange={(event) =>
+                    setComments((current) => ({ ...current, [approval.id]: event.target.value }))
+                  }
+                  sx={{ flexGrow: 1 }}
+                />
+                <Button
+                  variant="contained"
+                  color="success"
+                  disabled={decidingId === approval.id}
+                  onClick={() => handleDecide(approval, 'approve')}
+                >
+                  Approve
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  disabled={decidingId === approval.id}
+                  onClick={() => handleDecide(approval, 'reject')}
+                >
+                  Reject
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
         ))}
-        {pending.length === 0 && <li>No pending approvals.</li>}
-      </ul>
+        {pending.length === 0 && <Typography color="text.secondary">No pending approvals.</Typography>}
+      </Stack>
 
-      <h3>Decided</h3>
-      <ul>
+      <Typography variant="h6" component="h3" gutterBottom>
+        Decided
+      </Typography>
+      <List dense>
         {decided.map((approval) => (
-          <li key={approval.id}>
-            {approval.approvalType} — <strong>{approval.status}</strong>
-            {approval.decidedBy && ` by ${approval.decidedBy}`}
-            {approval.decisionReason && ` — "${approval.decisionReason}"`}
-          </li>
+          <ListItem key={approval.id} disableGutters>
+            <ListItemText
+              primary={approval.approvalType}
+              secondary={
+                <>
+                  {approval.decidedBy && `by ${approval.decidedBy}`}
+                  {approval.decisionReason && ` — "${approval.decisionReason}"`}
+                </>
+              }
+            />
+            <StatusChip status={approval.status} />
+          </ListItem>
         ))}
-        {decided.length === 0 && <li>No decided approvals yet.</li>}
-      </ul>
+        {decided.length === 0 && (
+          <ListItem disableGutters>
+            <ListItemText primary="No decided approvals yet." />
+          </ListItem>
+        )}
+      </List>
     </section>
   );
 }

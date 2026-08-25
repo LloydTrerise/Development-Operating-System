@@ -1,5 +1,20 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import {
+  Button,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from '@mui/material';
 import { createWorkItem, listWorkItems, type WorkItem } from '../api-client.js';
+import { ErrorAlert } from '../components/ErrorAlert.js';
+import { LoadingState } from '../components/LoadingState.js';
+import { StatusChip } from '../components/StatusChip.js';
 import { useProjectContext } from '../project-context.js';
 
 export function WorkItemsPage() {
@@ -61,58 +76,71 @@ export function WorkItemsPage() {
   if (!selectedProjectId) {
     return (
       <section>
-        <h2>Work Items</h2>
-        <p>Select a project to see its work items.</p>
+        <Typography variant="h4" component="h2" gutterBottom>
+          Work Items
+        </Typography>
+        <Typography color="text.secondary">Select a project to see its work items.</Typography>
       </section>
     );
   }
 
   return (
     <section>
-      <h2>Work Items</h2>
+      <Typography variant="h4" component="h2" gutterBottom>
+        Work Items
+      </Typography>
 
-      {loading && <p>Loading work items…</p>}
-      {error && <p role="alert">Failed to load work items: {error}</p>}
+      {loading && <LoadingState label="Loading work items…" />}
+      {error && <ErrorAlert message={`Failed to load work items: ${error}`} />}
 
       {!loading && !error && (
-        <table>
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Priority</th>
-            </tr>
-          </thead>
-          <tbody>
-            {workItems.map((workItem) => (
-              <tr key={workItem.id}>
-                <td>{workItem.title}</td>
-                <td>{workItem.type}</td>
-                <td>{workItem.status}</td>
-                <td>{workItem.priority}</td>
-              </tr>
-            ))}
-            {workItems.length === 0 && (
-              <tr>
-                <td colSpan={4}>No work items yet.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <TableContainer sx={{ maxWidth: 720 }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Title</TableCell>
+                <TableCell>Type</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Priority</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {workItems.map((workItem) => (
+                <TableRow key={workItem.id}>
+                  <TableCell>{workItem.title}</TableCell>
+                  <TableCell>{workItem.type}</TableCell>
+                  <TableCell>
+                    <StatusChip status={workItem.status} />
+                  </TableCell>
+                  <TableCell>{workItem.priority}</TableCell>
+                </TableRow>
+              ))}
+              {workItems.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={4}>No work items yet.</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
 
-      <h3>New work item</h3>
-      <form onSubmit={handleSubmit}>
-        <label>
-          Title
-          <input value={title} onChange={(event) => setTitle(event.target.value)} required />
-        </label>
-        <button type="submit" disabled={submitting}>
+      <Typography variant="h6" component="h3" sx={{ mt: 4 }} gutterBottom>
+        New work item
+      </Typography>
+      <Stack component="form" onSubmit={handleSubmit} spacing={2} sx={{ maxWidth: 360 }}>
+        <TextField
+          label="Title"
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          required
+          size="small"
+        />
+        <Button type="submit" variant="contained" disabled={submitting} sx={{ alignSelf: 'flex-start' }}>
           {submitting ? 'Creating…' : 'Create work item'}
-        </button>
-        {submitError && <p role="alert">{submitError}</p>}
-      </form>
+        </Button>
+        {submitError && <ErrorAlert message={submitError} />}
+      </Stack>
     </section>
   );
 }

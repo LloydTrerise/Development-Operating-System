@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEV_PRINCIPAL_ID, getHealth, listProjects, startRun } from '../src/api-client.js';
+import {
+  DEV_PRINCIPAL_ID,
+  getArtifactVersionById,
+  getHealth,
+  listAuditRecordsForProject,
+  listPoliciesForProject,
+  listProjects,
+  startRun,
+} from '../src/api-client.js';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -96,5 +104,57 @@ describe('api client', () => {
       workItemId: 'work-item-1',
       idempotencyKey: 'idem-1',
     });
+  });
+
+  it('DEVOS-090: lists policies for a project at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'policy-1', key: 'release-approval', version: 1, status: 'PUBLISHED' }],
+        meta: { requestId: 'req-5' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listPoliciesForProject('project-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/policies');
+  });
+
+  it('DEVOS-090: lists audit records for a project at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'audit-1', action: 'tool_invocation.rejected', outcome: 'FAILURE' }],
+        meta: { requestId: 'req-6' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listAuditRecordsForProject('project-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/audit');
+  });
+
+  it('DEVOS-095: resolves an artifact version by id at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'version-1',
+          artifactName: 'Discovery Report',
+          artifactType: 'DISCOVERY_REPORT',
+        },
+        meta: { requestId: 'req-7' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getArtifactVersionById('version-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/artifact-versions/version-1');
   });
 });
