@@ -5,6 +5,7 @@ export function toProjectDto(project: Project) {
   return {
     id: project.id,
     organisationId: project.organisationId,
+    projectTypeId: project.projectTypeId,
     name: project.name,
     slug: project.slug,
     description: project.description,
@@ -40,10 +41,18 @@ export interface CreateProjectBody {
   name: string;
   slug: string;
   description?: string;
+  /** Optional — defaults to the seeded organisation server-side (see
+   * routes/projects.ts) for backward compatibility with every existing
+   * caller that predates Organisation management. */
+  organisationId?: string;
+  /** Optional — defaults to the seeded 'software-development' Project Type
+   * server-side (see routes/projects.ts) for backward compatibility with
+   * every existing caller that predates Project Types. */
+  projectTypeId?: string;
 }
 
 export function parseCreateProjectBody(body: unknown): CreateProjectBody {
-  const { name, slug, description } = asRecord(body);
+  const { name, slug, description, organisationId, projectTypeId } = asRecord(body);
 
   if (typeof name !== 'string' || name.trim().length === 0) {
     throw new BadRequestError('name is required.');
@@ -54,8 +63,20 @@ export function parseCreateProjectBody(body: unknown): CreateProjectBody {
   if (description !== undefined && typeof description !== 'string') {
     throw new BadRequestError('description must be a string.');
   }
+  if (organisationId !== undefined && typeof organisationId !== 'string') {
+    throw new BadRequestError('organisationId must be a string.');
+  }
+  if (projectTypeId !== undefined && typeof projectTypeId !== 'string') {
+    throw new BadRequestError('projectTypeId must be a string.');
+  }
 
-  return { name, slug, ...(description !== undefined ? { description } : {}) };
+  return {
+    name,
+    slug,
+    ...(description !== undefined ? { description } : {}),
+    ...(organisationId !== undefined ? { organisationId } : {}),
+    ...(projectTypeId !== undefined ? { projectTypeId } : {}),
+  };
 }
 
 export interface UpdateProjectBody {

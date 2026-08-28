@@ -1,22 +1,27 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  KnowledgeSource,
-  KnowledgeSourceRepository,
-  Membership,
-  MembershipRepository,
-  OrganisationId,
-  Project,
-  ProjectRepository,
+import {
+  SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+  type KnowledgeSource,
+  type KnowledgeSourceRepository,
+  type Membership,
+  type MembershipRepository,
+  type OrganisationId,
+  type Project,
+  type ProjectRepository,
+  type ProjectType,
+  type ProjectTypeAgentRepository,
+  type ProjectTypeRepository,
+  type ProjectTypeWorkflowRepository,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../src/projects/create-project.js';
+import type { CreateProjectWithClones } from '../src/projects/deps.js';
 import { createKnowledgeSource } from '../src/knowledge/create-knowledge-source.js';
-import type { KnowledgeUseCaseDeps } from '../src/knowledge/deps.js';
 import { getKnowledgeSourceForPrincipal } from '../src/knowledge/get-knowledge-source.js';
 import { listKnowledgeSourcesForProject } from '../src/knowledge/list-knowledge-sources.js';
 import { NotFoundError, ValidationError } from '../src/errors.js';
 
-function createInMemoryDeps(): KnowledgeUseCaseDeps {
+function createInMemoryDeps() {
   const projects = new Map<string, Project>();
   const memberships = new Map<string, Membership>();
   const sourcesStore = new Map<string, KnowledgeSource>();
@@ -69,11 +74,65 @@ function createInMemoryDeps(): KnowledgeUseCaseDeps {
     },
   };
 
-  return { projects: projectRepository, memberships: membershipRepository, knowledgeSources };
+  const now = new Date().toISOString();
+  const projectTypesStore = new Map<string, ProjectType>([
+    [
+      SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+      {
+        id: SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+        key: 'software-development',
+        name: 'Software Development',
+        status: 'ACTIVE',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  ]);
+  const projectTypes: ProjectTypeRepository = {
+    getById: async (id) => projectTypesStore.get(id) ?? null,
+    getByKey: async (key) => [...projectTypesStore.values()].find((p) => p.key === key) ?? null,
+    list: async () => [...projectTypesStore.values()],
+    create: async (projectType) => {
+      projectTypesStore.set(projectType.id, projectType);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = projectTypesStore.get(id);
+      if (!existing) return;
+      projectTypesStore.set(id, { ...existing, ...changes, updatedAt });
+    },
+  };
+  const projectTypeWorkflows: ProjectTypeWorkflowRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const projectTypeAgents: ProjectTypeAgentRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const createProjectWithClones: CreateProjectWithClones = async (project, membership) => {
+    await projectRepository.create(project);
+    await membershipRepository.create(membership);
+  };
+
+  return {
+    projects: projectRepository,
+    memberships: membershipRepository,
+    knowledgeSources,
+    projectTypes,
+    projectTypeWorkflows,
+    projectTypeAgents,
+    createProjectWithClones,
+  };
 }
 
 describe('knowledge source use cases', () => {
-  let deps: KnowledgeUseCaseDeps;
+  let deps: ReturnType<typeof createInMemoryDeps>;
   let projectId: Project['id'];
   const organisationId = randomUUID() as OrganisationId;
 

@@ -36,6 +36,16 @@ import {
   SEED_PLANNING_PATH_WORKFLOW_VERSION_ID,
   SEED_PRINCIPAL_ID,
   SEED_PROJECT_ID,
+  SEED_PT_AGENT_DEVELOPMENT_ID,
+  SEED_PT_AGENT_DISCOVERY_ID,
+  SEED_PT_AGENT_PLANNING_ID,
+  SEED_PT_AGENT_REQUIREMENTS_ID,
+  SEED_PT_AGENT_REVIEW_ID,
+  SEED_PT_AGENT_TECHNICAL_DESIGN_ID,
+  SEED_PT_WORKFLOW_DEVELOPMENT_PATH_ID,
+  SEED_PT_WORKFLOW_INTAKE_ID,
+  SEED_PT_WORKFLOW_PLANNING_PATH_ID,
+  SEED_PT_WORKFLOW_RELEASE_PATH_ID,
   SEED_RELEASE_PATH_WORKFLOW_DEFINITION_ID,
   SEED_RELEASE_PATH_WORKFLOW_GRAPH,
   SEED_RELEASE_PATH_WORKFLOW_KEY,
@@ -47,6 +57,7 @@ import {
   SEED_REQUIREMENTS_AGENT_KEY,
   SEED_REQUIREMENTS_AGENT_PROMPT_REFERENCE,
   SEED_REQUIREMENTS_AGENT_VERSION_ID,
+  SEED_SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
   SEED_TECHNICAL_DESIGN_AGENT_CONFIGURATION,
   SEED_TECHNICAL_DESIGN_AGENT_ID,
   SEED_TECHNICAL_DESIGN_AGENT_KEY,
@@ -82,10 +93,25 @@ async function main(): Promise<void> {
     .execute();
 
   await db
+    .insertInto('project_types')
+    .values({
+      id: SEED_SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+      key: 'software-development',
+      name: 'Software Development',
+      description: null,
+      status: 'ACTIVE',
+      created_at: now,
+      updated_at: now,
+    })
+    .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
+
+  await db
     .insertInto('projects')
     .values({
       id: SEED_PROJECT_ID,
       organisation_id: SEED_ORGANISATION_ID,
+      project_type_id: SEED_SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
       name: 'DevOS POC',
       slug: 'devos-poc',
       description: 'Seeded development project for the DevOS POC vertical slice.',
@@ -459,6 +485,103 @@ async function main(): Promise<void> {
     })
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
+
+  const projectTypeWorkflowSeeds = [
+    { id: SEED_PT_WORKFLOW_INTAKE_ID, key: SEED_WORKFLOW_KEY, graph: SEED_WORKFLOW_GRAPH },
+    {
+      id: SEED_PT_WORKFLOW_PLANNING_PATH_ID,
+      key: SEED_PLANNING_PATH_WORKFLOW_KEY,
+      graph: SEED_PLANNING_PATH_WORKFLOW_GRAPH,
+    },
+    {
+      id: SEED_PT_WORKFLOW_DEVELOPMENT_PATH_ID,
+      key: SEED_DEVELOPMENT_PATH_WORKFLOW_KEY,
+      graph: SEED_DEVELOPMENT_PATH_WORKFLOW_V2_GRAPH,
+    },
+    {
+      id: SEED_PT_WORKFLOW_RELEASE_PATH_ID,
+      key: SEED_RELEASE_PATH_WORKFLOW_KEY,
+      graph: SEED_RELEASE_PATH_WORKFLOW_V2_GRAPH,
+    },
+  ];
+
+  for (const workflow of projectTypeWorkflowSeeds) {
+    await db
+      .insertInto('project_type_workflows')
+      .values({
+        id: workflow.id,
+        project_type_id: SEED_SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+        key: workflow.key,
+        name: workflow.graph.name,
+        definition: JSON.stringify(workflow.graph),
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
+  }
+
+  const projectTypeAgentSeeds = [
+    {
+      id: SEED_PT_AGENT_DISCOVERY_ID,
+      key: SEED_DISCOVERY_AGENT_KEY,
+      name: 'Discovery Agent',
+      configuration: SEED_DISCOVERY_AGENT_CONFIGURATION,
+      promptReference: SEED_DISCOVERY_AGENT_PROMPT_REFERENCE,
+    },
+    {
+      id: SEED_PT_AGENT_REQUIREMENTS_ID,
+      key: SEED_REQUIREMENTS_AGENT_KEY,
+      name: 'Requirements Agent',
+      configuration: SEED_REQUIREMENTS_AGENT_CONFIGURATION,
+      promptReference: SEED_REQUIREMENTS_AGENT_PROMPT_REFERENCE,
+    },
+    {
+      id: SEED_PT_AGENT_TECHNICAL_DESIGN_ID,
+      key: SEED_TECHNICAL_DESIGN_AGENT_KEY,
+      name: 'Technical Design Agent',
+      configuration: SEED_TECHNICAL_DESIGN_AGENT_CONFIGURATION,
+      promptReference: SEED_TECHNICAL_DESIGN_AGENT_PROMPT_REFERENCE,
+    },
+    {
+      id: SEED_PT_AGENT_PLANNING_ID,
+      key: SEED_PLANNING_AGENT_KEY,
+      name: 'Planning Agent',
+      configuration: SEED_PLANNING_AGENT_CONFIGURATION,
+      promptReference: SEED_PLANNING_AGENT_PROMPT_REFERENCE,
+    },
+    {
+      id: SEED_PT_AGENT_DEVELOPMENT_ID,
+      key: SEED_DEVELOPMENT_AGENT_KEY,
+      name: 'Development Agent',
+      configuration: SEED_DEVELOPMENT_AGENT_CONFIGURATION,
+      promptReference: SEED_DEVELOPMENT_AGENT_PROMPT_REFERENCE,
+    },
+    {
+      id: SEED_PT_AGENT_REVIEW_ID,
+      key: SEED_REVIEW_AGENT_KEY,
+      name: 'Review Agent',
+      configuration: SEED_REVIEW_AGENT_CONFIGURATION,
+      promptReference: SEED_REVIEW_AGENT_PROMPT_REFERENCE,
+    },
+  ];
+
+  for (const agent of projectTypeAgentSeeds) {
+    await db
+      .insertInto('project_type_agents')
+      .values({
+        id: agent.id,
+        project_type_id: SEED_SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+        key: agent.key,
+        name: agent.name,
+        configuration: JSON.stringify(agent.configuration),
+        prompt_reference: agent.promptReference,
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
+  }
 
   for (const capability of SEED_TOOL_CAPABILITIES) {
     await db

@@ -1,27 +1,33 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  Agent,
-  AgentRepository,
-  AgentVersion,
-  AgentVersionRepository,
-  AuditRecord,
-  AuditRecordRepository,
-  Membership,
-  MembershipRepository,
-  OrganisationId,
-  Project,
-  ProjectRepository,
+import {
+  SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+  type Agent,
+  type AgentRepository,
+  type AgentVersion,
+  type AgentVersionRepository,
+  type AuditRecord,
+  type AuditRecordRepository,
+  type Membership,
+  type MembershipRepository,
+  type OrganisationId,
+  type Project,
+  type ProjectRepository,
+  type ProjectType,
+  type ProjectTypeAgentRepository,
+  type ProjectTypeRepository,
+  type ProjectTypeWorkflowRepository,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../src/projects/create-project.js';
 import { createAgent } from '../src/agents/create-agent.js';
-import type { AgentUseCaseDeps } from '../src/agents/deps.js';
+import type { CreateAgentDraft } from '../src/agents/deps.js';
 import { getAgentForPrincipal } from '../src/agents/get-agent.js';
 import { listAgentsForProject } from '../src/agents/list-agents.js';
 import { publishAgentVersion } from '../src/agents/publish-agent-version.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
+import type { CreateProjectWithClones } from '../src/projects/deps.js';
 
-function createInMemoryDeps(): AgentUseCaseDeps {
+function createInMemoryDeps() {
   const projects = new Map<string, Project>();
   const memberships = new Map<string, Membership>();
   const agentsStore = new Map<string, Agent>();
@@ -104,16 +110,67 @@ function createInMemoryDeps(): AgentUseCaseDeps {
     listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
   };
 
+  const now = new Date().toISOString();
+  const projectTypesStore = new Map<string, ProjectType>([
+    [
+      SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+      {
+        id: SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+        key: 'software-development',
+        name: 'Software Development',
+        status: 'ACTIVE',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  ]);
+  const projectTypes: ProjectTypeRepository = {
+    getById: async (id) => projectTypesStore.get(id) ?? null,
+    getByKey: async (key) => [...projectTypesStore.values()].find((p) => p.key === key) ?? null,
+    list: async () => [...projectTypesStore.values()],
+    create: async (projectType) => {
+      projectTypesStore.set(projectType.id, projectType);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = projectTypesStore.get(id);
+      if (!existing) return;
+      projectTypesStore.set(id, { ...existing, ...changes, updatedAt });
+    },
+  };
+  const projectTypeWorkflows: ProjectTypeWorkflowRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const projectTypeAgents: ProjectTypeAgentRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const createProjectWithClones: CreateProjectWithClones = async (project, membership) => {
+    await projectRepository.create(project);
+    await membershipRepository.create(membership);
+  };
+  const createDraft: CreateAgentDraft = async (agent, version) => {
+    await agents.create(agent);
+    await agentVersions.create(version);
+  };
+
   return {
     projects: projectRepository,
     memberships: membershipRepository,
     agents,
     agentVersions,
-    createDraft: async (agent, version) => {
-      await agents.create(agent);
-      await agentVersions.create(version);
-    },
+    createDraft,
     auditRecords,
+    projectTypes,
+    projectTypeWorkflows,
+    projectTypeAgents,
+    createProjectWithClones,
   };
 }
 
@@ -125,7 +182,7 @@ const VALID_CONFIGURATION = {
 };
 
 describe('agent use cases', () => {
-  let deps: AgentUseCaseDeps;
+  let deps: ReturnType<typeof createInMemoryDeps>;
   let projectId: Project['id'];
   const organisationId = randomUUID() as OrganisationId;
 

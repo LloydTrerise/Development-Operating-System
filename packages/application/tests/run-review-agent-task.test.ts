@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AgentModelAdapter, PromptRepository, SchemaRepository } from '@devos/agents';
+import type { ProjectTypeId } from '@devos/contracts';
 import type {
   Agent,
   AgentExecution,
@@ -69,6 +70,7 @@ function buildScenario() {
   const project: Project = {
     id: projectId,
     organisationId: randomUUID() as Project['organisationId'],
+    projectTypeId: randomUUID() as ProjectTypeId,
     name: 'Test Project',
     slug: 'test-project',
     status: 'ACTIVE',

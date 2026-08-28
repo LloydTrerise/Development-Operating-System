@@ -22,8 +22,13 @@ import {
   createDatabaseClient,
   createKnowledgeSourceRepository,
   createMembershipRepository,
+  createOrganisationRepository,
   createPolicyRepository,
   createProjectRepository,
+  createProjectTypeAgentRepository,
+  createProjectTypeRepository,
+  createProjectTypeWorkflowRepository,
+  createProjectWithClonesCreator,
   createToolCapabilityRepository,
   createToolInvocationRepository,
   createWorkItemRepository,
@@ -44,7 +49,9 @@ import type {
   ArtifactUseCaseDeps,
   AuditUseCaseDeps,
   KnowledgeUseCaseDeps,
+  OrganisationUseCaseDeps,
   PolicyUseCaseDeps,
+  ProjectTypeUseCaseDeps,
   ProjectUseCaseDeps,
   ReleaseReadinessUseCaseDeps,
   ToolInvocationSummaryUseCaseDeps,
@@ -68,7 +75,9 @@ import { createAuditRoutes } from './routes/audit.js';
 import { createHealthRoutes } from './routes/health.js';
 import { createKnowledgeSourceRoutes } from './routes/knowledge-sources.js';
 import { createMeRoutes } from './routes/me.js';
+import { createOrganisationRoutes } from './routes/organisations.js';
 import { createPolicyRoutes } from './routes/policies.js';
+import { createProjectTypeRoutes } from './routes/project-types.js';
 import { createProjectRoutes } from './routes/projects.js';
 import { createReleaseReadinessRoutes } from './routes/release-readiness.js';
 import { createToolInvocationSummaryRoutes } from './routes/tool-invocation-summaries.js';
@@ -181,6 +190,8 @@ export interface CreateAppOptions {
   toolInvocationSummaryDeps?: ToolInvocationSummaryUseCaseDeps;
   releaseReadinessDeps?: ReleaseReadinessUseCaseDeps;
   knowledgeDeps?: KnowledgeUseCaseDeps;
+  organisationDeps?: OrganisationUseCaseDeps;
+  projectTypeDeps?: ProjectTypeUseCaseDeps;
   policyDeps?: PolicyUseCaseDeps;
   approvalDeps?: ApprovalUseCaseDeps;
   /** DEVOS-091: overridable so tests can exercise a real 429 without firing 60+ requests. */
@@ -198,10 +209,17 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   // with real usage or this app's own test suites while still being real.
   const mutationRateLimiter = options.mutationRateLimiter ?? createRateLimiter(60, 10_000);
   const auditRecordRepository = createAuditRecordRepository(database.db);
+  const projectTypeRepository = createProjectTypeRepository(database.db);
+  const projectTypeWorkflowRepository = createProjectTypeWorkflowRepository(database.db);
+  const projectTypeAgentRepository = createProjectTypeAgentRepository(database.db);
   const projectDeps: ProjectUseCaseDeps = options.projectDeps ?? {
     projects: createProjectRepository(database.db),
     memberships: createMembershipRepository(database.db),
     auditRecords: auditRecordRepository,
+    projectTypes: projectTypeRepository,
+    projectTypeWorkflows: projectTypeWorkflowRepository,
+    projectTypeAgents: projectTypeAgentRepository,
+    createProjectWithClones: createProjectWithClonesCreator(database.db),
   };
   const workItemDeps: WorkItemUseCaseDeps = options.workItemDeps ?? {
     projects: projectDeps.projects,
@@ -270,6 +288,15 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     memberships: projectDeps.memberships,
     knowledgeSources: createKnowledgeSourceRepository(database.db),
   };
+  const organisationDeps: OrganisationUseCaseDeps = options.organisationDeps ?? {
+    organisations: createOrganisationRepository(database.db),
+    memberships: projectDeps.memberships,
+  };
+  const projectTypeDeps: ProjectTypeUseCaseDeps = options.projectTypeDeps ?? {
+    projectTypes: projectTypeRepository,
+    projectTypeWorkflows: projectTypeWorkflowRepository,
+    projectTypeAgents: projectTypeAgentRepository,
+  };
   const policyDeps: PolicyUseCaseDeps = options.policyDeps ?? {
     projects: projectDeps.projects,
     memberships: projectDeps.memberships,
@@ -289,6 +316,8 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   const routes: Route[] = [
     ...createHealthRoutes(API_PREFIX, database),
     ...createMeRoutes(API_PREFIX),
+    ...createOrganisationRoutes(API_PREFIX, organisationDeps),
+    ...createProjectTypeRoutes(API_PREFIX, projectTypeDeps),
     ...createProjectRoutes(API_PREFIX, projectDeps),
     ...createWorkItemRoutes(API_PREFIX, {
       ...workItemDeps,

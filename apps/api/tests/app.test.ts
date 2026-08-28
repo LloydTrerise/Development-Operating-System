@@ -8,8 +8,11 @@ import type {
   ArtifactUseCaseDeps,
   AuditUseCaseDeps,
   ApprovalUseCaseDeps,
+  CreateProjectWithClones,
   KnowledgeUseCaseDeps,
+  OrganisationUseCaseDeps,
   PolicyUseCaseDeps,
+  ProjectTypeUseCaseDeps,
   ProjectUseCaseDeps,
   ReleaseReadinessUseCaseDeps,
   ToolInvocationSummaryUseCaseDeps,
@@ -17,45 +20,54 @@ import type {
   WorkflowUseCaseDeps,
 } from '@devos/application';
 import type { DatabaseClient } from '@devos/database';
-import type {
-  Agent,
-  AgentExecution,
-  AgentExecutionRepository,
-  AgentRepository,
-  AgentVersion,
-  AgentVersionRepository,
-  Approval,
-  ApprovalRepository,
-  Artifact,
-  ArtifactRepository,
-  ArtifactVersion,
-  ArtifactVersionRepository,
-  AuditRecord,
-  AuditRecordRepository,
-  ContextManifest,
-  ContextManifestRepository,
-  KnowledgeSource,
-  KnowledgeSourceRepository,
-  Membership,
-  MembershipRepository,
-  Policy,
-  PolicyRepository,
-  Project,
-  ProjectRepository,
-  ToolCapability,
-  ToolCapabilityRepository,
-  ToolInvocation,
-  ToolInvocationRepository,
-  WorkItem,
-  WorkItemRepository,
-  WorkflowDefinition,
-  WorkflowDefinitionRepository,
-  WorkflowRun,
-  WorkflowRunRepository,
-  WorkflowTask,
-  WorkflowTaskRepository,
-  WorkflowVersion,
-  WorkflowVersionRepository,
+import {
+  SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+  type Agent,
+  type AgentExecution,
+  type AgentExecutionRepository,
+  type AgentRepository,
+  type AgentVersion,
+  type AgentVersionRepository,
+  type Approval,
+  type ApprovalRepository,
+  type Artifact,
+  type ArtifactRepository,
+  type ArtifactVersion,
+  type ArtifactVersionRepository,
+  type AuditRecord,
+  type AuditRecordRepository,
+  type ContextManifest,
+  type ContextManifestRepository,
+  type KnowledgeSource,
+  type KnowledgeSourceRepository,
+  type Membership,
+  type MembershipRepository,
+  type Organisation,
+  type OrganisationRepository,
+  type Policy,
+  type PolicyRepository,
+  type Project,
+  type ProjectRepository,
+  type ProjectType,
+  type ProjectTypeAgent,
+  type ProjectTypeAgentRepository,
+  type ProjectTypeRepository,
+  type ProjectTypeWorkflow,
+  type ProjectTypeWorkflowRepository,
+  type ToolCapability,
+  type ToolCapabilityRepository,
+  type ToolInvocation,
+  type ToolInvocationRepository,
+  type WorkItem,
+  type WorkItemRepository,
+  type WorkflowDefinition,
+  type WorkflowDefinitionRepository,
+  type WorkflowRun,
+  type WorkflowRunRepository,
+  type WorkflowTask,
+  type WorkflowTaskRepository,
+  type WorkflowVersion,
+  type WorkflowVersionRepository,
 } from '@devos/domain';
 import { createLocalFilesystemStorage } from '@devos/storage';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -82,9 +94,76 @@ function createInMemoryAuditRecordRepository(): AuditRecordRepository {
   };
 }
 
+function createInMemoryProjectTypeRepositories(seed: ProjectType[] = []): {
+  projectTypes: ProjectTypeRepository;
+  projectTypeWorkflows: ProjectTypeWorkflowRepository;
+  projectTypeAgents: ProjectTypeAgentRepository;
+} {
+  const projectTypes = new Map<string, ProjectType>(seed.map((pt) => [pt.id, pt]));
+  const workflows = new Map<string, ProjectTypeWorkflow>();
+  const agents = new Map<string, ProjectTypeAgent>();
+
+  const projectTypeRepository: ProjectTypeRepository = {
+    getById: async (id) => projectTypes.get(id) ?? null,
+    getByKey: async (key) => [...projectTypes.values()].find((p) => p.key === key) ?? null,
+    list: async () => [...projectTypes.values()],
+    create: async (projectType) => {
+      projectTypes.set(projectType.id, projectType);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = projectTypes.get(id);
+      if (!existing) return;
+      projectTypes.set(id, { ...existing, ...changes, updatedAt });
+    },
+  };
+
+  const projectTypeWorkflowRepository: ProjectTypeWorkflowRepository = {
+    getById: async (id) => workflows.get(id) ?? null,
+    getByProjectTypeAndKey: async (projectTypeId, key) =>
+      [...workflows.values()].find((w) => w.projectTypeId === projectTypeId && w.key === key) ??
+      null,
+    listForProjectType: async (projectTypeId) =>
+      [...workflows.values()].filter((w) => w.projectTypeId === projectTypeId),
+    create: async (workflow) => {
+      workflows.set(workflow.id, workflow);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = workflows.get(id);
+      if (!existing) return;
+      workflows.set(id, { ...existing, ...changes, updatedAt });
+    },
+  };
+
+  const projectTypeAgentRepository: ProjectTypeAgentRepository = {
+    getById: async (id) => agents.get(id) ?? null,
+    getByProjectTypeAndKey: async (projectTypeId, key) =>
+      [...agents.values()].find((a) => a.projectTypeId === projectTypeId && a.key === key) ?? null,
+    listForProjectType: async (projectTypeId) =>
+      [...agents.values()].filter((a) => a.projectTypeId === projectTypeId),
+    create: async (agent) => {
+      agents.set(agent.id, agent);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = agents.get(id);
+      if (!existing) return;
+      agents.set(id, { ...existing, ...changes, updatedAt });
+    },
+  };
+
+  return {
+    projectTypes: projectTypeRepository,
+    projectTypeWorkflows: projectTypeWorkflowRepository,
+    projectTypeAgents: projectTypeAgentRepository,
+  };
+}
+
 function createInMemoryProjectDeps(): ProjectUseCaseDeps {
   const projects = new Map<string, Project>();
   const memberships = new Map<string, Membership>();
+  const workflowDefinitions = new Map<string, WorkflowDefinition>();
+  const workflowVersions = new Map<string, WorkflowVersion>();
+  const agents = new Map<string, Agent>();
+  const agentVersions = new Map<string, AgentVersion>();
 
   const projectRepository: ProjectRepository = {
     getById: async (id) => projects.get(id) ?? null,
@@ -123,11 +202,68 @@ function createInMemoryProjectDeps(): ProjectUseCaseDeps {
     },
   };
 
+  const now = new Date().toISOString();
+  const projectTypeRepositories = createInMemoryProjectTypeRepositories([
+    {
+      id: SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+      key: 'software-development',
+      name: 'Software Development',
+      status: 'ACTIVE',
+      createdAt: now,
+      updatedAt: now,
+    },
+  ]);
+
+  const createProjectWithClones: CreateProjectWithClones = async (
+    project,
+    membership,
+    workflows,
+    agentClones,
+  ) => {
+    projects.set(project.id, project);
+    memberships.set(membership.id, membership);
+    for (const { definition, version } of workflows) {
+      workflowDefinitions.set(definition.id, definition);
+      workflowVersions.set(version.id, version);
+    }
+    for (const { agent, version } of agentClones) {
+      agents.set(agent.id, agent);
+      agentVersions.set(version.id, version);
+    }
+  };
+
   return {
     projects: projectRepository,
     memberships: membershipRepository,
     auditRecords: createInMemoryAuditRecordRepository(),
+    ...projectTypeRepositories,
+    createProjectWithClones,
   };
+}
+
+function createInMemoryOrganisationDeps(
+  projectDeps: ProjectUseCaseDeps,
+): OrganisationUseCaseDeps {
+  const organisations = new Map<string, Organisation>();
+
+  const organisationRepository: OrganisationRepository = {
+    getById: async (id) => organisations.get(id) ?? null,
+    list: async () => [...organisations.values()],
+    create: async (organisation) => {
+      organisations.set(organisation.id, organisation);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = organisations.get(id);
+      if (!existing) return;
+      organisations.set(id, { ...existing, ...changes, updatedAt });
+    },
+  };
+
+  return { organisations: organisationRepository, memberships: projectDeps.memberships };
+}
+
+function createInMemoryProjectTypeDeps(): ProjectTypeUseCaseDeps {
+  return createInMemoryProjectTypeRepositories();
 }
 
 function createInMemoryWorkItemDeps(projectDeps: ProjectUseCaseDeps): WorkItemUseCaseDeps {
@@ -2141,5 +2277,266 @@ describe('DEVOS-091: rate limiting', () => {
     // Reads are never rate-limited, even after the mutation budget is spent.
     const listResponse = await authed('/api/v1/projects', 'alice');
     expect(listResponse.status).toBe(200);
+  });
+});
+
+describe('organisation routes', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const organisationDeps = createInMemoryOrganisationDeps(projectDeps);
+    const started = await startServer({ projectDeps, organisationDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('creates an organisation, lists it for the creator, gets it by id, and updates it', async () => {
+    const createResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Acme Corp', slug: 'acme-corp' }),
+    });
+    expect(createResponse.status).toBe(200);
+    const created = (await createResponse.json()).data;
+    expect(created).toMatchObject({ name: 'Acme Corp', slug: 'acme-corp', status: 'ACTIVE' });
+
+    const listResponse = await authed('/api/v1/organisations', 'alice');
+    const listBody = await listResponse.json();
+    expect(listBody.data.some((o: { id: string }) => o.id === created.id)).toBe(true);
+
+    const getResponse = await authed(`/api/v1/organisations/${created.id}`, 'alice');
+    expect((await getResponse.json()).data.id).toBe(created.id);
+
+    const updateResponse = await authed(`/api/v1/organisations/${created.id}`, 'alice', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Acme Corp Renamed' }),
+    });
+    expect(updateResponse.status).toBe(200);
+    expect((await updateResponse.json()).data.name).toBe('Acme Corp Renamed');
+  });
+
+  it('denies a non-member from reading or updating an organisation', async () => {
+    const createResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Secret Org', slug: 'secret-org' }),
+    });
+    const created = (await createResponse.json()).data;
+
+    const getResponse = await authed(`/api/v1/organisations/${created.id}`, 'mallory');
+    expect(getResponse.status).toBe(404);
+
+    const updateResponse = await authed(`/api/v1/organisations/${created.id}`, 'mallory', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Should fail' }),
+    });
+    expect(updateResponse.status).toBe(404);
+  });
+
+  it('creates a project under a caller-specified organisation, not just the seeded default', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Second Org', slug: 'second-org' }),
+    });
+    const organisation = (await orgResponse.json()).data;
+
+    const projectResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Project Under Second Org',
+        slug: 'project-under-second-org',
+        organisationId: organisation.id,
+      }),
+    });
+    expect(projectResponse.status).toBe(200);
+    const project = (await projectResponse.json()).data;
+    expect(project.organisationId).toBe(organisation.id);
+  });
+});
+
+describe('project type routes', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const projectTypeDeps = createInMemoryProjectTypeDeps();
+    const started = await startServer({ projectTypeDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  const SAMPLE_GRAPH = {
+    name: 'Sample Workflow',
+    trigger: { type: 'WORK_ITEM_MANUAL' },
+    inputs: [],
+    nodes: [{ id: 'step-1', type: 'TASK', name: 'Step 1' }],
+    edges: [],
+    policies: [],
+    outputs: [],
+  };
+
+  const SAMPLE_AGENT_CONFIGURATION = {
+    role: 'DISCOVERY',
+    provider: 'gemini',
+    modelRef: 'gemini-3.6-flash',
+    outputSchemaRef: 'discovery-report-v1',
+    allowedCapabilities: [],
+  };
+
+  it('creates a project type, lists it, gets it by id, and updates it', async () => {
+    const createResponse = await authed('/api/v1/project-types', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'software-development', name: 'Software Development' }),
+    });
+    expect(createResponse.status).toBe(200);
+    const created = (await createResponse.json()).data;
+    expect(created).toMatchObject({ key: 'software-development', status: 'ACTIVE' });
+
+    const listResponse = await authed('/api/v1/project-types', 'alice');
+    const listBody = await listResponse.json();
+    expect(listBody.data.some((p: { id: string }) => p.id === created.id)).toBe(true);
+
+    const getResponse = await authed(`/api/v1/project-types/${created.id}`, 'alice');
+    expect((await getResponse.json()).data.id).toBe(created.id);
+
+    const updateResponse = await authed(`/api/v1/project-types/${created.id}`, 'alice', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Renamed' }),
+    });
+    expect(updateResponse.status).toBe(200);
+    expect((await updateResponse.json()).data.name).toBe('Renamed');
+  });
+
+  it('creates, lists, and updates a workflow template under a project type', async () => {
+    const ptResponse = await authed('/api/v1/project-types', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: `kind-${Math.random()}`, name: 'Kind' }),
+    });
+    const projectType = (await ptResponse.json()).data;
+
+    const createResponse = await authed(
+      `/api/v1/project-types/${projectType.id}/workflows`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          key: 'planning-path',
+          name: 'Planning Path',
+          definition: SAMPLE_GRAPH,
+        }),
+      },
+    );
+    expect(createResponse.status).toBe(200);
+
+    const listResponse = await authed(`/api/v1/project-types/${projectType.id}/workflows`, 'alice');
+    const listBody = await listResponse.json();
+    expect(listBody.data).toHaveLength(1);
+    expect(listBody.data[0].key).toBe('planning-path');
+
+    const updateResponse = await authed(
+      `/api/v1/project-types/${projectType.id}/workflows/planning-path`,
+      'alice',
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Renamed Planning Path' }),
+      },
+    );
+    expect(updateResponse.status).toBe(200);
+    expect((await updateResponse.json()).data.name).toBe('Renamed Planning Path');
+  });
+
+  it('rejects an invalid workflow template graph with 400', async () => {
+    const ptResponse = await authed('/api/v1/project-types', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: `kind-${Math.random()}`, name: 'Kind' }),
+    });
+    const projectType = (await ptResponse.json()).data;
+
+    const createResponse = await authed(
+      `/api/v1/project-types/${projectType.id}/workflows`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: 'bad', name: 'Bad', definition: { name: 'Bad' } }),
+      },
+    );
+    expect(createResponse.status).toBe(400);
+  });
+
+  it('creates, lists, and updates an agent template under a project type', async () => {
+    const ptResponse = await authed('/api/v1/project-types', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: `kind-${Math.random()}`, name: 'Kind' }),
+    });
+    const projectType = (await ptResponse.json()).data;
+
+    const createResponse = await authed(`/api/v1/project-types/${projectType.id}/agents`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        key: 'discovery-agent',
+        name: 'Discovery Agent',
+        configuration: SAMPLE_AGENT_CONFIGURATION,
+      }),
+    });
+    expect(createResponse.status).toBe(200);
+
+    const listResponse = await authed(`/api/v1/project-types/${projectType.id}/agents`, 'alice');
+    const listBody = await listResponse.json();
+    expect(listBody.data).toHaveLength(1);
+    expect(listBody.data[0].key).toBe('discovery-agent');
+
+    const updateResponse = await authed(
+      `/api/v1/project-types/${projectType.id}/agents/discovery-agent`,
+      'alice',
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Renamed Discovery Agent' }),
+      },
+    );
+    expect(updateResponse.status).toBe(200);
+    expect((await updateResponse.json()).data.name).toBe('Renamed Discovery Agent');
+  });
+
+  it('rejects unauthenticated project type listing', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/project-types`);
+    expect(response.status).toBe(401);
   });
 });

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { ProjectTypeId } from '@devos/contracts';
 import type {
   Artifact,
   ArtifactRepository,
@@ -49,6 +50,7 @@ async function buildScenario(
   const project: Project = {
     id: randomUUID() as Project['id'],
     organisationId,
+    projectTypeId: randomUUID() as ProjectTypeId,
     name: 'Test Project',
     slug: 'test-project',
     status: 'ACTIVE',

@@ -1,4 +1,4 @@
-import type { OrganisationId, ProjectId } from '@devos/contracts';
+import type { OrganisationId, ProjectId, ProjectTypeId } from '@devos/contracts';
 import {
   addMember,
   changeMemberRole,
@@ -50,9 +50,10 @@ export function createProjectRoutes(prefix: string, deps: ProjectUseCaseDeps): R
       protected: true,
       handler: async ({ principal, body }) => {
         const user = requirePrincipal(principal);
-        const input = parseCreateProjectBody(body);
+        const { organisationId, projectTypeId, ...input } = parseCreateProjectBody(body);
         const project = await createProject(deps, user.id, {
-          organisationId: SEED_ORGANISATION_ID as OrganisationId,
+          organisationId: (organisationId ?? SEED_ORGANISATION_ID) as OrganisationId,
+          ...(projectTypeId !== undefined ? { projectTypeId: projectTypeId as ProjectTypeId } : {}),
           ...input,
         });
         return toProjectDto(project);

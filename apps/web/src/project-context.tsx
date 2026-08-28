@@ -1,5 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { listProjects, type Project } from './api-client.js';
+import { useOrganisationContext } from './organisation-context.js';
 
 export interface ProjectContextValue {
   projects: Project[];
@@ -13,7 +22,8 @@ export interface ProjectContextValue {
 const ProjectContext = createContext<ProjectContextValue | null>(null);
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const { selectedOrganisationId } = useOrganisationContext();
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -33,17 +43,33 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       }
 
       setError(null);
-      setProjects(result.data);
-      setSelectedProjectId((current) => {
-        if (current && result.data.some((project) => project.id === current)) return current;
-        return result.data[0]?.id ?? null;
-      });
+      setAllProjects(result.data);
     });
 
     return () => {
       cancelled = true;
     };
   }, [refreshToken]);
+
+  // specs/architecture/organisations-and-project-types.md §10.2: the
+  // project list is scoped to the selected organisation. There is no
+  // organisation-scoped query parameter on GET /projects (it lists every
+  // project the principal has access to), so this filters client-side
+  // rather than expanding the API contract for it.
+  const projects = useMemo(
+    () =>
+      selectedOrganisationId
+        ? allProjects.filter((project) => project.organisationId === selectedOrganisationId)
+        : allProjects,
+    [allProjects, selectedOrganisationId],
+  );
+
+  useEffect(() => {
+    setSelectedProjectId((current) => {
+      if (current && projects.some((project) => project.id === current)) return current;
+      return projects[0]?.id ?? null;
+    });
+  }, [projects]);
 
   const selectProject = useCallback((projectId: string) => {
     setSelectedProjectId(projectId);

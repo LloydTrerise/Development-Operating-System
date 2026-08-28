@@ -15,6 +15,7 @@ import {
   createWorkflowVersionRepository,
   createWorkItemRepository,
   SEED_ORGANISATION_ID,
+  SEED_SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
   type DatabaseClient,
 } from '@devos/database';
 import { createTaskDispatcher } from '@devos/worker';
@@ -159,6 +160,7 @@ beforeAll(async () => {
   project = {
     id: randomUUID() as Project['id'],
     organisationId: SEED_ORGANISATION_ID as Project['organisationId'],
+    projectTypeId: SEED_SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID as Project['projectTypeId'],
     name: `Hardening Test Project ${Date.now()}`,
     slug: `hardening-${Date.now()}`,
     status: 'ACTIVE',

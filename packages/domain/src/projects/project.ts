@@ -1,8 +1,9 @@
-import type { OrganisationId, ProjectId } from '@devos/contracts';
+import type { OrganisationId, ProjectId, ProjectTypeId } from '@devos/contracts';
 
 export interface Project {
   id: ProjectId;
   organisationId: OrganisationId;
+  projectTypeId: ProjectTypeId;
   name: string;
   slug: string;
   description?: string;
@@ -20,6 +21,10 @@ export interface Project {
 
 export interface CreateProjectInput {
   organisationId: OrganisationId;
+  /** Optional — defaults to the seeded 'software-development' Project Type
+   * (see `SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID`) for backward compatibility
+   * with every caller that predates Project Types. */
+  projectTypeId?: ProjectTypeId;
   name: string;
   slug: string;
   description?: string;

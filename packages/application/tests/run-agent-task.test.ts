@@ -5,7 +5,7 @@ import {
   type PromptRepository,
   type SchemaRepository,
 } from '@devos/agents';
-import type { OrganisationId } from '@devos/contracts';
+import type { OrganisationId, ProjectTypeId } from '@devos/contracts';
 import type {
   Agent,
   AgentExecution,
@@ -174,6 +174,7 @@ function buildScenario() {
   const project: Project = {
     id: projectId,
     organisationId: randomUUID() as OrganisationId,
+    projectTypeId: randomUUID() as ProjectTypeId,
     name: 'Test Project',
     slug: 'test-project',
     status: 'ACTIVE',

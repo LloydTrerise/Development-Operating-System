@@ -21,9 +21,12 @@ import { getHealth } from './api-client.js';
 import { ApprovalsPage } from './pages/ApprovalsPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { GovernancePage } from './pages/GovernancePage.js';
+import { OrganisationsPage } from './pages/OrganisationsPage.js';
+import { ProjectTypesPage } from './pages/ProjectTypesPage.js';
 import { ProjectsPage } from './pages/ProjectsPage.js';
 import { RunsPage } from './pages/RunsPage.js';
 import { WorkItemsPage } from './pages/WorkItemsPage.js';
+import { useOrganisationContext } from './organisation-context.js';
 import { useProjectContext } from './project-context.js';
 import { useSession } from './session.js';
 import { useThemeMode } from './theme-mode-context.js';
@@ -34,12 +37,79 @@ const DRAWER_WIDTH = 220;
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard' },
+  { to: '/organisations', label: 'Organisations' },
   { to: '/projects', label: 'Projects' },
+  { to: '/project-types', label: 'Project Types' },
   { to: '/work-items', label: 'Work Items' },
   { to: '/runs', label: 'Runs' },
   { to: '/approvals', label: 'Approvals' },
   { to: '/governance', label: 'Governance' },
 ] as const;
+
+function OrganisationSelector() {
+  const { organisations, selectedOrganisationId, selectOrganisation, loading, error } =
+    useOrganisationContext();
+
+  if (loading) {
+    return (
+      <Typography
+        data-testid="organisation-selector-status"
+        variant="body2"
+        component="span"
+        color="inherit"
+      >
+        Loading organisations…
+      </Typography>
+    );
+  }
+  if (error) {
+    return (
+      <Typography
+        data-testid="organisation-selector-status"
+        variant="body2"
+        component="span"
+        color="inherit"
+      >
+        Organisations unavailable: {error}
+      </Typography>
+    );
+  }
+  if (organisations.length === 0) {
+    return (
+      <Typography
+        data-testid="organisation-selector-status"
+        variant="body2"
+        component="span"
+        color="inherit"
+      >
+        No organisations yet.
+      </Typography>
+    );
+  }
+
+  return (
+    <FormControl size="small" sx={{ minWidth: 180 }}>
+      <Select
+        value={selectedOrganisationId ?? ''}
+        onChange={(event) => selectOrganisation(event.target.value)}
+        SelectDisplayProps={
+          { 'data-testid': 'organisation-selector' } as React.HTMLAttributes<HTMLDivElement>
+        }
+        sx={{
+          color: 'inherit',
+          '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.4)' },
+          '.MuiSvgIcon-root': { color: 'inherit' },
+        }}
+      >
+        {organisations.map((organisation) => (
+          <MenuItem key={organisation.id} value={organisation.id}>
+            {organisation.name}
+          </MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  );
+}
 
 function ProjectSelector() {
   const { projects, selectedProjectId, selectProject, loading, error } = useProjectContext();
@@ -116,6 +186,7 @@ export function App() {
           <Typography variant="h6" noWrap component="h1" sx={{ flexGrow: 1 }}>
             DevOS
           </Typography>
+          <OrganisationSelector />
           <ProjectSelector />
           <Typography data-testid="api-status" variant="body2" component="span">
             API: {apiStatus}
@@ -159,7 +230,9 @@ export function App() {
       <Box component="main" sx={{ flexGrow: 1, p: 3, mt: 8 }}>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/organisations" element={<OrganisationsPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/project-types" element={<ProjectTypesPage />} />
           <Route path="/work-items" element={<WorkItemsPage />} />
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />

@@ -8,6 +8,12 @@ export function canUpdateProject(role: MembershipRole): boolean {
   return role === 'OWNER';
 }
 
+/** DEVOS: Organisations & Project Types — same OWNER-only bar as every
+ * other consequential action in this file, applied one scope level up. */
+export function canUpdateOrganisation(role: MembershipRole): boolean {
+  return role === 'OWNER';
+}
+
 /**
  * Approval decisions carry the same authority as a human release gate
  * (specs/api/poc-api-contracts.md §30: "reviewer role") — no dedicated

@@ -1,23 +1,28 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  Membership,
-  MembershipRepository,
-  OrganisationId,
-  Project,
-  ProjectRepository,
-  ToolCapability,
-  ToolCapabilityRepository,
+import {
+  SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+  type Membership,
+  type MembershipRepository,
+  type OrganisationId,
+  type Project,
+  type ProjectRepository,
+  type ProjectType,
+  type ProjectTypeAgentRepository,
+  type ProjectTypeRepository,
+  type ProjectTypeWorkflowRepository,
+  type ToolCapability,
+  type ToolCapabilityRepository,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../src/projects/create-project.js';
+import type { CreateProjectWithClones } from '../src/projects/deps.js';
 import { NotFoundError, ValidationError } from '../src/errors.js';
-import type { ToolUseCaseDeps } from '../src/tools/deps.js';
 import { getCapabilityForPrincipal } from '../src/tools/get-capability.js';
 import { listCapabilitiesForProject } from '../src/tools/list-capabilities.js';
 import { registerAllCapabilities } from '../src/tools/register-all-capabilities.js';
 import { registerCapability } from '../src/tools/register-capability.js';
 
-function createInMemoryDeps(): ToolUseCaseDeps {
+function createInMemoryDeps() {
   const projects = new Map<string, Project>();
   const memberships = new Map<string, Membership>();
   const capabilities = new Map<string, ToolCapability>();
@@ -70,7 +75,61 @@ function createInMemoryDeps(): ToolUseCaseDeps {
     },
   };
 
-  return { projects: projectRepository, memberships: membershipRepository, toolCapabilities };
+  const now = new Date().toISOString();
+  const projectTypesStore = new Map<string, ProjectType>([
+    [
+      SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+      {
+        id: SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+        key: 'software-development',
+        name: 'Software Development',
+        status: 'ACTIVE',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  ]);
+  const projectTypes: ProjectTypeRepository = {
+    getById: async (id) => projectTypesStore.get(id) ?? null,
+    getByKey: async (key) => [...projectTypesStore.values()].find((p) => p.key === key) ?? null,
+    list: async () => [...projectTypesStore.values()],
+    create: async (projectType) => {
+      projectTypesStore.set(projectType.id, projectType);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = projectTypesStore.get(id);
+      if (!existing) return;
+      projectTypesStore.set(id, { ...existing, ...changes, updatedAt });
+    },
+  };
+  const projectTypeWorkflows: ProjectTypeWorkflowRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const projectTypeAgents: ProjectTypeAgentRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const createProjectWithClones: CreateProjectWithClones = async (project, membership) => {
+    await projectRepository.create(project);
+    await membershipRepository.create(membership);
+  };
+
+  return {
+    projects: projectRepository,
+    memberships: membershipRepository,
+    toolCapabilities,
+    projectTypes,
+    projectTypeWorkflows,
+    projectTypeAgents,
+    createProjectWithClones,
+  };
 }
 
 const VALID_INPUT = {
@@ -82,7 +141,7 @@ const VALID_INPUT = {
 };
 
 describe('tool capability use cases', () => {
-  let deps: ToolUseCaseDeps;
+  let deps: ReturnType<typeof createInMemoryDeps>;
   let projectId: Project['id'];
   const organisationId = randomUUID() as OrganisationId;
 

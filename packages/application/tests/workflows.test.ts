@@ -1,32 +1,38 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  Membership,
-  MembershipRepository,
-  OrganisationId,
-  Project,
-  ProjectRepository,
-  WorkflowDefinition,
-  WorkflowDefinitionRepository,
-  WorkflowRun,
-  WorkflowRunRepository,
-  WorkflowTask,
-  WorkflowTaskRepository,
-  WorkflowVersion,
-  WorkflowVersionRepository,
-  WorkItem,
-  WorkItemRepository,
+import {
+  SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+  type Membership,
+  type MembershipRepository,
+  type OrganisationId,
+  type Project,
+  type ProjectRepository,
+  type ProjectType,
+  type ProjectTypeAgentRepository,
+  type ProjectTypeRepository,
+  type ProjectTypeWorkflowRepository,
+  type WorkflowDefinition,
+  type WorkflowDefinitionRepository,
+  type WorkflowRun,
+  type WorkflowRunRepository,
+  type WorkflowTask,
+  type WorkflowTaskRepository,
+  type WorkflowVersion,
+  type WorkflowVersionRepository,
+  type WorkItem,
+  type WorkItemRepository,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../src/projects/create-project.js';
+import type { CreateProjectWithClones } from '../src/projects/deps.js';
 import { createWorkflowDefinition } from '../src/workflows/create-workflow-definition.js';
-import type { WorkflowUseCaseDeps } from '../src/workflows/deps.js';
+import type { CreateWorkflowDraft, StartWorkflowRun } from '../src/workflows/deps.js';
 import { publishWorkflowVersion } from '../src/workflows/publish-workflow-version.js';
 import { startWorkflowRunFromActiveVersion } from '../src/workflows/start-run-from-active-version.js';
 import { updateDraftWorkflow } from '../src/workflows/update-draft-workflow.js';
 import { validateDraftWorkflow } from '../src/workflows/validate-draft-workflow.js';
 import { ForbiddenError, ValidationError } from '../src/errors.js';
 
-function createInMemoryDeps(): WorkflowUseCaseDeps {
+function createInMemoryDeps() {
   const projects = new Map<string, Project>();
   const memberships = new Map<string, Membership>();
   const definitions = new Map<string, WorkflowDefinition>();
@@ -144,6 +150,61 @@ function createInMemoryDeps(): WorkflowUseCaseDeps {
     },
   };
 
+  const createDraft: CreateWorkflowDraft = async (definition, version) => {
+    await workflowDefinitions.create(definition);
+    await workflowVersions.create(version);
+  };
+  const startRun: StartWorkflowRun = async (run, tasks) => {
+    await workflowRuns.create(run);
+    for (const task of tasks) await workflowTasks.create(task);
+  };
+
+  const now = new Date().toISOString();
+  const projectTypesStore = new Map<string, ProjectType>([
+    [
+      SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+      {
+        id: SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+        key: 'software-development',
+        name: 'Software Development',
+        status: 'ACTIVE',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  ]);
+  const projectTypes: ProjectTypeRepository = {
+    getById: async (id) => projectTypesStore.get(id) ?? null,
+    getByKey: async (key) => [...projectTypesStore.values()].find((p) => p.key === key) ?? null,
+    list: async () => [...projectTypesStore.values()],
+    create: async (projectType) => {
+      projectTypesStore.set(projectType.id, projectType);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = projectTypesStore.get(id);
+      if (!existing) return;
+      projectTypesStore.set(id, { ...existing, ...changes, updatedAt });
+    },
+  };
+  const projectTypeWorkflows: ProjectTypeWorkflowRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const projectTypeAgents: ProjectTypeAgentRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const createProjectWithClones: CreateProjectWithClones = async (project, membership) => {
+    await projectRepository.create(project);
+    await membershipRepository.create(membership);
+  };
+
   return {
     projects: projectRepository,
     memberships: membershipRepository,
@@ -152,14 +213,12 @@ function createInMemoryDeps(): WorkflowUseCaseDeps {
     workflowVersions,
     workflowRuns,
     workflowTasks,
-    createDraft: async (definition, version) => {
-      await workflowDefinitions.create(definition);
-      await workflowVersions.create(version);
-    },
-    startRun: async (run, tasks) => {
-      await workflowRuns.create(run);
-      for (const task of tasks) await workflowTasks.create(task);
-    },
+    createDraft,
+    startRun,
+    projectTypes,
+    projectTypeWorkflows,
+    projectTypeAgents,
+    createProjectWithClones,
   };
 }
 
@@ -170,7 +229,7 @@ const VALID_GRAPH = {
 };
 
 describe('workflow use cases', () => {
-  let deps: WorkflowUseCaseDeps;
+  let deps: ReturnType<typeof createInMemoryDeps>;
   let projectId: Project['id'];
   const organisationId = randomUUID() as OrganisationId;
 
