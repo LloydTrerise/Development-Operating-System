@@ -15,7 +15,9 @@ import type {
   ArtifactVersion,
   ArtifactVersionRepository,
   ContextManifest,
+  KnowledgeSourceRepository,
   ProjectId,
+  ProjectRepository,
   WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
@@ -208,9 +210,24 @@ function buildScenario() {
       artifactId === discoveryArtifact.id ? [discoveryVersion] : [],
     create: async () => {},
   };
+  // DEVOS-109: runAgentTask now calls buildContext(), which needs these.
+  const projects: ProjectRepository = {
+    getById: async () => null,
+    listForOrganisation: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const knowledgeSources: KnowledgeSourceRepository = {
+    getById: async () => null,
+    listForProject: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
 
   return {
     projectId,
+    projects,
+    knowledgeSources,
     workItem,
     run,
     agent,
@@ -274,6 +291,8 @@ describe('runRequirementsAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
       storage: createLocalFilesystemStorage(storageDir),
       publishArtifact: async (artifact, version) => {
         publishedArtifact = artifact;
@@ -333,6 +352,8 @@ describe('runRequirementsAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
       storage: createLocalFilesystemStorage(storageDir),
       publishArtifact: async () => {},
       artifacts: scenario.artifacts,

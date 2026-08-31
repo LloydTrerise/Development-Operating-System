@@ -595,4 +595,41 @@ describe('invokeTool', () => {
     const record = auditRecordsStore.find((r) => r.targetId === invocation.id);
     expect(record?.correlationId).toBeUndefined();
   });
+
+  it('DEVOS-116: records an allowed agentVersionId in both inputMetadata and the audit record metadata — a durable attribution trail, not just the transient gate check', async () => {
+    await seedCapability(deps, projectId);
+    const agentVersion = seedAgentVersion(agentVersionsStore, ['git-commit']);
+    deps.adapters['git-commit'] = {
+      invoke: async () => ({
+        outputMetadata: { commitSha: 'abc123' },
+        providerReference: 'abc123',
+      }),
+    };
+
+    const invocation = await invokeTool(deps, 'alice', projectId, workflowTaskId, {
+      ...VALID_INPUT,
+      agentVersionId: agentVersion.id,
+    });
+
+    expect(invocation.status).toBe('SUCCEEDED');
+    expect(invocation.inputMetadata).toMatchObject({ agentVersionId: agentVersion.id });
+    const record = auditRecordsStore.find((r) => r.targetId === invocation.id);
+    expect(record?.metadata).toMatchObject({ agentVersionId: agentVersion.id });
+  });
+
+  it('DEVOS-116: omits agentVersionId from inputMetadata and the audit record metadata when the invocation is not carrying out any agent proposal', async () => {
+    await seedCapability(deps, projectId);
+    deps.adapters['git-commit'] = {
+      invoke: async () => ({
+        outputMetadata: { commitSha: 'abc123' },
+        providerReference: 'abc123',
+      }),
+    };
+
+    const invocation = await invokeTool(deps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+
+    expect(invocation.inputMetadata).not.toHaveProperty('agentVersionId');
+    const record = auditRecordsStore.find((r) => r.targetId === invocation.id);
+    expect(record?.metadata).not.toHaveProperty('agentVersionId');
+  });
 });

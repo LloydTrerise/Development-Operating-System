@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+  type AuditRecord,
+  type AuditRecordRepository,
   type Membership,
   type MembershipRepository,
   type OrganisationId,
@@ -121,6 +123,14 @@ function createInMemoryDeps() {
     await membershipRepository.create(membership);
   };
 
+  const auditRecordsStore: AuditRecord[] = [];
+  const auditRecords: AuditRecordRepository = {
+    create: async (record) => {
+      auditRecordsStore.push(record);
+    },
+    listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
+  };
+
   return {
     projects: projectRepository,
     memberships: membershipRepository,
@@ -129,6 +139,7 @@ function createInMemoryDeps() {
     projectTypeWorkflows,
     projectTypeAgents,
     createProjectWithClones,
+    auditRecords,
   };
 }
 
@@ -216,7 +227,7 @@ describe('tool capability use cases', () => {
 
   it('registers all capability definitions against a project, idempotently', async () => {
     const first = await registerAllCapabilities(deps, 'alice', projectId);
-    expect(first).toHaveLength(8);
+    expect(first).toHaveLength(9);
     expect(first.every((c) => c.status === 'ACTIVE')).toBe(true);
 
     const second = await registerAllCapabilities(deps, 'alice', projectId);

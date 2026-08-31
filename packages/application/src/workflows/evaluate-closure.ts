@@ -46,6 +46,9 @@ export function evaluateClosure(evidence: ClosureEvidence): ClosureResult {
   const releaseReadiness = evaluateReleaseReadiness({
     ...(evidence.testEvidence !== undefined ? { testEvidence: evidence.testEvidence } : {}),
     ...(evidence.reviewEvidence !== undefined ? { reviewEvidence: evidence.reviewEvidence } : {}),
+    ...(evidence.securityScanEvidence !== undefined
+      ? { securityScanEvidence: evidence.securityScanEvidence }
+      : {}),
   });
   const reasons = [...releaseReadiness.reasons];
 

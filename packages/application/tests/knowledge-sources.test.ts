@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+  type AuditRecord,
+  type AuditRecordRepository,
   type KnowledgeSource,
   type KnowledgeSourceRepository,
   type Membership,
@@ -120,6 +122,14 @@ function createInMemoryDeps() {
     await membershipRepository.create(membership);
   };
 
+  const auditRecordsStore: AuditRecord[] = [];
+  const auditRecords: AuditRecordRepository = {
+    create: async (record) => {
+      auditRecordsStore.push(record);
+    },
+    listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
+  };
+
   return {
     projects: projectRepository,
     memberships: membershipRepository,
@@ -128,6 +138,7 @@ function createInMemoryDeps() {
     projectTypeWorkflows,
     projectTypeAgents,
     createProjectWithClones,
+    auditRecords,
   };
 }
 
@@ -157,6 +168,18 @@ describe('knowledge source use cases', () => {
     expect(source.key).toBe('coding-standards');
     expect(source.status).toBe('ACTIVE');
     expect(source.createdBy).toBe('alice');
+
+    // DEVOS-115: extends DEVOS-086's audit coverage to knowledge-source
+    // creation — the real audit trail, not just the returned value.
+    const auditRecords = await deps.auditRecords.listForProject(projectId);
+    expect(auditRecords).toContainEqual(
+      expect.objectContaining({
+        action: 'knowledge-source.created',
+        targetType: 'KnowledgeSource',
+        targetId: source.id,
+        outcome: 'SUCCESS',
+      }),
+    );
   });
 
   it('rejects a duplicate key within the same project', async () => {

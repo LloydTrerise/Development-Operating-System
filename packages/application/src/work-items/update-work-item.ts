@@ -1,4 +1,5 @@
-import type { WorkItemId } from '@devos/contracts';
+import { randomUUID } from 'node:crypto';
+import type { AuditId, WorkItemId } from '@devos/contracts';
 import type { UpdateWorkItemInput, WorkItem } from '@devos/domain';
 import { NotFoundError } from '../errors.js';
 import { resolveMembership } from '../projects/membership-access.js';
@@ -21,6 +22,21 @@ export async function updateWorkItem(
 
   const updatedAt = new Date().toISOString();
   await deps.workItems.update(workItemId, changes, updatedAt);
+
+  // DEVOS-115: extends DEVOS-086's audit coverage to work-item update.
+  await deps.auditRecords.create({
+    id: randomUUID() as AuditId,
+    organisationId: project.organisationId,
+    projectId: workItem.projectId,
+    actorType: 'USER',
+    actorId: principalId,
+    action: 'work-item.updated',
+    targetType: 'WorkItem',
+    targetId: workItemId,
+    outcome: 'SUCCESS',
+    metadata: { changes },
+    createdAt: updatedAt,
+  });
 
   return { ...workItem, ...changes, updatedAt };
 }

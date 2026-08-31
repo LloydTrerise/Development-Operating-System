@@ -341,6 +341,81 @@ export const SEED_RELEASE_PATH_WORKFLOW_V2_GRAPH = {
   outputs: [],
 };
 
+export const SEED_RELEASE_PATH_WORKFLOW_V3_VERSION_ID = '00000000-0000-4000-8000-00000000002f';
+
+/**
+ * DEVOS-113: version 3 of the same `release-path` definition — same
+ * immutability reasoning as v2 above (a new version, not an edit to v1's
+ * graph). Adds a real security-scan stage ahead of the pre-existing
+ * readiness re-check, `security-scan -> release-readiness-check`, using
+ * the real dependency-ordering barrier DEVOS-108-followup added to
+ * `claimNext()` (`packages/database/src/repositories/task-queue.ts`) so the
+ * readiness check genuinely waits for the scan's own real result rather
+ * than racing it. Additive, not a replacement for v1 — v1 stays exactly as
+ * every existing test/seed consumer already depends on; v3 is what a
+ * project wanting the real scan stage runs instead.
+ */
+export const SEED_RELEASE_PATH_WORKFLOW_V3_GRAPH = {
+  name: 'Release Path',
+  description:
+    'Runs a real security scan, then re-checks release readiness against it alongside the existing test/review evidence (Sprint 10).',
+  trigger: { type: 'WORK_ITEM_MANUAL' },
+  inputs: [{ name: 'workItemId', type: 'WORK_ITEM', required: true }],
+  nodes: [
+    {
+      id: 'security-scan',
+      type: 'TOOL_TASK',
+      name: 'Security Scan',
+    },
+    {
+      id: 'release-readiness-check',
+      type: 'TOOL_TASK',
+      name: 'Release Readiness Check',
+    },
+  ],
+  edges: [{ from: 'security-scan', to: 'release-readiness-check' }],
+  policies: [RELEASE_APPROVAL_POLICY_KEY],
+  outputs: [],
+};
+
+export const SEED_RELEASE_ROLLBACK_WORKFLOW_DEFINITION_ID = '00000000-0000-4000-8000-000000000030';
+export const SEED_RELEASE_ROLLBACK_WORKFLOW_VERSION_ID = '00000000-0000-4000-8000-000000000031';
+export const SEED_RELEASE_ROLLBACK_WORKFLOW_KEY = 'release-rollback';
+
+/**
+ * DEVOS-114: a real trigger for `runReleaseRollbackTask` (DEVOS-077) — a
+ * separate, single-node, on-demand workflow rather than a new node on
+ * `release-path`, since a rollback isn't a stage in the standard pipeline
+ * (it never runs as part of a normal release) and needs its own real,
+ * caller-supplied `rollbackToRevision` — which the generic run-start API
+ * (`POST .../runs`, `StartRunInput.inputs`) already accepted but, until
+ * DEVOS-114's fix to `run-creation.ts`, never actually threaded through to
+ * a task's own `input` (only `run.input` got it). `apps/web`'s existing
+ * generic "start a run" UI (`RunsPage.tsx`) is the real trigger the task's
+ * own acceptance criterion asks for — an authorized user picks this
+ * workflow and supplies the revision to roll back to.
+ */
+export const SEED_RELEASE_ROLLBACK_WORKFLOW_GRAPH = {
+  name: 'Release Rollback',
+  description:
+    'Rolls back a real deployment to a specific, explicitly authorized revision (Sprint 10).',
+  trigger: { type: 'WORK_ITEM_MANUAL' },
+  inputs: [
+    { name: 'workItemId', type: 'WORK_ITEM', required: true },
+    { name: 'rollbackToRevision', type: 'STRING', required: true },
+  ],
+  nodes: [
+    {
+      id: 'rollback',
+      type: 'TOOL_TASK',
+      name: 'Rollback',
+    },
+  ],
+  edges: [],
+  policies: [],
+  outputs: [],
+};
+
 /**
  * Seed rows for `tool_capabilities` (DEVOS-051). `packages/database` cannot
  * depend on `packages/tools` (package-boundary direction: tools sits
@@ -359,6 +434,7 @@ export const SEED_BUILD_RUN_CAPABILITY_ID = '00000000-0000-4000-8000-00000000001
 export const SEED_TEST_RUN_CAPABILITY_ID = '00000000-0000-4000-8000-00000000001a';
 export const SEED_DEPLOY_CAPABILITY_ID = '00000000-0000-4000-8000-000000000020';
 export const SEED_HEALTH_CHECK_CAPABILITY_ID = '00000000-0000-4000-8000-000000000021';
+export const SEED_SECURITY_SCAN_CAPABILITY_ID = '00000000-0000-4000-8000-00000000002e';
 
 /**
  * DEVOS spec `specs/architecture/organisations-and-project-types.md` §7:
@@ -477,6 +553,26 @@ export const SEED_TOOL_CAPABILITIES = [
     id: SEED_TEST_RUN_CAPABILITY_ID,
     key: 'test-run',
     name: 'Run Tests',
+    riskClass: 'R2',
+    inputSchema: {
+      type: 'object',
+      properties: { command: { type: 'string' } },
+      required: ['command'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        exitCode: { type: 'number' },
+        stdout: { type: 'string' },
+        stderr: { type: 'string' },
+      },
+      required: ['exitCode', 'stdout', 'stderr'],
+    },
+  },
+  {
+    id: SEED_SECURITY_SCAN_CAPABILITY_ID,
+    key: 'security-scan',
+    name: 'Run Security Scan',
     riskClass: 'R2',
     inputSchema: {
       type: 'object',

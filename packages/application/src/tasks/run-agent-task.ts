@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { estimateCostUsd, validateAgentOutput } from '@devos/agents';
-import type { AuditId, ProjectId } from '@devos/contracts';
+import type { AuditId, ProjectId, WorkflowRunId } from '@devos/contracts';
 import type {
   AgentExecution,
   ContextManifest,
   ContextManifestSource,
   WorkflowTask,
 } from '@devos/domain';
-import { authorityLevelFor } from '@devos/knowledge';
+import { authorityLevelFor, buildContext } from '@devos/knowledge';
 import type { AgentTaskHandlerDeps } from './deps.js';
 
 // Matches every other task handler's own SYSTEM_ACTOR_ID constant
@@ -201,6 +201,25 @@ export async function runAgentTask(
   };
   await deps.agentExecutions.create(execution);
 
+  // DEVOS-109: real context retrieval (project context, active knowledge
+  // sources, every artifact produced so far in this run) via the generic
+  // context builder (DEVOS-041), replacing what used to be an inline
+  // WORK_ITEM/AGENT_VERSION/PROMPT-only source list. Strictly widens what
+  // gets recorded — PROJECT_CONTEXT/KNOWLEDGE_SOURCE sources were never
+  // recorded in the manifest before this, and every ARTIFACT this run has
+  // produced is now included automatically rather than only the one a
+  // concrete agent handler happened to fetch and pass through
+  // `additionalContext.sources` itself (each handler still supplies the
+  // real keyed content that prompt actually needs via `additionalContext
+  // .input` — that part is genuinely agent-specific and unchanged).
+  // WORK_ITEM/AGENT_VERSION/PROMPT stay hand-added: `buildContext()` has no
+  // concept of a workflow task's own work item or of agent-execution
+  // configuration, only retrieved project/knowledge/artifact content.
+  const assembledContext = await buildContext(deps, {
+    projectId: run.projectId,
+    workflowRunId: run.id as WorkflowRunId,
+  });
+
   const manifest: ContextManifest = {
     id: randomUUID() as ContextManifest['id'],
     projectId: run.projectId,
@@ -213,6 +232,7 @@ export async function runAgentTask(
       ...(version.promptReference !== undefined
         ? [{ type: 'PROMPT', ref: `prompt:${version.promptReference}` }]
         : []),
+      ...assembledContext.sources.map((source) => ({ type: source.type, ref: source.ref })),
       ...(additionalContext?.sources ?? []),
     ].map((source) => withProvenance(source, now)),
     // No policy engine exists yet (specs/sprints/sprint-02/README.md scopes

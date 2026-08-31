@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ProjectId } from '@devos/contracts';
+import type { AuditId, ProjectId } from '@devos/contracts';
 import {
   validateWorkflowGraph,
   type WorkflowDefinition,
@@ -8,7 +8,7 @@ import {
 import type { WorkflowDefinition as WorkflowGraph } from '@devos/contracts';
 import { NotFoundError, ValidationError } from '../errors.js';
 import { resolveMembership } from '../projects/membership-access.js';
-import type { WorkflowUseCaseDeps } from './deps.js';
+import type { CreateWorkflowDefinitionDeps } from './deps.js';
 
 export interface CreateWorkflowDefinitionInput {
   key: string;
@@ -18,7 +18,7 @@ export interface CreateWorkflowDefinitionInput {
 }
 
 export async function createWorkflowDefinition(
-  deps: WorkflowUseCaseDeps,
+  deps: CreateWorkflowDefinitionDeps,
   principalId: string,
   projectId: ProjectId,
   input: CreateWorkflowDefinitionInput,
@@ -62,6 +62,23 @@ export async function createWorkflowDefinition(
   };
 
   await deps.createDraft(definition, version);
+
+  // DEVOS-115: extends DEVOS-086's audit coverage to workflow
+  // definition/version creation — one record, since createDraft creates
+  // both the definition and its initial (version 1, DRAFT) version together.
+  await deps.auditRecords.create({
+    id: randomUUID() as AuditId,
+    organisationId: project.organisationId,
+    projectId,
+    actorType: 'USER',
+    actorId: principalId,
+    action: 'workflow.created',
+    targetType: 'WorkflowDefinition',
+    targetId: definition.id,
+    outcome: 'SUCCESS',
+    metadata: { key: definition.key, name: definition.name, versionId: version.id },
+    createdAt: now,
+  });
 
   return { definition, version };
 }

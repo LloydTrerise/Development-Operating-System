@@ -4,6 +4,7 @@ export * from './repositories/agent-executions.js';
 export * from './repositories/agent-versions.js';
 export * from './repositories/agents.js';
 export * from './repositories/approval-run-transition.js';
+export * from './repositories/decide-approval-and-transition.js';
 export * from './repositories/approvals.js';
 export * from './repositories/artifact-versions.js';
 export * from './repositories/artifacts.js';

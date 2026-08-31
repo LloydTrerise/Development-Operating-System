@@ -160,6 +160,40 @@ describe('routeToolTask', () => {
     );
   });
 
+  it('routes taskKey "rollback" to runReleaseRollbackTask (DEVOS-114)', async () => {
+    const { run } = buildRun();
+    const workflowRuns: WorkflowRunRepository = {
+      getById: async (id) => (id === run.id ? run : null),
+      getByVersionAndIdempotencyKey: async () => null,
+      create: async () => {},
+    };
+    const deps = {
+      workflowRuns,
+      workItems: {} as never,
+      storage: {} as never,
+      publishArtifact: async () => {},
+      artifacts: {} as never,
+      artifactVersions: {} as never,
+      projects: {} as never,
+      memberships: {} as never,
+      policies: {} as never,
+      toolCapabilities: {} as never,
+      toolInvocations: {} as never,
+      auditRecords: {} as never,
+      integrations: {} as never,
+      approvals: {} as never,
+      closeWorkItem: async () => {},
+    };
+
+    // No rollbackToRevision in the task's own input (buildTask() defaults
+    // it to {}) — proves the switch case actually dispatches to
+    // runReleaseRollbackTask, which requires it explicitly and is never
+    // triggered automatically (DEVOS-077).
+    await expect(routeToolTask(deps, buildTask(run.id, 'rollback'))).rejects.toThrow(
+      'rollbackToRevision is required',
+    );
+  });
+
   it('routes taskKey "closure" to runClosureTask (DEVOS-078)', async () => {
     const { run } = buildRun();
     const workflowRuns: WorkflowRunRepository = {

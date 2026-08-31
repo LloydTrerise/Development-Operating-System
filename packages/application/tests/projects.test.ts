@@ -210,6 +210,17 @@ describe('project use cases', () => {
     const members = await listMembers(deps, 'alice', project.id);
     expect(members).toHaveLength(1);
     expect(members[0]).toMatchObject({ principalId: 'alice', role: 'OWNER' });
+
+    // DEVOS-115: extends DEVOS-086's audit coverage to project creation.
+    const auditRecords = await deps.auditRecords.listForProject(project.id);
+    expect(auditRecords).toContainEqual(
+      expect.objectContaining({
+        action: 'project.created',
+        targetType: 'Project',
+        targetId: project.id,
+        outcome: 'SUCCESS',
+      }),
+    );
   });
 
   it('lists only projects the principal has access to', async () => {
@@ -259,6 +270,17 @@ describe('project use cases', () => {
 
     await expect(updateProject(deps, 'bob', project.id, { name: 'Should fail' })).rejects.toThrow(
       ForbiddenError,
+    );
+
+    // DEVOS-115: extends DEVOS-086's audit coverage to project update.
+    const auditRecords = await deps.auditRecords.listForProject(project.id);
+    expect(auditRecords).toContainEqual(
+      expect.objectContaining({
+        action: 'project.updated',
+        targetType: 'Project',
+        targetId: project.id,
+        outcome: 'SUCCESS',
+      }),
     );
   });
 
@@ -390,9 +412,7 @@ describe('project use cases', () => {
       slug: 'cloned-project',
     });
 
-    const clonedAgents = [...deps.clonedAgents.values()].filter(
-      (a) => a.projectId === project.id,
-    );
+    const clonedAgents = [...deps.clonedAgents.values()].filter((a) => a.projectId === project.id);
     expect(clonedAgents).toHaveLength(1);
     expect(clonedAgents[0]).toMatchObject({ key: 'discovery-agent', name: 'Discovery Agent' });
 

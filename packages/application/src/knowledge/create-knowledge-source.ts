@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ProjectId } from '@devos/contracts';
+import type { AuditId, ProjectId } from '@devos/contracts';
 import type { KnowledgeSource } from '@devos/domain';
 import { NotFoundError, ValidationError } from '../errors.js';
 import { resolveMembership } from '../projects/membership-access.js';
@@ -49,6 +49,22 @@ export async function createKnowledgeSource(
   };
 
   await deps.knowledgeSources.create(source);
+
+  // DEVOS-115: extends DEVOS-086's audit coverage to knowledge-source
+  // creation.
+  await deps.auditRecords.create({
+    id: randomUUID() as AuditId,
+    organisationId: project.organisationId,
+    projectId,
+    actorType: 'USER',
+    actorId: principalId,
+    action: 'knowledge-source.created',
+    targetType: 'KnowledgeSource',
+    targetId: source.id,
+    outcome: 'SUCCESS',
+    metadata: { key: source.key, name: source.name, sourceType: source.sourceType },
+    createdAt: now,
+  });
 
   return source;
 }

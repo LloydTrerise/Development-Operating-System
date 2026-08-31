@@ -11,7 +11,7 @@ import {
   SEED_PLANNING_PATH_WORKFLOW_VERSION_ID,
   SEED_PROJECT_ID,
   SEED_RELEASE_PATH_WORKFLOW_V2_VERSION_ID,
-  SEED_RELEASE_PATH_WORKFLOW_VERSION_ID,
+  SEED_RELEASE_PATH_WORKFLOW_V3_VERSION_ID,
 } from '@devos/database';
 import type { Integration } from '@devos/domain';
 import { runGit } from '@devos/integrations';
@@ -146,6 +146,9 @@ async function setUpGitIntegration(
   repositoryPath: string,
   stagingRoot: string,
   healthCheckCommand: string,
+  // DEVOS-113: defaults to a real, always-passing command — only the
+  // dedicated security-scan e2e coverage needs a genuinely failing one.
+  securityScanCommand = 'node -e "console.log(\'scan ok\')"',
 ): Promise<void> {
   const { db, close } = createDatabaseClient({ connectionString: DATABASE_URL });
 
@@ -181,6 +184,7 @@ async function setUpGitIntegration(
       repositoryPath,
       buildCommand: 'node -e "console.log(\'build ok\')"',
       testCommand: 'node -e "console.log(\'tests ok\')"',
+      securityScanCommand,
       releaseEnvironment: 'staging',
       stagingRoot,
       healthCheckCommand,
@@ -277,27 +281,31 @@ async function approvePlanningRun(
   return workItemId;
 }
 
-/** Starts a release-path v1 run (readiness check -> gate), decides its
- * RELEASE approval, and confirms the run reaches the expected terminal
- * state — the same generalized approve/reject flow `approvePlanningRun`
- * already exercises for `PLANNING`, now exercising `RELEASE` (DEVOS-073). */
+/** Starts a release-path v3 run (security scan -> readiness check -> gate,
+ * DEVOS-113), decides its RELEASE approval, and confirms the run reaches
+ * the expected terminal state — the same generalized approve/reject flow
+ * `approvePlanningRun` already exercises for `PLANNING`, now exercising
+ * `RELEASE` (DEVOS-073). Uses v3 rather than the older v1 (readiness-check
+ * only) graph so this real end-to-end path actually exercises the new
+ * `security-scan` stage feeding `evaluateReleaseReadiness`, not just the
+ * pre-existing test/review checks. */
 async function decideReleaseApproval(
   api: ReturnType<typeof createApiClient>,
   workItemId: string,
   idempotencyKey: string,
   decision: 'approve' | 'reject',
-): Promise<{ v1RunId: string; v1Status: string }> {
-  const v1Run = await api<{ id: string }>(
+): Promise<{ readinessRunId: string; readinessRunStatus: string }> {
+  const readinessRun = await api<{ id: string }>(
     'POST',
-    `/api/v1/workflow-versions/${SEED_RELEASE_PATH_WORKFLOW_VERSION_ID}/runs`,
+    `/api/v1/workflow-versions/${SEED_RELEASE_PATH_WORKFLOW_V3_VERSION_ID}/runs`,
     { workItemId, idempotencyKey },
   );
-  expect(v1Run.status).toBe(200);
-  const v1RunId = v1Run.body.data!.id;
+  expect(readinessRun.status).toBe(200);
+  const readinessRunId = readinessRun.body.data!.id;
 
   const readinessResult = await pollRunStatus(
     api,
-    v1RunId,
+    readinessRunId,
     ['AWAITING_APPROVAL', 'FAILED'],
     60_000,
   );
@@ -305,7 +313,7 @@ async function decideReleaseApproval(
 
   const approvals = await api<
     { id: string; approvalType: string; evidenceReference: { scopeHash: string } }[]
-  >('GET', `/api/v1/runs/${v1RunId}/approvals`);
+  >('GET', `/api/v1/runs/${readinessRunId}/approvals`);
   const releaseApproval = approvals.body.data!.find((a) => a.approvalType === 'RELEASE')!;
   expect(releaseApproval).toBeDefined();
 
@@ -319,8 +327,8 @@ async function decideReleaseApproval(
   );
   expect(decided.body.data!.status).toBe(decision === 'approve' ? 'APPROVED' : 'REJECTED');
 
-  const afterDecision = await api<{ status: string }>('GET', `/api/v1/runs/${v1RunId}`);
-  return { v1RunId, v1Status: afterDecision.body.data!.status };
+  const afterDecision = await api<{ status: string }>('GET', `/api/v1/runs/${readinessRunId}`);
+  return { readinessRunId, readinessRunStatus: afterDecision.body.data!.status };
 }
 
 describe('Sprint 6 full happy path E2E (DEVOS-081) — rework, release, and closure', () => {
@@ -435,13 +443,13 @@ describe('Sprint 6 full happy path E2E (DEVOS-081) — rework, release, and clos
     expect(reworkReviewVersion.body.data!.metadata.decision).toBe('PASS');
 
     // --- Release approval, real deployment, closure ---
-    const { v1RunId, v1Status } = await decideReleaseApproval(
+    const { readinessRunId, readinessRunStatus } = await decideReleaseApproval(
       api,
       workItemId,
-      `${unique}-release-v1`,
+      `${unique}-release-readiness`,
       'approve',
     );
-    expect(v1Status).toBe('COMPLETED');
+    expect(readinessRunStatus).toBe('COMPLETED');
 
     const v2Run = await api<{ id: string }>(
       'POST',
@@ -483,7 +491,7 @@ describe('Sprint 6 full happy path E2E (DEVOS-081) — rework, release, and clos
       `/api/v1/work-items/${workItemId}/workflow-runs`,
     );
     expect(runsForWorkItem.body.data!.map((r) => r.id)).toEqual(
-      expect.arrayContaining([firstRunId, reworkRunId, v1RunId, v2RunId]),
+      expect.arrayContaining([firstRunId, reworkRunId, readinessRunId, v2RunId]),
     );
   }, 180_000);
 });
@@ -566,13 +574,13 @@ describe('Sprint 6 release failure E2E (DEVOS-081) — bounded, non-retryable fa
     );
     expect(developmentResult?.status).toBe('COMPLETED');
 
-    const { v1Status } = await decideReleaseApproval(
+    const { readinessRunStatus } = await decideReleaseApproval(
       api,
       workItemId,
-      `${unique}-release-v1`,
+      `${unique}-release-readiness`,
       'approve',
     );
-    expect(v1Status).toBe('COMPLETED');
+    expect(readinessRunStatus).toBe('COMPLETED');
 
     const v2Run = await api<{ id: string }>(
       'POST',

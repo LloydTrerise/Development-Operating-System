@@ -5,7 +5,7 @@ import {
 } from '../src/registry/capability-registry.js';
 
 describe('capability registry', () => {
-  it('defines exactly the eight capabilities introduced through Sprint 6', () => {
+  it('defines exactly the nine capabilities introduced through Sprint 10', () => {
     const keys = capabilityDefinitions.map((d) => d.key).sort();
     expect(keys).toEqual([
       'build-run',
@@ -15,6 +15,7 @@ describe('capability registry', () => {
       'pull-request-create',
       'repo-read',
       'repo-write',
+      'security-scan',
       'test-run',
     ]);
   });

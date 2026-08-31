@@ -18,6 +18,16 @@ export interface ReleaseReadinessEvidence {
     decision: string;
     findings: ReleaseReadinessFinding[];
   };
+  /**
+   * DEVOS-113: mirrors `testEvidence` exactly — the real (not fabricated)
+   * result of the new `security-scan` `TOOL_TASK` stage
+   * (`runSecurityScanTask`), resolved from the project's latest
+   * `SECURITY_SCAN_EVIDENCE` artifact.
+   */
+  securityScanEvidence?: {
+    artifactId: string;
+    passed: boolean;
+  };
 }
 
 export interface ReleaseReadinessResult {
@@ -37,13 +47,13 @@ export interface ReleaseReadinessResult {
  * review *agent*): the same evidence always yields the same verdict.
  *
  * §21 also lists "acceptance criteria pass," "security checks pass," and
- * "required approvals exist" among its checks — none of those have any
- * implementation anywhere in this codebase or this sprint (acceptance-
- * criteria validation and security scanning don't exist; this sprint adds
- * no new approval gate), so fabricating a pass/fail for them would violate
- * AGENTS.md §7. This evaluator is explicitly scoped to the two checks this
- * sprint's own evidence actually supports: test evidence and review
- * evidence.
+ * "required approvals exist" among its checks. DEVOS-113 (Sprint 10) adds
+ * real support for "security checks pass" via `securityScanEvidence`
+ * below; "acceptance criteria pass" and "required approvals exist" still
+ * have no implementation anywhere in this codebase, so fabricating a
+ * pass/fail for them would violate AGENTS.md §7. This evaluator remains
+ * explicitly scoped to the checks its own evidence actually supports: test
+ * evidence, review evidence, and now security-scan evidence.
  */
 export function evaluateReleaseReadiness(
   evidence: ReleaseReadinessEvidence,
@@ -68,6 +78,12 @@ export function evaluateReleaseReadiness(
     if (unresolvedBlockers.length > 0) {
       reasons.push(`${unresolvedBlockers.length} unresolved BLOCKER finding(s) remain.`);
     }
+  }
+
+  if (!evidence.securityScanEvidence) {
+    reasons.push('No security scan evidence found.');
+  } else if (!evidence.securityScanEvidence.passed) {
+    reasons.push('Security scan evidence shows a failing scan.');
   }
 
   return { ready: reasons.length === 0, reasons, evidence };
@@ -108,17 +124,25 @@ export async function gatherReleaseReadinessEvidence(
 
   const testEvidenceArtifact = latestOfType(artifacts, 'TEST_EVIDENCE');
   const reviewEvidenceArtifact = latestOfType(artifacts, 'REVIEW_EVIDENCE');
+  const securityScanEvidenceArtifact = latestOfType(artifacts, 'SECURITY_SCAN_EVIDENCE');
 
-  const [testEvidenceVersions, reviewEvidenceVersions] = await Promise.all([
-    testEvidenceArtifact
-      ? deps.artifactVersions.listForArtifact(testEvidenceArtifact.id)
-      : Promise.resolve([]),
-    reviewEvidenceArtifact
-      ? deps.artifactVersions.listForArtifact(reviewEvidenceArtifact.id)
-      : Promise.resolve([]),
-  ]);
+  const [testEvidenceVersions, reviewEvidenceVersions, securityScanEvidenceVersions] =
+    await Promise.all([
+      testEvidenceArtifact
+        ? deps.artifactVersions.listForArtifact(testEvidenceArtifact.id)
+        : Promise.resolve([]),
+      reviewEvidenceArtifact
+        ? deps.artifactVersions.listForArtifact(reviewEvidenceArtifact.id)
+        : Promise.resolve([]),
+      securityScanEvidenceArtifact
+        ? deps.artifactVersions.listForArtifact(securityScanEvidenceArtifact.id)
+        : Promise.resolve([]),
+    ]);
   const latestTestEvidenceVersion = testEvidenceVersions.sort((a, b) => b.version - a.version)[0];
   const latestReviewEvidenceVersion = reviewEvidenceVersions.sort(
+    (a, b) => b.version - a.version,
+  )[0];
+  const latestSecurityScanEvidenceVersion = securityScanEvidenceVersions.sort(
     (a, b) => b.version - a.version,
   )[0];
 
@@ -139,6 +163,14 @@ export async function gatherReleaseReadinessEvidence(
             findings: Array.isArray(latestReviewEvidenceVersion.metadata?.findings)
               ? (latestReviewEvidenceVersion.metadata.findings as ReleaseReadinessFinding[])
               : [],
+          },
+        }
+      : {}),
+    ...(securityScanEvidenceArtifact && latestSecurityScanEvidenceVersion
+      ? {
+          securityScanEvidence: {
+            artifactId: securityScanEvidenceArtifact.id,
+            passed: latestSecurityScanEvidenceVersion.metadata?.passed === true,
           },
         }
       : {}),

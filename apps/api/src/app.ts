@@ -7,13 +7,14 @@ import {
 } from '@devos/application';
 import { loadConfig, type DevosConfig } from '@devos/config';
 import type { ApiError, ApiErrorResponse, ApiResponse } from '@devos/contracts';
+import { Redis } from 'ioredis';
 import {
   createAgentDraftCreator,
   createAgentExecutionRepository,
   createAgentRepository,
   createAgentVersionRepository,
   createApprovalRepository,
-  createApprovalRunTransition,
+  createDecideApprovalAndTransition,
   createArtifactPublisher,
   createArtifactRepository,
   createArtifactVersionRepository,
@@ -40,7 +41,11 @@ import {
   createWorkflowVersionRepository,
   type DatabaseClient,
 } from '@devos/database';
-import { createLocalAuthProvider, type AuthProvider } from '@devos/identity';
+import {
+  createLocalAuthProvider,
+  createOidcAuthProvider,
+  type AuthProvider,
+} from '@devos/identity';
 import { createLocalFilesystemStorage } from '@devos/storage';
 import type {
   AgentExecutionSummaryUseCaseDeps,
@@ -65,7 +70,11 @@ import {
   NotFoundError,
   RateLimitError,
 } from './http/errors.js';
-import { createRateLimiter, type RateLimiter } from './http/rate-limiter.js';
+import {
+  createRateLimiter,
+  createRedisRateLimiter,
+  type RateLimiter,
+} from './http/rate-limiter.js';
 import { findRoute, type Route } from './http/router.js';
 import { createAgentExecutionSummaryRoutes } from './routes/agent-execution-summaries.js';
 import { createAgentRoutes } from './routes/agents.js';
@@ -202,12 +211,36 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   const config = loadConfig(options.env ?? process.env);
   const database =
     options.database ?? createDatabaseClient({ connectionString: config.database.url });
-  const authProvider = options.authProvider ?? createLocalAuthProvider();
+  // DEVOS-107: a real OIDC provider is used by default whenever both
+  // AUTH_ISSUER_URL/AUTH_AUDIENCE are configured; `createLocalAuthProvider`
+  // remains the default otherwise (local dev, and every existing test that
+  // never sets those two variables), per this task's own scope.
+  const authProvider =
+    options.authProvider ??
+    (config.auth.issuerUrl !== undefined && config.auth.audience !== undefined
+      ? createOidcAuthProvider({ issuerUrl: config.auth.issuerUrl, audience: config.auth.audience })
+      : createLocalAuthProvider());
   // DEVOS-091: only mutating requests count as "expensive" for rate-limiting
   // purposes — a read has no write/agent/tool-invocation cost behind it.
   // 60 requests per 10s per principal is generous enough not to interfere
   // with real usage or this app's own test suites while still being real.
-  const mutationRateLimiter = options.mutationRateLimiter ?? createRateLimiter(60, 10_000);
+  //
+  // DEVOS-118: a real shared-store (Redis) limiter is used by default
+  // whenever REDIS_URL is configured — the same "real backend when
+  // configured, else the pre-existing single-process behaviour" selection
+  // DEVOS-106/107 already established for Vault/OIDC. `redisClient` stays
+  // `undefined` (and is never connected) unless this path is actually
+  // taken, so every existing test/local-dev run that never sets REDIS_URL
+  // is completely unaffected.
+  const redisClient =
+    options.mutationRateLimiter === undefined && config.rateLimit.redisUrl !== undefined
+      ? new Redis(config.rateLimit.redisUrl)
+      : undefined;
+  const mutationRateLimiter =
+    options.mutationRateLimiter ??
+    (redisClient !== undefined
+      ? createRedisRateLimiter(redisClient, 60, 10_000)
+      : createRateLimiter(60, 10_000));
   const auditRecordRepository = createAuditRecordRepository(database.db);
   const projectTypeRepository = createProjectTypeRepository(database.db);
   const projectTypeWorkflowRepository = createProjectTypeWorkflowRepository(database.db);
@@ -225,6 +258,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     projects: projectDeps.projects,
     memberships: projectDeps.memberships,
     workItems: createWorkItemRepository(database.db),
+    auditRecords: auditRecordRepository,
   };
   const workflowDeps: WorkflowUseCaseDeps = options.workflowDeps ?? {
     projects: projectDeps.projects,
@@ -287,6 +321,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     projects: projectDeps.projects,
     memberships: projectDeps.memberships,
     knowledgeSources: createKnowledgeSourceRepository(database.db),
+    auditRecords: auditRecordRepository,
   };
   const organisationDeps: OrganisationUseCaseDeps = options.organisationDeps ?? {
     organisations: createOrganisationRepository(database.db),
@@ -309,8 +344,17 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     workflowRuns: workflowDeps.workflowRuns,
     artifactVersions: artifactDeps.artifactVersions,
     approvals: createApprovalRepository(database.db),
-    transitionAfterApprovalDecision: createApprovalRunTransition(database.db)
-      .transitionAfterApprovalDecision,
+    policies: policyDeps.policies,
+    decideApprovalAndTransition: createDecideApprovalAndTransition(database.db),
+    // DEVOS-112: the re-planning loop's own `startRunForVersion` call needs
+    // the full workflow use-case surface — reusing workflowDeps's own
+    // already-constructed repositories rather than duplicating them.
+    workItems: workflowDeps.workItems,
+    workflowDefinitions: workflowDeps.workflowDefinitions,
+    workflowVersions: workflowDeps.workflowVersions,
+    workflowTasks: workflowDeps.workflowTasks,
+    createDraft: workflowDeps.createDraft,
+    startRun: workflowDeps.startRun,
   };
 
   const routes: Route[] = [
@@ -323,7 +367,10 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
       ...workItemDeps,
       workflowRuns: workflowDeps.workflowRuns,
     }),
-    ...createWorkflowRoutes(API_PREFIX, workflowDeps),
+    ...createWorkflowRoutes(API_PREFIX, {
+      ...workflowDeps,
+      auditRecords: projectDeps.auditRecords,
+    }),
     ...createWorkflowRunRoutes(API_PREFIX, workflowDeps),
     ...createArtifactRoutes(API_PREFIX, artifactDeps),
     ...createAuditRoutes(API_PREFIX, auditDeps),
@@ -355,13 +402,13 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
       const match = findRoute(routes, req.method, pathname);
       if (!match) throw new NotFoundError(pathname);
 
-      const principal = authProvider.authenticate(req.headers.authorization);
+      const principal = await authProvider.authenticate(req.headers.authorization);
       if (match.route.protected && principal === null) throw new AuthenticationError();
 
       const isMutatingMethod =
         req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE';
       if (isMutatingMethod && principal !== null) {
-        if (!mutationRateLimiter.tryAcquire(principal.id)) throw new RateLimitError();
+        if (!(await mutationRateLimiter.tryAcquire(principal.id))) throw new RateLimitError();
       }
 
       const data = await match.route.handler({
@@ -378,6 +425,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   }
 
   async function close(): Promise<void> {
+    if (redisClient !== undefined) redisClient.disconnect();
     await database.close();
   }
 

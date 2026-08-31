@@ -5,6 +5,7 @@ import type {
   ApprovalRepository,
   ArtifactRepository,
   ArtifactVersionRepository,
+  AuditRecordRepository,
   ContextManifestRepository,
   MembershipRepository,
   ProjectRepository,
@@ -42,6 +43,20 @@ export interface WorkflowUseCaseDeps {
   workflowTasks: WorkflowTaskRepository;
   createDraft: CreateWorkflowDraft;
   startRun: StartWorkflowRun;
+}
+
+/**
+ * DEVOS-115: `createWorkflowDefinition`'s own audited variant — a narrower
+ * addition than widening `WorkflowUseCaseDeps` itself, following DEVOS-086's
+ * own `MembershipAccessDeps` precedent exactly: `startRunForVersion` and
+ * every other `WorkflowUseCaseDeps` consumer (the re-planning loop, the
+ * development-path rework loop) never reads `auditRecords` and must stay
+ * satisfiable by `ApprovalUseCaseDeps`/`ReviewAgentTaskHandlerDeps`, neither
+ * of which carries a *required* `auditRecords` field — widening the shared
+ * interface itself broke both at their own `startRunForVersion` call sites.
+ */
+export interface CreateWorkflowDefinitionDeps extends WorkflowUseCaseDeps {
+  auditRecords: AuditRecordRepository;
 }
 
 /**

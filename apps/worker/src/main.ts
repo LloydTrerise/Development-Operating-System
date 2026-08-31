@@ -42,10 +42,16 @@ import {
   createWorkItemCloser,
   createWorkItemRepository,
 } from '@devos/database';
-import { createLocalPullRequestProvider } from '@devos/integrations';
+import {
+  createEnvCredentialResolver,
+  createLocalPullRequestProvider,
+  createVaultCredentialResolver,
+  type CredentialResolver,
+} from '@devos/integrations';
 import { createMetricsRegistry } from '@devos/observability';
 import { createLocalFilesystemStorage } from '@devos/storage';
 import { routeAgentTask } from './agent-task-router.js';
+import { startMetricsServer } from './metrics-server.js';
 import { createTaskDispatcher } from './task-dispatcher.js';
 import { routeToolTask } from './tool-task-router.js';
 
@@ -59,6 +65,22 @@ const dispatcher = createTaskDispatcher(taskQueue, { metrics });
 const storage = createLocalFilesystemStorage(
   process.env.ARTIFACT_STORAGE_DIR ?? './data/artifacts',
 );
+
+/**
+ * DEVOS-106: real Vault when configured (VAULT_ADDR/VAULT_TOKEN — see
+ * infrastructure/docker/docker-compose.yml's `vault` service), else the
+ * pre-existing env-var resolver — so a project's Git integration
+ * `credentialReference` resolves to a real live secret only when a real
+ * secret backend is actually configured, without forcing every DevOS
+ * deployment to run Vault.
+ */
+const credentialResolver: CredentialResolver =
+  config.secrets.vaultAddress !== undefined && config.secrets.vaultToken !== undefined
+    ? createVaultCredentialResolver({
+        address: config.secrets.vaultAddress,
+        token: config.secrets.vaultToken,
+      })
+    : createEnvCredentialResolver();
 const publishArtifact = createArtifactPublisher(database.db);
 const workflowRuns = createWorkflowRunRepository(database.db);
 const workItems = createWorkItemRepository(database.db);
@@ -170,7 +192,12 @@ if (modelAdapter === undefined) {
     toolInvocations: createToolInvocationRepository(database.db),
     auditRecords: createAuditRecordRepository(database.db),
     integrations: createIntegrationRepository(database.db),
+    // DEVOS-104: the real GitHub provider is selected per task instead,
+    // when the project's Git integration configures a real GitHub target
+    // (resolveGitHubRepositoryTarget) — this stays the fallback for every
+    // project that doesn't.
     pullRequestProvider: createLocalPullRequestProvider(),
+    credentialResolver,
     // DEVOS-065/067: the review agent's own extra needs — engineering
     // standards retrieval, and starting a rework run on CHANGES_REQUIRED.
     knowledgeSources: createKnowledgeSourceRepository(database.db),
@@ -219,10 +246,32 @@ if (metricsSnapshotIntervalMs > 0) {
   metricsSnapshotTimer.unref();
 }
 
+/**
+ * DEVOS-117: the real external side of the same seam — a real, self-hosted
+ * Prometheus (`infrastructure/docker/docker-compose.yml`) scrapes this real
+ * `GET /metrics` endpoint on its own schedule, additive alongside (not
+ * replacing) the periodic log-line snapshot above. `9464` is the OpenTelemetry
+ * Prometheus exporter's own conventional default port when `METRICS_PORT` is
+ * set — reused here for the same real numbers, even though this exports via
+ * a hand-written Prometheus text formatter rather than the OTel SDK itself
+ * (see `prometheus-format.ts`'s own doc comment for why).
+ *
+ * Opt-in (unset/`0` disables it), unlike `METRICS_SNAPSHOT_INTERVAL_MS`'s own
+ * enabled-by-default convention: this is a real network listener, and
+ * `tests/e2e` spawns multiple independent `apps/worker` processes, often
+ * concurrently — a shared fixed default port would collide across them.
+ */
+const metricsPort = Number(process.env.METRICS_PORT ?? 0);
+const metricsServer = metricsPort > 0 ? startMetricsServer(metrics, metricsPort) : undefined;
+if (metricsServer) {
+  console.log(`DevOS worker metrics available at http://localhost:${metricsPort}/metrics`);
+}
+
 async function shutdown(signal: string): Promise<void> {
   console.log(`DevOS worker received ${signal}, shutting down gracefully`);
   if (metricsSnapshotTimer) clearInterval(metricsSnapshotTimer);
   console.log('DevOS worker final metrics snapshot', JSON.stringify(metrics.snapshot()));
+  if (metricsServer) await new Promise<void>((resolve) => metricsServer.close(() => resolve()));
   await dispatcher.stop();
   await database.close();
   console.log('DevOS worker stopped');

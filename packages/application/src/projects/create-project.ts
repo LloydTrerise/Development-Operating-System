@@ -9,6 +9,7 @@ import {
   type WorkflowDefinition,
   type WorkflowVersion,
 } from '@devos/domain';
+import type { AuditId } from '@devos/contracts';
 import { NotFoundError, ValidationError } from '../errors.js';
 import type { ProjectUseCaseDeps } from './deps.js';
 
@@ -109,6 +110,23 @@ export async function createProject(
   });
 
   await deps.createProjectWithClones(project, membership, workflows, agents);
+
+  // DEVOS-115: extends DEVOS-086's audit coverage to project creation — same
+  // lighter-weight, non-transactional pattern (audited after the real state
+  // change succeeds, not inside `createProjectWithClones`'s own transaction).
+  await deps.auditRecords.create({
+    id: randomUUID() as AuditId,
+    organisationId: input.organisationId,
+    projectId: project.id,
+    actorType: 'USER',
+    actorId: principalId,
+    action: 'project.created',
+    targetType: 'Project',
+    targetId: project.id,
+    outcome: 'SUCCESS',
+    metadata: { name: project.name, slug: project.slug, projectTypeId },
+    createdAt: now,
+  });
 
   return project;
 }

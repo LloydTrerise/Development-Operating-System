@@ -110,6 +110,23 @@ export function validateEnvironment(env: RawEnvironment): ConfigValidationResult
     });
   }
 
+  // VAULT_ADDR/VAULT_TOKEN (DEVOS-106): optional here — only a process that
+  // actually resolves a live credential (apps/worker's real GitHub/Render
+  // adapters) needs Vault configured; never echo VAULT_TOKEN's value itself.
+  validUrl(env.VAULT_ADDR, 'VAULT_ADDR', issues);
+  if (env.VAULT_TOKEN !== undefined && env.VAULT_TOKEN.trim().length === 0) {
+    issues.push({
+      key: 'VAULT_TOKEN',
+      message: 'VAULT_TOKEN must not be empty when provided.',
+    });
+  }
+
+  // REDIS_URL (DEVOS-118): optional here — only apps/api's rate limiter
+  // needs a real shared store configured; unset stays the real in-process
+  // limiter (DEVOS-091), matching every other optional-backend precedent
+  // above.
+  validUrl(env.REDIS_URL, 'REDIS_URL', issues);
+
   if (env.LOG_LEVEL !== undefined && !['debug', 'info', 'warn', 'error'].includes(env.LOG_LEVEL)) {
     issues.push({
       key: 'LOG_LEVEL',

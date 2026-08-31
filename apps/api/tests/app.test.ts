@@ -241,9 +241,7 @@ function createInMemoryProjectDeps(): ProjectUseCaseDeps {
   };
 }
 
-function createInMemoryOrganisationDeps(
-  projectDeps: ProjectUseCaseDeps,
-): OrganisationUseCaseDeps {
+function createInMemoryOrganisationDeps(projectDeps: ProjectUseCaseDeps): OrganisationUseCaseDeps {
   const organisations = new Map<string, Organisation>();
 
   const organisationRepository: OrganisationRepository = {
@@ -287,6 +285,7 @@ function createInMemoryWorkItemDeps(projectDeps: ProjectUseCaseDeps): WorkItemUs
     projects: projectDeps.projects,
     memberships: projectDeps.memberships,
     workItems: workItemRepository,
+    auditRecords: projectDeps.auditRecords,
   };
 }
 
@@ -656,6 +655,7 @@ function createInMemoryKnowledgeDeps(projectDeps: ProjectUseCaseDeps): Knowledge
     projects: projectDeps.projects,
     memberships: projectDeps.memberships,
     knowledgeSources,
+    auditRecords: projectDeps.auditRecords,
   };
 }
 
@@ -852,6 +852,37 @@ describe('api application with an unreachable database', () => {
 
     expect(response.status).toBe(200);
     expect(body.data).toEqual({ status: 'degraded', checks: { database: 'error' } });
+  });
+});
+
+describe('DEVOS-107: real OIDC auth provider selected by default when configured', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const started = await startServer({
+      env: {
+        ...TEST_ENV,
+        AUTH_ISSUER_URL: 'https://devos-test.example.auth0.com/',
+        AUTH_AUDIENCE: 'https://devos-api',
+      },
+    });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  it('rejects a plain bearer token that is not a real signed JWT — proving the local dev provider is not in effect', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/me`, {
+      headers: { authorization: 'Bearer alice' },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error.code).toBe('DEVOS_UNAUTHENTICATED');
   });
 });
 
@@ -1867,7 +1898,11 @@ describe('release readiness routes', () => {
     expect(response.status).toBe(200);
     expect(body.data).toMatchObject({
       ready: false,
-      reasons: ['No test evidence found.', 'No review evidence found.'],
+      reasons: [
+        'No test evidence found.',
+        'No review evidence found.',
+        'No security scan evidence found.',
+      ],
     });
   });
 
@@ -1917,6 +1952,28 @@ describe('release readiness routes', () => {
       createdAt: now,
     });
 
+    const securityScanEvidenceArtifact: Artifact = {
+      id: 'release-readiness-security-scan-evidence',
+      projectId,
+      artifactType: 'SECURITY_SCAN_EVIDENCE',
+      name: 'Security Scan Evidence',
+      status: 'GENERATED',
+      createdBy: 'devos-agent-runtime',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await artifactDeps.publishArtifact(securityScanEvidenceArtifact, {
+      id: 'release-readiness-security-scan-evidence-v1',
+      artifactId: securityScanEvidenceArtifact.id,
+      version: 1,
+      contentType: 'application/json',
+      contentUri: 'file:///security-scan-evidence.json',
+      contentHash: 'c'.repeat(64),
+      metadata: { passed: true },
+      createdBy: 'devos-agent-runtime',
+      createdAt: now,
+    });
+
     const response = await authed(`/api/v1/projects/${projectId}/release-readiness`, 'alice');
     const body = await response.json();
 
@@ -1927,6 +1984,7 @@ describe('release readiness routes', () => {
       evidence: {
         testEvidence: { artifactId: testEvidenceArtifact.id, passed: true },
         reviewEvidence: { artifactId: reviewEvidenceArtifact.id, decision: 'PASS' },
+        securityScanEvidence: { artifactId: securityScanEvidenceArtifact.id, passed: true },
       },
     });
   });

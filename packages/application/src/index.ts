@@ -75,6 +75,7 @@ export * from './tasks/run-release-readiness-check-task.js';
 export * from './tasks/run-release-task.js';
 export * from './tasks/run-requirements-agent-task.js';
 export * from './tasks/run-review-agent-task.js';
+export * from './tasks/run-security-scan-task.js';
 export * from './tasks/run-technical-design-agent-task.js';
 export * from './tasks/run-validation-task.js';
 export * from './tools/deps.js';

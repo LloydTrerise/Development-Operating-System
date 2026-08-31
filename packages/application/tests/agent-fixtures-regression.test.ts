@@ -20,7 +20,9 @@ import type {
   ArtifactVersion,
   ArtifactVersionRepository,
   ContextManifest,
+  KnowledgeSourceRepository,
   ProjectId,
+  ProjectRepository,
   WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
@@ -226,6 +228,20 @@ describe('agent fixtures regression (no live API calls)', () => {
       await artifactVersions.create(version);
     };
 
+    // DEVOS-109: runAgentTask now calls buildContext(), which needs these.
+    const projects: ProjectRepository = {
+      getById: async () => null,
+      listForOrganisation: async () => [],
+      create: async () => {},
+      update: async () => {},
+    };
+    const knowledgeSources: KnowledgeSourceRepository = {
+      getById: async () => null,
+      listForProject: async () => [],
+      create: async () => {},
+      update: async () => {},
+    };
+
     const fixtureRepository = createFilesystemFixtureRepository();
     const [discoveryFixture, requirementsFixture, technicalDesignFixture, planningFixture] =
       await Promise.all([
@@ -256,6 +272,8 @@ describe('agent fixtures regression (no live API calls)', () => {
       publishArtifact,
       artifacts,
       artifactVersions,
+      projects,
+      knowledgeSources,
     };
 
     function buildTask(taskKey: string, agentRef: string): WorkflowTask {

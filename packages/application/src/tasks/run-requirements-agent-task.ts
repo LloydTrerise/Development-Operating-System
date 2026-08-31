@@ -50,14 +50,11 @@ export async function runRequirementsAgentTask(
     throw new Error(`Discovery artifact ${discoveryArtifact.id} has no versions.`);
   }
 
+  // DEVOS-109: no `sources` entry needed here anymore — runAgentTask's own
+  // buildContext() call already records this artifact (and every other one
+  // this run has produced so far) in the manifest automatically.
   const { agentExecutionId, agentVersionId, ...modelOutput } = await runAgentTask(deps, task, {
     input: { discoveryReport: latestDiscoveryVersion.metadata ?? {} },
-    sources: [
-      {
-        type: 'ARTIFACT',
-        ref: `artifact:${discoveryArtifact.id}:v${latestDiscoveryVersion.version}`,
-      },
-    ],
   });
 
   const now = new Date().toISOString();

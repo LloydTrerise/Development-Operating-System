@@ -51,7 +51,13 @@ import {
   SEED_RELEASE_PATH_WORKFLOW_KEY,
   SEED_RELEASE_PATH_WORKFLOW_V2_GRAPH,
   SEED_RELEASE_PATH_WORKFLOW_V2_VERSION_ID,
+  SEED_RELEASE_PATH_WORKFLOW_V3_GRAPH,
+  SEED_RELEASE_PATH_WORKFLOW_V3_VERSION_ID,
   SEED_RELEASE_PATH_WORKFLOW_VERSION_ID,
+  SEED_RELEASE_ROLLBACK_WORKFLOW_DEFINITION_ID,
+  SEED_RELEASE_ROLLBACK_WORKFLOW_GRAPH,
+  SEED_RELEASE_ROLLBACK_WORKFLOW_KEY,
+  SEED_RELEASE_ROLLBACK_WORKFLOW_VERSION_ID,
   SEED_REQUIREMENTS_AGENT_CONFIGURATION,
   SEED_REQUIREMENTS_AGENT_ID,
   SEED_REQUIREMENTS_AGENT_KEY,
@@ -486,6 +492,54 @@ async function main(): Promise<void> {
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
 
+  await db
+    .insertInto('workflow_versions')
+    .values({
+      id: SEED_RELEASE_PATH_WORKFLOW_V3_VERSION_ID,
+      workflow_definition_id: SEED_RELEASE_PATH_WORKFLOW_DEFINITION_ID,
+      version: 3,
+      status: 'PUBLISHED',
+      definition: JSON.stringify(SEED_RELEASE_PATH_WORKFLOW_V3_GRAPH),
+      published_at: now,
+      created_by: SEED_PRINCIPAL_ID,
+      created_at: now,
+    })
+    .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
+
+  // DEVOS-114: a real, separate on-demand workflow (not another release-path
+  // version) so `runReleaseRollbackTask` has a real caller reachable through
+  // the existing generic "start a run" UI/API, distinct from the standard
+  // release pipeline.
+  await db
+    .insertInto('workflow_definitions')
+    .values({
+      id: SEED_RELEASE_ROLLBACK_WORKFLOW_DEFINITION_ID,
+      project_id: SEED_PROJECT_ID,
+      key: SEED_RELEASE_ROLLBACK_WORKFLOW_KEY,
+      name: SEED_RELEASE_ROLLBACK_WORKFLOW_GRAPH.name,
+      description: SEED_RELEASE_ROLLBACK_WORKFLOW_GRAPH.description,
+      created_at: now,
+      updated_at: now,
+    })
+    .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
+
+  await db
+    .insertInto('workflow_versions')
+    .values({
+      id: SEED_RELEASE_ROLLBACK_WORKFLOW_VERSION_ID,
+      workflow_definition_id: SEED_RELEASE_ROLLBACK_WORKFLOW_DEFINITION_ID,
+      version: 1,
+      status: 'PUBLISHED',
+      definition: JSON.stringify(SEED_RELEASE_ROLLBACK_WORKFLOW_GRAPH),
+      published_at: now,
+      created_by: SEED_PRINCIPAL_ID,
+      created_at: now,
+    })
+    .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
+
   const projectTypeWorkflowSeeds = [
     { id: SEED_PT_WORKFLOW_INTAKE_ID, key: SEED_WORKFLOW_KEY, graph: SEED_WORKFLOW_GRAPH },
     {
@@ -501,7 +555,10 @@ async function main(): Promise<void> {
     {
       id: SEED_PT_WORKFLOW_RELEASE_PATH_ID,
       key: SEED_RELEASE_PATH_WORKFLOW_KEY,
-      graph: SEED_RELEASE_PATH_WORKFLOW_V2_GRAPH,
+      // DEVOS-113: v3 (security-scan -> release-readiness-check) is now the
+      // live default template for new projects of this type, same as v2
+      // superseded v1 above.
+      graph: SEED_RELEASE_PATH_WORKFLOW_V3_GRAPH,
     },
   ];
 

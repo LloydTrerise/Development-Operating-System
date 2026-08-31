@@ -16,6 +16,7 @@ import {
   Paper,
   Select,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -47,6 +48,13 @@ import { StatusChip } from '../components/StatusChip.js';
 import { useProjectContext } from '../project-context.js';
 
 const POLL_INTERVAL_MS = 2000;
+
+// DEVOS-114: matches the real seeded workflow key
+// (`SEED_RELEASE_ROLLBACK_WORKFLOW_KEY`, `packages/database/src/seed-constants.ts`)
+// — this is the one workflow whose real caller-supplied input this generic
+// form needs to collect, since a rollback's target revision can't be known
+// ahead of time the way every other workflow's fixed node graph is.
+const RELEASE_ROLLBACK_WORKFLOW_KEY = 'release-rollback';
 
 const PRE_PAPER_SX = {
   p: 1,
@@ -145,8 +153,8 @@ function RunCard({
 
   const runArtifacts = artifacts.filter((artifact) => artifact.provenance.workflowRunId === run.id);
   const findings =
-    (reviewEvidence?.metadata?.findings as { severity: string; description?: string }[] | undefined) ??
-    [];
+    (reviewEvidence?.metadata?.findings as
+      { severity: string; description?: string }[] | undefined) ?? [];
 
   return (
     <Card variant="outlined" sx={{ mb: 3 }}>
@@ -199,7 +207,12 @@ function RunCard({
                     </Typography>
                     {execution.contextManifest && (
                       <>
-                        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 1 }}>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          component="div"
+                          sx={{ mt: 1 }}
+                        >
                           Context manifest
                         </Typography>
                         <Typography variant="body2">
@@ -211,7 +224,12 @@ function RunCard({
                     )}
                     {execution.output && (
                       <>
-                        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 1 }}>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          component="div"
+                          sx={{ mt: 1 }}
+                        >
                           Output
                         </Typography>
                         <Paper variant="outlined" component="pre" sx={PRE_PAPER_SX}>
@@ -230,7 +248,11 @@ function RunCard({
                     </Typography>
                     <List dense disablePadding>
                       {invocations.map((invocation) => (
-                        <ListItem key={invocation.invocationId} disableGutters sx={{ display: 'block' }}>
+                        <ListItem
+                          key={invocation.invocationId}
+                          disableGutters
+                          sx={{ display: 'block' }}
+                        >
                           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                             <Typography variant="body2">{invocation.capabilityKey}</Typography>
                             <StatusChip status={invocation.status} />
@@ -242,7 +264,11 @@ function RunCard({
                           </Stack>
                           {invocation.errorCode && <ErrorAlert message={invocation.errorCode} />}
                           {invocation.outputMetadata && (
-                            <Paper variant="outlined" component="pre" sx={{ ...PRE_PAPER_SX, mt: 0.5 }}>
+                            <Paper
+                              variant="outlined"
+                              component="pre"
+                              sx={{ ...PRE_PAPER_SX, mt: 0.5 }}
+                            >
                               {JSON.stringify(invocation.outputMetadata, null, 2)}
                             </Paper>
                           )}
@@ -365,6 +391,7 @@ export function RunsPage() {
 
   const [selectedWorkItemId, setSelectedWorkItemId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
+  const [rollbackToRevision, setRollbackToRevision] = useState('');
   const [startError, setStartError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
@@ -442,9 +469,13 @@ export function RunsPage() {
     refreshWorkItemRuns();
   }, [selectedWorkItemId]);
 
+  const selectedWorkflow = workflows.find((workflow) => workflow.id === selectedWorkflowId);
+  const isRollbackWorkflow = selectedWorkflow?.key === RELEASE_ROLLBACK_WORKFLOW_KEY;
+
   async function handleStartRun(event: FormEvent) {
     event.preventDefault();
     if (!selectedWorkItemId || !selectedWorkflowId) return;
+    if (isRollbackWorkflow && !rollbackToRevision.trim()) return;
 
     setStarting(true);
     setStartError(null);
@@ -452,6 +483,7 @@ export function RunsPage() {
     const result = await startRun(selectedWorkflowId, {
       workItemId: selectedWorkItemId,
       idempotencyKey: `web-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      ...(isRollbackWorkflow ? { inputs: { rollbackToRevision: rollbackToRevision.trim() } } : {}),
     });
     setStarting(false);
 
@@ -459,6 +491,7 @@ export function RunsPage() {
       setStartError(result.error.message);
       return;
     }
+    if (isRollbackWorkflow) setRollbackToRevision('');
 
     setRuns((current) => [result.data, ...current]);
     refreshWorkItemRuns();
@@ -470,7 +503,9 @@ export function RunsPage() {
         <Typography variant="h4" component="h2" gutterBottom>
           Runs
         </Typography>
-        <Typography color="text.secondary">Select a project to start and observe workflow runs.</Typography>
+        <Typography color="text.secondary">
+          Select a project to start and observe workflow runs.
+        </Typography>
       </section>
     );
   }
@@ -525,13 +560,29 @@ export function RunsPage() {
             ))}
           </Select>
         </FormControl>
+        {isRollbackWorkflow && (
+          <TextField
+            size="small"
+            required
+            label="Revision to roll back to"
+            helperText="An authorized, explicit revision — never automatic (DEVOS-077)."
+            value={rollbackToRevision}
+            onChange={(event) => setRollbackToRevision(event.target.value)}
+            sx={{ minWidth: 260 }}
+          />
+        )}
         <Button
           type="submit"
           variant="contained"
-          disabled={starting || workItems.length === 0 || workflows.length === 0}
+          disabled={
+            starting ||
+            workItems.length === 0 ||
+            workflows.length === 0 ||
+            (isRollbackWorkflow && !rollbackToRevision.trim())
+          }
           sx={{ mt: 0.5 }}
         >
-          {starting ? 'Starting…' : 'Start run'}
+          {starting ? 'Starting…' : isRollbackWorkflow ? 'Roll back' : 'Start run'}
         </Button>
         {startError && <ErrorAlert message={startError} />}
       </Stack>
@@ -559,7 +610,9 @@ export function RunsPage() {
         Every run this work item&apos;s change has gone through — planning, development, release,
         and any others — oldest first, not just the runs started above.
       </Typography>
-      {workItemRunsError && <ErrorAlert message={`Failed to load the work item's runs: ${workItemRunsError}`} />}
+      {workItemRunsError && (
+        <ErrorAlert message={`Failed to load the work item's runs: ${workItemRunsError}`} />
+      )}
       <Box>
         {workItemRuns.map((run) => (
           <RunCard

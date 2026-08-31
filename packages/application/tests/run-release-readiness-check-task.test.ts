@@ -77,9 +77,16 @@ function buildScenario() {
       decision: 'PASS',
       findings: [],
     });
-    projectArtifacts = [testEvidenceArtifact, reviewEvidenceArtifact];
+    const securityScanEvidenceArtifact = makeArtifact('SECURITY_SCAN_EVIDENCE', 3);
+    const securityScanEvidenceVersion = makeVersion(securityScanEvidenceArtifact, {
+      passed: true,
+    });
+    projectArtifacts = [testEvidenceArtifact, reviewEvidenceArtifact, securityScanEvidenceArtifact];
     artifactVersionsByArtifactId.set(testEvidenceArtifact.id, [testEvidenceVersion]);
     artifactVersionsByArtifactId.set(reviewEvidenceArtifact.id, [reviewEvidenceVersion]);
+    artifactVersionsByArtifactId.set(securityScanEvidenceArtifact.id, [
+      securityScanEvidenceVersion,
+    ]);
   }
 
   function seedBlockerFinding(): void {
@@ -90,9 +97,36 @@ function buildScenario() {
       decision: 'PASS',
       findings: [{ severity: 'BLOCKER', description: 'Should not have shipped.' }],
     });
-    projectArtifacts = [testEvidenceArtifact, reviewEvidenceArtifact];
+    const securityScanEvidenceArtifact = makeArtifact('SECURITY_SCAN_EVIDENCE', 3);
+    const securityScanEvidenceVersion = makeVersion(securityScanEvidenceArtifact, {
+      passed: true,
+    });
+    projectArtifacts = [testEvidenceArtifact, reviewEvidenceArtifact, securityScanEvidenceArtifact];
     artifactVersionsByArtifactId.set(testEvidenceArtifact.id, [testEvidenceVersion]);
     artifactVersionsByArtifactId.set(reviewEvidenceArtifact.id, [reviewEvidenceVersion]);
+    artifactVersionsByArtifactId.set(securityScanEvidenceArtifact.id, [
+      securityScanEvidenceVersion,
+    ]);
+  }
+
+  function seedFailingScan(): void {
+    const testEvidenceArtifact = makeArtifact('TEST_EVIDENCE', 1);
+    const testEvidenceVersion = makeVersion(testEvidenceArtifact, { passed: true });
+    const reviewEvidenceArtifact = makeArtifact('REVIEW_EVIDENCE', 2);
+    const reviewEvidenceVersion = makeVersion(reviewEvidenceArtifact, {
+      decision: 'PASS',
+      findings: [],
+    });
+    const securityScanEvidenceArtifact = makeArtifact('SECURITY_SCAN_EVIDENCE', 3);
+    const securityScanEvidenceVersion = makeVersion(securityScanEvidenceArtifact, {
+      passed: false,
+    });
+    projectArtifacts = [testEvidenceArtifact, reviewEvidenceArtifact, securityScanEvidenceArtifact];
+    artifactVersionsByArtifactId.set(testEvidenceArtifact.id, [testEvidenceVersion]);
+    artifactVersionsByArtifactId.set(reviewEvidenceArtifact.id, [reviewEvidenceVersion]);
+    artifactVersionsByArtifactId.set(securityScanEvidenceArtifact.id, [
+      securityScanEvidenceVersion,
+    ]);
   }
 
   const workflowRuns: WorkflowRunRepository = {
@@ -127,7 +161,7 @@ function buildScenario() {
     integrations: {} as never,
   };
 
-  return { deps, task, seedPassingEvidence, seedBlockerFinding };
+  return { deps, task, seedPassingEvidence, seedBlockerFinding, seedFailingScan };
 }
 
 describe('runReleaseReadinessCheckTask (DEVOS-073)', () => {
@@ -154,6 +188,15 @@ describe('runReleaseReadinessCheckTask (DEVOS-073)', () => {
 
     await expect(runReleaseReadinessCheckTask(deps, task)).rejects.toThrow(
       'unresolved BLOCKER finding',
+    );
+  });
+
+  it('throws with the reason when the security scan failed', async () => {
+    const { deps, task, seedFailingScan } = buildScenario();
+    seedFailingScan();
+
+    await expect(runReleaseReadinessCheckTask(deps, task)).rejects.toThrow(
+      'Security scan evidence shows a failing scan.',
     );
   });
 

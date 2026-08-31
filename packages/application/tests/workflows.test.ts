@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+  type AuditRecord,
+  type AuditRecordRepository,
   type Membership,
   type MembershipRepository,
   type OrganisationId,
@@ -205,6 +207,14 @@ function createInMemoryDeps() {
     await membershipRepository.create(membership);
   };
 
+  const auditRecordsStore: AuditRecord[] = [];
+  const auditRecords: AuditRecordRepository = {
+    create: async (record) => {
+      auditRecordsStore.push(record);
+    },
+    listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
+  };
+
   return {
     projects: projectRepository,
     memberships: membershipRepository,
@@ -219,6 +229,7 @@ function createInMemoryDeps() {
     projectTypeWorkflows,
     projectTypeAgents,
     createProjectWithClones,
+    auditRecords,
   };
 }
 
@@ -253,6 +264,18 @@ describe('workflow use cases', () => {
     expect(definition.key).toBe('intake-to-artifact');
     expect(version.version).toBe(1);
     expect(version.status).toBe('DRAFT');
+
+    // DEVOS-115: extends DEVOS-086's audit coverage to workflow
+    // definition/version creation.
+    const auditRecords = await deps.auditRecords.listForProject(projectId);
+    expect(auditRecords).toContainEqual(
+      expect.objectContaining({
+        action: 'workflow.created',
+        targetType: 'WorkflowDefinition',
+        targetId: definition.id,
+        outcome: 'SUCCESS',
+      }),
+    );
   });
 
   it('rejects a duplicate key within the same project', async () => {
@@ -391,7 +414,7 @@ describe('workflow use cases', () => {
     expect(tasks[0]).toMatchObject({ taskKey: 'discovery', taskType: 'TASK', status: 'PENDING' });
   });
 
-  it("DEVOS-088: folds a supplied correlationId into the run's and every task's own input", async () => {
+  it("DEVOS-088/114: folds a supplied correlationId, and the run's own generic inputs, into the run's and every task's own input", async () => {
     const { definition } = await createWorkflowDefinition(deps, 'alice', projectId, {
       key: 'correlated',
       name: 'Correlated',
@@ -422,7 +445,94 @@ describe('workflow use cases', () => {
 
     expect(run.input).toEqual({ foo: 'bar', correlationId: 'trace-abcd' });
     const tasks = await deps.workflowTasks.listForRun(run.id);
-    expect(tasks[0]?.input).toMatchObject({ correlationId: 'trace-abcd' });
+    // DEVOS-114: previously only run.input carried the caller's own generic
+    // inputs — a TOOL_TASK handler reading task.input directly (e.g.
+    // runReleaseRollbackTask's rollbackToRevision) had no way to see them.
+    expect(tasks[0]?.input).toMatchObject({ foo: 'bar', correlationId: 'trace-abcd' });
+  });
+
+  it('DEVOS-114: a reserved key (e.g. agentRef) on the node always wins over a same-named caller-supplied input', async () => {
+    const AGENT_GRAPH = {
+      name: 'Agent graph',
+      nodes: [{ id: 'discovery', type: 'AGENT_TASK', agentRef: 'discovery-agent' }],
+      edges: [],
+    };
+    const { definition } = await createWorkflowDefinition(deps, 'alice', projectId, {
+      key: 'agent-reserved',
+      name: 'Agent reserved',
+      definition: AGENT_GRAPH,
+    });
+    await publishWorkflowVersion(deps, 'alice', definition.id);
+
+    const workItem: WorkItem = {
+      id: randomUUID() as WorkItem['id'],
+      projectId,
+      title: 'Test item',
+      type: 'GENERAL',
+      status: 'OPEN',
+      priority: 'MEDIUM',
+      metadata: {},
+      createdBy: 'alice',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    await deps.workItems.create(workItem);
+
+    const run = await startWorkflowRunFromActiveVersion(deps, 'alice', definition.id, {
+      workItemId: workItem.id,
+      inputs: { agentRef: 'not-a-real-agent' },
+      idempotencyKey: 'key-agent-reserved',
+    });
+
+    const tasks = await deps.workflowTasks.listForRun(run.id);
+    expect(tasks[0]?.input).toMatchObject({ agentRef: 'discovery-agent' });
+  });
+
+  it("DEVOS-108-followup: folds each node's real upstream dependencies (from its own declared edges) into its task input, and omits the field for a node with none", async () => {
+    const CHAIN_GRAPH = {
+      name: 'Chained',
+      nodes: [
+        { id: 'discovery', type: 'TASK' },
+        { id: 'requirements', type: 'TASK' },
+        { id: 'planning', type: 'TASK' },
+      ],
+      edges: [
+        { from: 'discovery', to: 'requirements' },
+        { from: 'requirements', to: 'planning' },
+      ],
+    };
+    const { definition } = await createWorkflowDefinition(deps, 'alice', projectId, {
+      key: 'chained',
+      name: 'Chained',
+      definition: CHAIN_GRAPH,
+    });
+    await publishWorkflowVersion(deps, 'alice', definition.id);
+
+    const workItem: WorkItem = {
+      id: randomUUID() as WorkItem['id'],
+      projectId,
+      title: 'Test item',
+      type: 'GENERAL',
+      status: 'OPEN',
+      priority: 'MEDIUM',
+      metadata: {},
+      createdBy: 'alice',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    await deps.workItems.create(workItem);
+
+    const run = await startWorkflowRunFromActiveVersion(deps, 'alice', definition.id, {
+      workItemId: workItem.id,
+      inputs: {},
+      idempotencyKey: 'key-chained',
+    });
+
+    const tasks = await deps.workflowTasks.listForRun(run.id);
+    const byKey = Object.fromEntries(tasks.map((t) => [t.taskKey, t]));
+    expect(byKey.discovery?.input).not.toHaveProperty('dependsOn');
+    expect(byKey.requirements?.input).toMatchObject({ dependsOn: ['discovery'] });
+    expect(byKey.planning?.input).toMatchObject({ dependsOn: ['requirements'] });
   });
 
   it('is idempotent: starting a run twice with the same key returns the same run', async () => {

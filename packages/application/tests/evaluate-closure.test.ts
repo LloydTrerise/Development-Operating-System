@@ -25,12 +25,14 @@ const PASSING_TEST_EVIDENCE = { artifactId: 'a', passed: true };
 const PASSING_REVIEW_EVIDENCE = { artifactId: 'b', decision: 'PASS', findings: [] };
 const APPROVED_RELEASE_APPROVAL = { approvalId: 'c', status: 'APPROVED' };
 const PASSING_RELEASE_EVIDENCE = { artifactId: 'd', passed: true };
+const PASSING_SECURITY_SCAN_EVIDENCE = { artifactId: 'e', passed: true };
 
 describe('evaluateClosure (pure function)', () => {
   it('closes when test/review evidence pass, release approval is APPROVED, and release evidence passed', () => {
     const result = evaluateClosure({
       testEvidence: PASSING_TEST_EVIDENCE,
       reviewEvidence: PASSING_REVIEW_EVIDENCE,
+      securityScanEvidence: PASSING_SECURITY_SCAN_EVIDENCE,
       releaseApproval: APPROVED_RELEASE_APPROVAL,
       releaseEvidence: PASSING_RELEASE_EVIDENCE,
     });
@@ -43,6 +45,7 @@ describe('evaluateClosure (pure function)', () => {
     const result = evaluateClosure({
       testEvidence: { artifactId: 'a', passed: false },
       reviewEvidence: PASSING_REVIEW_EVIDENCE,
+      securityScanEvidence: PASSING_SECURITY_SCAN_EVIDENCE,
       releaseApproval: APPROVED_RELEASE_APPROVAL,
       releaseEvidence: PASSING_RELEASE_EVIDENCE,
     });
@@ -55,6 +58,7 @@ describe('evaluateClosure (pure function)', () => {
     const result = evaluateClosure({
       testEvidence: PASSING_TEST_EVIDENCE,
       reviewEvidence: PASSING_REVIEW_EVIDENCE,
+      securityScanEvidence: PASSING_SECURITY_SCAN_EVIDENCE,
       releaseEvidence: PASSING_RELEASE_EVIDENCE,
     });
 
@@ -66,6 +70,7 @@ describe('evaluateClosure (pure function)', () => {
     const result = evaluateClosure({
       testEvidence: PASSING_TEST_EVIDENCE,
       reviewEvidence: PASSING_REVIEW_EVIDENCE,
+      securityScanEvidence: PASSING_SECURITY_SCAN_EVIDENCE,
       releaseApproval: { approvalId: 'c', status: 'REJECTED' },
       releaseEvidence: PASSING_RELEASE_EVIDENCE,
     });
@@ -78,6 +83,7 @@ describe('evaluateClosure (pure function)', () => {
     const result = evaluateClosure({
       testEvidence: PASSING_TEST_EVIDENCE,
       reviewEvidence: PASSING_REVIEW_EVIDENCE,
+      securityScanEvidence: PASSING_SECURITY_SCAN_EVIDENCE,
       releaseApproval: APPROVED_RELEASE_APPROVAL,
     });
 
@@ -89,6 +95,7 @@ describe('evaluateClosure (pure function)', () => {
     const result = evaluateClosure({
       testEvidence: PASSING_TEST_EVIDENCE,
       reviewEvidence: PASSING_REVIEW_EVIDENCE,
+      securityScanEvidence: PASSING_SECURITY_SCAN_EVIDENCE,
       releaseApproval: APPROVED_RELEASE_APPROVAL,
       releaseEvidence: { artifactId: 'd', passed: false },
     });
@@ -101,6 +108,7 @@ describe('evaluateClosure (pure function)', () => {
     const evidence = {
       testEvidence: PASSING_TEST_EVIDENCE,
       reviewEvidence: PASSING_REVIEW_EVIDENCE,
+      securityScanEvidence: PASSING_SECURITY_SCAN_EVIDENCE,
       releaseApproval: APPROVED_RELEASE_APPROVAL,
       releaseEvidence: PASSING_RELEASE_EVIDENCE,
     };
@@ -183,16 +191,22 @@ describe('closeWorkItem (real project-scoped evidence lookup)', () => {
     });
     const releaseEvidenceArtifact = makeArtifact('RELEASE_EVIDENCE', 3);
     const releaseEvidenceVersion = makeVersion(releaseEvidenceArtifact, { passed: true });
+    const securityScanEvidenceArtifact = makeArtifact('SECURITY_SCAN_EVIDENCE', 4);
+    const securityScanEvidenceVersion = makeVersion(securityScanEvidenceArtifact, {
+      passed: true,
+    });
 
     const projectArtifacts = [
       testEvidenceArtifact,
       reviewEvidenceArtifact,
       releaseEvidenceArtifact,
+      securityScanEvidenceArtifact,
     ];
     const artifactVersionsByArtifactId = new Map([
       [testEvidenceArtifact.id, [testEvidenceVersion]],
       [reviewEvidenceArtifact.id, [reviewEvidenceVersion]],
       [releaseEvidenceArtifact.id, [releaseEvidenceVersion]],
+      [securityScanEvidenceArtifact.id, [securityScanEvidenceVersion]],
     ]);
 
     const releaseApproval: Approval = {

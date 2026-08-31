@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # DEVOS-117: the real DevOS worker process, running on the host (not
+  # inside this compose stack — it's started via `pnpm --filter @devos/worker
+  # dev`, the same as every other local-dev process this repository runs
+  # outside Docker). `host.docker.internal` is Docker Desktop's own DNS name
+  # for reaching the host from inside a container. `METRICS_PORT` must be
+  # set (e.g. 9464) on the worker process for this target to have anything
+  # to scrape — unset by default, see apps/worker/src/main.ts.
+  - job_name: 'devos-worker'
+    static_configs:
+      - targets: ['host.docker.internal:9464']

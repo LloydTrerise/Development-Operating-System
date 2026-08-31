@@ -1,7 +1,9 @@
 import {
   runClosureTask,
   runReleaseReadinessCheckTask,
+  runReleaseRollbackTask,
   runReleaseTask,
+  runSecurityScanTask,
   runValidationTask,
   type ClosureUseCaseDeps,
   type ToolTaskHandlerDeps,
@@ -9,10 +11,11 @@ import {
 import type { WorkflowTask } from '@devos/domain';
 
 /**
- * DEVOS-073/076/078: mirrors `agent-task-router.ts`'s exact pattern — one
- * 'TOOL_TASK' WorkflowNodeType, now four deterministic (non-agent) handlers
- * behind it (DEVOS-064's build/test validation, DEVOS-073's release-
- * readiness check, DEVOS-076's release, DEVOS-078's closure), so the
+ * DEVOS-073/076/078/113/114: mirrors `agent-task-router.ts`'s exact pattern —
+ * one 'TOOL_TASK' WorkflowNodeType, now six deterministic (non-agent)
+ * handlers behind it (DEVOS-064's build/test validation, DEVOS-113's
+ * security scan, DEVOS-073's release-readiness check, DEVOS-076's release,
+ * DEVOS-114's rollback, DEVOS-078's closure), so the
  * dispatcher's single registration for that type routes internally. Keyed
  * by `task.taskKey` (the node's own `id`, unconditionally threaded through
  * by `run-creation.ts` for every node — unlike `agentRef`, no new per-node
@@ -31,10 +34,14 @@ export async function routeToolTask(
   switch (task.taskKey) {
     case 'validation':
       return runValidationTask(deps, task);
+    case 'security-scan':
+      return runSecurityScanTask(deps, task);
     case 'release-readiness-check':
       return runReleaseReadinessCheckTask(deps, task);
     case 'release':
       return runReleaseTask(deps, task);
+    case 'rollback':
+      return runReleaseRollbackTask(deps, task);
     case 'closure':
       return runClosureTask(deps, task);
     default:
