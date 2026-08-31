@@ -19,11 +19,16 @@ export function createDeploymentProviderAdapters(
   return {
     deploy: {
       async invoke(target, parameters) {
+        // DEVOS-105: repositoryPath is local-filesystem semantics, required
+        // only by createLocalStagingDeploymentProvider (which validates it
+        // itself) — this adapter stays provider-agnostic and passes it
+        // through only when present, rather than assuming every
+        // DeploymentProvider needs one.
         const repositoryPath = target.repositoryPath;
         const environment = target.environment;
         const revision = parameters.revision;
-        if (typeof repositoryPath !== 'string' || repositoryPath.trim().length === 0) {
-          throw new ValidationError('deploy target.repositoryPath must be a non-empty string.');
+        if (repositoryPath !== undefined && typeof repositoryPath !== 'string') {
+          throw new ValidationError('deploy target.repositoryPath must be a string when provided.');
         }
         if (typeof environment !== 'string' || environment.trim().length === 0) {
           throw new ValidationError('deploy target.environment must be a non-empty string.');
@@ -32,13 +37,18 @@ export function createDeploymentProviderAdapters(
           throw new ValidationError('deploy parameters.revision must be a non-empty string.');
         }
 
-        const record = await provider.deploy({ repositoryPath, environment, revision });
+        const record = await provider.deploy({
+          ...(repositoryPath !== undefined ? { repositoryPath } : {}),
+          environment,
+          revision,
+        });
 
         return {
           outputMetadata: {
             deploymentId: record.id,
-            deployedPath: record.deployedPath,
             revision: record.revision,
+            ...(record.deployedPath !== undefined ? { deployedPath: record.deployedPath } : {}),
+            ...(record.url !== undefined ? { url: record.url } : {}),
           },
           providerReference: record.id,
         };

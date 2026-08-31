@@ -16,5 +16,7 @@ export async function listOrganisationsForPrincipal(
     [...organisationIds].map((id) => deps.organisations.getById(id)),
   );
 
-  return organisations.filter((organisation): organisation is Organisation => organisation !== null);
+  return organisations.filter(
+    (organisation): organisation is Organisation => organisation !== null,
+  );
 }

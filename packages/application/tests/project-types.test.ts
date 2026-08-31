@@ -54,9 +54,8 @@ function createInMemoryDeps(): ProjectTypeUseCaseDeps {
   const projectTypeWorkflowRepository: ProjectTypeWorkflowRepository = {
     getById: async (id) => workflows.get(id) ?? null,
     getByProjectTypeAndKey: async (projectTypeId, key) =>
-      [...workflows.values()].find(
-        (w) => w.projectTypeId === projectTypeId && w.key === key,
-      ) ?? null,
+      [...workflows.values()].find((w) => w.projectTypeId === projectTypeId && w.key === key) ??
+      null,
     listForProjectType: async (projectTypeId) =>
       [...workflows.values()].filter((w) => w.projectTypeId === projectTypeId),
     create: async (workflow) => {

@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { OrganisationId } from '@devos/contracts';
-import type { Membership, MembershipRepository, Organisation, OrganisationRepository } from '@devos/domain';
+import type {
+  Membership,
+  MembershipRepository,
+  Organisation,
+  OrganisationRepository,
+} from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createOrganisation } from '../src/organisations/create-organisation.js';
 import type { OrganisationUseCaseDeps } from '../src/organisations/deps.js';

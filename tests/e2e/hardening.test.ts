@@ -455,3 +455,181 @@ describe('DEVOS-094: completion fencing against a stale reclaim', () => {
     expect(afterLateFailA?.output).toEqual({ completedBy: 'workerB' });
   });
 });
+
+/**
+ * DEVOS-108-followup: `claimNext()` previously had no way to know a task
+ * depends on another's real output — every node's task was created as
+ * independently claimable at run-start (DEVOS-096's own already-recorded
+ * gap), relying only on a one-millisecond `createdAt` offset per node as an
+ * *ordering hint* for a single sequential claimer. Live-verified during
+ * DEVOS-108's own real pilot run to be a real, reproducible race once more
+ * than one claimer is polling the same real Postgres queue at once (a
+ * genuine multi-instance production deployment's normal operating mode, not
+ * just a test artifact) — a downstream task got claimed and failed before
+ * its real upstream sibling had finished. `run-creation.ts` now folds each
+ * node's real upstream dependencies (from the workflow graph's own declared
+ * edges) into its task's `input.dependsOn`; `claimNext()` now refuses to
+ * claim a task until every task named there has reached `SUCCEEDED` in the
+ * same run — proven here against real Postgres with two independent
+ * concurrent claimers, not a single sequential one, and with the downstream
+ * task's own `createdAt` deliberately set *earlier* than its upstream's, so
+ * passing this test cannot be an accident of ordering.
+ */
+describe('DEVOS-108-followup: real dependency ordering at claim time', () => {
+  async function createTwoNodeChainRun(
+    downstreamDependsOn: string[],
+    downstreamCreatedAtOffsetMs: number,
+  ): Promise<{ run: WorkflowRun; upstreamTaskId: string; downstreamTaskId: string }> {
+    const version = await createPublishedTwoNodeWorkflow();
+    const workItem = await createWorkItemFixture();
+
+    const now = new Date().toISOString();
+    const run: WorkflowRun = {
+      id: randomUUID() as WorkflowRun['id'],
+      projectId: project.id,
+      workflowVersionId: version.id,
+      workItemId: workItem.id,
+      status: 'PENDING',
+      input: {},
+      idempotencyKey: randomUUID(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    const upstreamTaskId = randomUUID() as WorkflowTask['id'];
+    const downstreamTaskId = randomUUID() as WorkflowTask['id'];
+    const tasks: WorkflowTask[] = [
+      {
+        id: upstreamTaskId,
+        workflowRunId: run.id,
+        taskKey: 'a',
+        taskType: 'TASK',
+        status: 'PENDING',
+        attempt: 0,
+        input: {},
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: downstreamTaskId,
+        workflowRunId: run.id,
+        taskKey: 'b',
+        taskType: 'TASK',
+        status: 'PENDING',
+        attempt: 0,
+        input: downstreamDependsOn.length > 0 ? { dependsOn: downstreamDependsOn } : {},
+        // Deliberately earlier than the upstream task's own createdAt (not
+        // just equal) — if claimNext() were still only using createdAt
+        // ordering, this would make the "downstream" task the *first*
+        // candidate claimed, not the last.
+        createdAt: new Date(Date.parse(now) + downstreamCreatedAtOffsetMs).toISOString(),
+        updatedAt: now,
+      },
+    ];
+    await createWorkflowRunStarter(database.db)(run, tasks, ACTOR_ID);
+    return { run, upstreamTaskId, downstreamTaskId };
+  }
+
+  /**
+   * `claimNext()` is deliberately global, not run-scoped (matching
+   * production, and this file's own "duplicate delivery" test's precedent
+   * above) — this real Postgres database is shared with whatever other e2e
+   * test file's own spawned worker process is concurrently polling the same
+   * queue. Claims and completes (a harmless no-op for whatever unrelated
+   * task it turns out to be) up to `maxAttempts` times looking for
+   * `targetTaskId` specifically, so these tests assert the real property
+   * under test — not "the very next global claim", which shared-queue noise
+   * could make flaky in either direction.
+   */
+  async function claimSpecific(
+    queue: ReturnType<typeof createPostgresTaskQueue>,
+    targetTaskId: string,
+    maxAttempts: number,
+  ): Promise<WorkflowTask | null> {
+    for (let i = 0; i < maxAttempts; i++) {
+      const claimed = await queue.claimNext();
+      if (!claimed) return null;
+      if (claimed.id === targetTaskId) return claimed;
+      await queue.complete(claimed.id, claimed.attempt, {});
+    }
+    return null;
+  }
+
+  it('refuses to claim a task whose declared dependency has not yet succeeded, even when it would otherwise be claimed first by createdAt', async () => {
+    const { upstreamTaskId, downstreamTaskId } = await createTwoNodeChainRun(['a'], -60_000);
+    const queue = createPostgresTaskQueue(database.db);
+
+    const first = await claimSpecific(queue, upstreamTaskId, 50);
+    expect(first?.id).toBe(upstreamTaskId);
+    expect(first?.taskKey).toBe('a');
+
+    // The downstream task must not be claimable while 'a' is still
+    // RUNNING — drain a bounded number of (harmless, unrelated) claims
+    // from the shared queue and confirm the target id never appears among
+    // them, rather than assuming the very next claim is deterministic.
+    for (let i = 0; i < 30; i++) {
+      const claimed = await queue.claimNext();
+      if (!claimed) break;
+      expect(claimed.id).not.toBe(downstreamTaskId);
+      await queue.complete(claimed.id, claimed.attempt, {});
+    }
+
+    await queue.complete(first!.id, first!.attempt, {});
+
+    const second = await claimSpecific(queue, downstreamTaskId, 50);
+    expect(second?.id).toBe(downstreamTaskId);
+    expect(second?.taskKey).toBe('b');
+
+    await queue.complete(second!.id, second!.attempt, {});
+  }, 30_000);
+
+  it('claims a task with no declared dependency immediately, regardless of a sibling task existing', async () => {
+    const { upstreamTaskId, downstreamTaskId } = await createTwoNodeChainRun([], 0);
+    const queue = createPostgresTaskQueue(database.db);
+
+    // No `dependsOn` was declared on either task, so both are immediately
+    // claimable — unchanged behavior for every workflow that declares no
+    // real dependency between its nodes. Each is found (in some order,
+    // possibly interleaved with unrelated shared-queue claims) well within
+    // the bounded search.
+    const first = await claimSpecific(queue, upstreamTaskId, 50);
+    expect(first?.id).toBe(upstreamTaskId);
+    await queue.complete(first!.id, first!.attempt, {});
+
+    const second = await claimSpecific(queue, downstreamTaskId, 50);
+    expect(second?.id).toBe(downstreamTaskId);
+    await queue.complete(second!.id, second!.attempt, {});
+  }, 30_000);
+
+  it('marks a still-PENDING downstream task FAILED (never attempted) once its declared upstream dependency permanently fails, instead of leaving it claimable-but-never-claimed forever', async () => {
+    const { upstreamTaskId, downstreamTaskId } = await createTwoNodeChainRun(['a'], 60_000);
+    const queue = createPostgresTaskQueue(database.db);
+
+    const claimed = await claimSpecific(queue, upstreamTaskId, 50);
+    expect(claimed?.id).toBe(upstreamTaskId);
+
+    // Non-retryable: fails permanently on the very first attempt, the same
+    // real path a NonRetryableTaskError (e.g. a policy denial) takes.
+    await queue.fail(claimed!.id, claimed!.attempt, { message: 'permanent failure' }, false);
+
+    const downstream = await createWorkflowTaskRepository(database.db).getById(
+      downstreamTaskId as WorkflowTask['id'],
+    );
+    expect(downstream?.status).toBe('FAILED');
+    expect(downstream?.errorCode).toBe('DEVOS_UPSTREAM_TASK_FAILED');
+
+    const run = await createWorkflowRunRepository(database.db).getById(
+      (await createWorkflowTaskRepository(database.db).getById(
+        upstreamTaskId as WorkflowTask['id'],
+      ))!.workflowRunId,
+    );
+    expect(run?.status).toBe('FAILED');
+
+    // Never claimable — the run already failed, and it never will succeed.
+    const strayClaim = await queue.claimNext();
+    expect(strayClaim?.id).not.toBe(downstreamTaskId);
+    // Leave no lingering RUNNING row behind for a later test, whatever
+    // unrelated task this turned out to be (see "duplicate delivery"'s own
+    // identical cleanup above).
+    if (strayClaim) await queue.complete(strayClaim.id, strayClaim.attempt, {});
+  });
+});

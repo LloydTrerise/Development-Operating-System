@@ -23,7 +23,10 @@ import type {
   ArtifactVersion,
   ArtifactVersionRepository,
   ContextManifest,
+  KnowledgeSourceRepository,
+  Project,
   ProjectId,
+  ProjectRepository,
   WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
@@ -223,6 +226,30 @@ function buildScenario() {
     create: async () => {},
   };
 
+  // DEVOS-109: runAgentTask now assembles its context manifest via
+  // buildContext(), which needs `projects`/`knowledgeSources` too.
+  const project: Project = {
+    id: projectId,
+    organisationId: randomUUID() as Project['organisationId'],
+    name: 'Router test project',
+    slug: 'router-test-project',
+    status: 'ACTIVE',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const projects: ProjectRepository = {
+    getById: async (id) => (id === projectId ? project : null),
+    listForOrganisation: async () => [project],
+    create: async () => {},
+    update: async () => {},
+  };
+  const knowledgeSources: KnowledgeSourceRepository = {
+    getById: async () => null,
+    getByProjectAndKey: async () => null,
+    listForProject: async () => [],
+    create: async () => {},
+  };
+
   function buildTask(agentRef: string): WorkflowTask {
     return {
       id: randomUUID() as WorkflowTask['id'],
@@ -249,6 +276,8 @@ function buildScenario() {
     recordContextManifest,
     artifacts,
     artifactVersions,
+    projects,
+    knowledgeSources,
     buildTask,
   };
 }
@@ -297,6 +326,8 @@ describe('routeAgentTask', () => {
         },
         artifacts: scenario.artifacts,
         artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        knowledgeSources: scenario.knowledgeSources,
       };
 
       const output = await routeAgentTask(deps, scenario.buildTask(agentRef));
@@ -322,6 +353,8 @@ describe('routeAgentTask', () => {
       publishArtifact: async () => {},
       artifacts: scenario.artifacts,
       artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
     };
 
     await expect(routeAgentTask(deps, scenario.buildTask('not-a-real-agent'))).rejects.toThrow(
@@ -371,6 +404,8 @@ describe('routeAgentTask', () => {
       publishArtifact: async () => {},
       artifacts: scenario.artifacts,
       artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
     };
 
     await expect(routeAgentTask(deps, scenario.buildTask(unknownRoleKey))).rejects.toThrow(

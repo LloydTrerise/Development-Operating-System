@@ -13,7 +13,7 @@
 
 ## Flagged gap
 
-No spec names an actual target cloud/hosting environment for a real pilot deployment — fabricating one would violate AGENTS.md §7. This task stands up a genuinely separate, isolated local environment (a distinct Postgres database/schema, freshly migrated and seeded), proving the *process* of standing up an isolated environment is real and repeatable, without claiming a cloud deployment that was never authorized or specified.
+No spec names an actual target cloud/hosting environment for a real pilot deployment — fabricating one would violate AGENTS.md §7. This task stands up a genuinely separate, isolated local environment (a distinct Postgres database/schema, freshly migrated and seeded), proving the _process_ of standing up an isolated environment is real and repeatable, without claiming a cloud deployment that was never authorized or specified.
 
 ## Acceptance
 

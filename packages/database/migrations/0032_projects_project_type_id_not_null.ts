@@ -9,7 +9,10 @@ import type { Kysely } from 'kysely';
  * backfilled.
  */
 export async function up(db: Kysely<any>): Promise<void> {
-  await db.schema.alterTable('projects').alterColumn('project_type_id', (col) => col.setNotNull()).execute();
+  await db.schema
+    .alterTable('projects')
+    .alterColumn('project_type_id', (col) => col.setNotNull())
+    .execute();
 }
 
 export async function down(db: Kysely<any>): Promise<void> {

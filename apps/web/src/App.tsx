@@ -3,6 +3,7 @@ import { NavLink, Route, Routes } from 'react-router-dom';
 import {
   AppBar,
   Box,
+  Button,
   Divider,
   Drawer,
   FormControl,
@@ -116,21 +117,36 @@ function ProjectSelector() {
 
   if (loading) {
     return (
-      <Typography data-testid="project-selector-status" variant="body2" component="span" color="inherit">
+      <Typography
+        data-testid="project-selector-status"
+        variant="body2"
+        component="span"
+        color="inherit"
+      >
         Loading projects…
       </Typography>
     );
   }
   if (error) {
     return (
-      <Typography data-testid="project-selector-status" variant="body2" component="span" color="inherit">
+      <Typography
+        data-testid="project-selector-status"
+        variant="body2"
+        component="span"
+        color="inherit"
+      >
         Projects unavailable: {error}
       </Typography>
     );
   }
   if (projects.length === 0) {
     return (
-      <Typography data-testid="project-selector-status" variant="body2" component="span" color="inherit">
+      <Typography
+        data-testid="project-selector-status"
+        variant="body2"
+        component="span"
+        color="inherit"
+      >
         No projects yet.
       </Typography>
     );
@@ -141,7 +157,9 @@ function ProjectSelector() {
       <Select
         value={selectedProjectId ?? ''}
         onChange={(event) => selectProject(event.target.value)}
-        SelectDisplayProps={{ 'data-testid': 'project-selector' } as React.HTMLAttributes<HTMLDivElement>}
+        SelectDisplayProps={
+          { 'data-testid': 'project-selector' } as React.HTMLAttributes<HTMLDivElement>
+        }
         sx={{
           color: 'inherit',
           '.MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.4)' },
@@ -158,8 +176,48 @@ function ProjectSelector() {
   );
 }
 
-export function App() {
+function SessionStatus() {
   const session = useSession();
+
+  switch (session.status) {
+    case 'dev-identity':
+      return (
+        <Typography data-testid="session-status" variant="body2" component="span">
+          Session: dev-identity ({session.principalId})
+        </Typography>
+      );
+    case 'loading':
+      return (
+        <Typography data-testid="session-status" variant="body2" component="span">
+          Signing in…
+        </Typography>
+      );
+    case 'unauthenticated':
+      return (
+        <Button data-testid="session-login" color="inherit" size="small" onClick={session.login}>
+          Log in
+        </Button>
+      );
+    case 'authenticated':
+      return (
+        <>
+          <Typography data-testid="session-status" variant="body2" component="span">
+            {session.email ?? session.principalId}
+          </Typography>
+          <Button
+            data-testid="session-logout"
+            color="inherit"
+            size="small"
+            onClick={session.logout}
+          >
+            Log out
+          </Button>
+        </>
+      );
+  }
+}
+
+export function App() {
   const { mode, toggleMode } = useThemeMode();
   const [apiStatus, setApiStatus] = useState<ApiStatus>('checking');
 
@@ -191,9 +249,7 @@ export function App() {
           <Typography data-testid="api-status" variant="body2" component="span">
             API: {apiStatus}
           </Typography>
-          <Typography data-testid="session-status" variant="body2" component="span">
-            Session: {session.status} ({session.principalId})
-          </Typography>
+          <SessionStatus />
           <IconButton
             color="inherit"
             onClick={toggleMode}

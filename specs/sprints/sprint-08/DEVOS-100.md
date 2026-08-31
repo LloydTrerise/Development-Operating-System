@@ -9,7 +9,7 @@
 
 ## Grounding
 
-`specs/workflows/software-change-workflow.md`'s full stage list; the existing e2e suite already proves the mechanism works. This task is about actually *running* it once more, live, against the isolated pilot environment specifically, and reporting what really happened (timings, any friction, any surprise) rather than re-asserting what the automated suite already asserts.
+`specs/workflows/software-change-workflow.md`'s full stage list; the existing e2e suite already proves the mechanism works. This task is about actually _running_ it once more, live, against the isolated pilot environment specifically, and reporting what really happened (timings, any friction, any surprise) rather than re-asserting what the automated suite already asserts.
 
 ## Flagged gap
 

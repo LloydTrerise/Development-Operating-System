@@ -30,9 +30,10 @@ import type {
   WorkItemRepository,
 } from '@devos/domain';
 import { NonRetryableTaskError } from '@devos/domain';
+import type { CredentialResolver } from '@devos/integrations';
 import { runGit } from '@devos/integrations';
 import { createLocalFilesystemStorage } from '@devos/storage';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ToolTaskHandlerDeps } from '../src/tasks/deps.js';
 import { runReleaseRollbackTask, runReleaseTask } from '../src/tasks/run-release-task.js';
 
@@ -43,6 +44,7 @@ async function buildScenario(
   stagingRoot: string,
   commitSha: string,
   overrides: { releaseEnvironment: string; healthCheckCommand: string },
+  extraIntegrationsFactory?: (projectId: Project['id']) => Integration[],
 ) {
   const organisationId = randomUUID() as OrganisationId;
   const now = new Date(0).toISOString();
@@ -238,9 +240,11 @@ async function buildScenario(
     },
     listForProject: async (projectId) => auditRecordsList.filter((r) => r.projectId === projectId),
   };
+  const extraIntegrations = extraIntegrationsFactory?.(project.id) ?? [];
+  const allIntegrations = [gitIntegration, ...extraIntegrations];
   const integrations: IntegrationRepository = {
-    getById: async (id) => (id === gitIntegration.id ? gitIntegration : null),
-    listForProject: async () => [gitIntegration],
+    getById: async (id) => allIntegrations.find((i) => i.id === id) ?? null,
+    listForProject: async () => allIntegrations,
     create: async () => {},
   };
 
@@ -321,6 +325,7 @@ describe('runReleaseTask (real local git repository, real local staging deployme
     scenario: Awaited<ReturnType<typeof buildScenario>>,
     storage: ReturnType<typeof createLocalFilesystemStorage>,
     onPublish: (artifact: Artifact, version: ArtifactVersion) => void,
+    credentialResolver?: ToolTaskHandlerDeps['credentialResolver'],
   ): ToolTaskHandlerDeps {
     return {
       workflowRuns: scenario.workflowRuns,
@@ -338,6 +343,7 @@ describe('runReleaseTask (real local git repository, real local staging deployme
       toolInvocations: scenario.toolInvocationRepository,
       auditRecords: scenario.auditRecordRepository,
       integrations: scenario.integrations,
+      ...(credentialResolver !== undefined ? { credentialResolver } : {}),
     };
   }
 
@@ -508,5 +514,128 @@ describe('runReleaseTask (real local git repository, real local staging deployme
     await expect(runReleaseRollbackTask(deps, scenario.task)).rejects.toThrow(
       'rollbackToRevision is required',
     );
+  });
+
+  describe('DEVOS-105: real Render deployment target selection', () => {
+    function renderIntegrationFactory(projectId: Project['id']): Integration[] {
+      const now = new Date(0).toISOString();
+      return [
+        {
+          id: randomUUID() as Integration['id'],
+          projectId,
+          type: 'Deployment',
+          provider: 'render',
+          name: 'Render (production)',
+          status: 'ACTIVE',
+          credentialReference: 'DEVOS105_TEST_RENDER_API_KEY',
+          configuration: { serviceId: 'srv-devos-pilot', environment: 'production' },
+          createdAt: now,
+          updatedAt: now,
+        },
+      ];
+    }
+
+    it('throws when a real Deployment integration is configured but no credentialResolver is available', async () => {
+      const scenario = await buildScenario(
+        repositoryPath,
+        stagingRoot,
+        commitSha,
+        { releaseEnvironment: 'staging', healthCheckCommand: 'test -f index.html' },
+        renderIntegrationFactory,
+      );
+      const storage = createLocalFilesystemStorage(storageDir);
+      const deps = buildDeps(scenario, storage, () => {});
+
+      await expect(runReleaseTask(deps, scenario.task)).rejects.toThrow(
+        'no credentialResolver is available',
+      );
+    });
+
+    it('throws when the configured credential reference cannot be resolved', async () => {
+      const scenario = await buildScenario(
+        repositoryPath,
+        stagingRoot,
+        commitSha,
+        { releaseEnvironment: 'staging', healthCheckCommand: 'test -f index.html' },
+        renderIntegrationFactory,
+      );
+      const storage = createLocalFilesystemStorage(storageDir);
+      const credentialResolver: CredentialResolver = { resolve: async () => null };
+      const deps = buildDeps(scenario, storage, () => {}, credentialResolver);
+
+      await expect(runReleaseTask(deps, scenario.task)).rejects.toThrow(
+        'Could not resolve a credential for reference "DEVOS105_TEST_RENDER_API_KEY"',
+      );
+    });
+
+    it('deploys through the real Render API and health-checks over real HTTP when a Deployment integration and credential are configured', async () => {
+      const scenario = await buildScenario(
+        repositoryPath,
+        stagingRoot,
+        commitSha,
+        { releaseEnvironment: 'staging', healthCheckCommand: 'test -f index.html' },
+        renderIntegrationFactory,
+      );
+      const storage = createLocalFilesystemStorage(storageDir);
+      const credentialResolver: CredentialResolver = { resolve: async () => 'render-test-key' };
+
+      function jsonResponse(status: number, body: unknown): Response {
+        return new Response(JSON.stringify(body), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      const fetchImpl = vi
+        .fn()
+        // POST trigger deploy
+        .mockResolvedValueOnce(jsonResponse(201, { id: 'dep-1', status: 'live' }))
+        // GET deploy status (poll)
+        .mockResolvedValueOnce(jsonResponse(200, { id: 'dep-1', status: 'live' }))
+        // GET service (resolve URL)
+        .mockResolvedValueOnce(
+          jsonResponse(200, {
+            id: 'srv-devos-pilot',
+            serviceDetails: { url: 'https://devos-pilot.onrender.com' },
+          }),
+        )
+        // GET health check (real HTTP request to the deployed URL)
+        .mockResolvedValueOnce(new Response('ok', { status: 200 }));
+      vi.stubGlobal('fetch', fetchImpl);
+
+      let published: { artifact: Artifact; version: ArtifactVersion } | undefined;
+      const deps = buildDeps(
+        scenario,
+        storage,
+        (artifact, version) => {
+          published = { artifact, version };
+        },
+        credentialResolver,
+      );
+
+      try {
+        const output = await runReleaseTask(deps, scenario.task);
+
+        expect(output.status).toBe('SUCCEEDED');
+        expect(output.passed).toBe(true);
+        expect((output as { url?: string }).url).toBe('https://devos-pilot.onrender.com');
+        const metadata = published?.version.metadata as Record<string, unknown>;
+        expect((metadata.deployment as Record<string, unknown>).url).toBe(
+          'https://devos-pilot.onrender.com',
+        );
+
+        const deployTriggerCall = fetchImpl.mock.calls[0] as [string, RequestInit];
+        expect(deployTriggerCall[0]).toBe(
+          'https://api.render.com/v1/services/srv-devos-pilot/deploys',
+        );
+        expect((deployTriggerCall[1].headers as Record<string, string>).authorization).toBe(
+          'Bearer render-test-key',
+        );
+        const healthCheckCall = fetchImpl.mock.calls[3] as [string, RequestInit];
+        expect(healthCheckCall[0]).toBe('https://devos-pilot.onrender.com');
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }, 30_000);
   });
 });

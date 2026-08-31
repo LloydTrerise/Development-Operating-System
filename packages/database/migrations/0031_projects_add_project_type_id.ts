@@ -46,9 +46,12 @@ export async function up(db: Kysely<any>): Promise<void> {
 
   await db.schema
     .alterTable('projects')
-    .addForeignKeyConstraint('projects_project_type_id_fkey', ['project_type_id'], 'project_types', [
-      'id',
-    ])
+    .addForeignKeyConstraint(
+      'projects_project_type_id_fkey',
+      ['project_type_id'],
+      'project_types',
+      ['id'],
+    )
     .execute();
 }
 

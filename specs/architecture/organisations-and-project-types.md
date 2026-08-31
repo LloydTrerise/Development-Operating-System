@@ -25,17 +25,17 @@ This document covers the technical design only. No code has been written against
 
 This section exists so the proposal below is legible against what's actually there today, not an imagined baseline.
 
-| Concept | Current reality |
-|---|---|
-| **Organisation** | A real table (`organisations`, migration `0001`) and a real domain type (`packages/domain/src/organisations/organisation.ts`) exist. The repository implements only `getById`. There is **no** create/list/update, and **no API route** — `apps/api/src/routes/projects.ts` hardcodes every created project to the one seeded `SEED_ORGANISATION_ID`. There is no way to create or select an organisation today. |
-| **Project** | `{ id, organisationId, name, slug, description?, status, budgetUsd?, createdAt, updatedAt }` — **no `type`/`kind` field exists**. Full CRUD exists (minus delete) at `POST/GET/PATCH /projects`, plus membership routes. |
-| **WorkflowDefinition** | `{ id, projectId, key, name, description?, createdAt, updatedAt }` — **owned by exactly one project**; `key` is unique *per project*, not globally. There is no template or cross-project sharing mechanism today. |
-| **WorkflowVersion** | `{ id, workflowDefinitionId, version, status, definition (the graph), publishedAt?, createdBy, createdAt }`. Full draft → validate → publish lifecycle exists via `apps/api/src/routes/workflows.ts`, but **the web app has zero client functions or UI for it** — `api-client.ts` has no `createWorkflow`/`validateDraftWorkflow`/`publishWorkflowVersion`. |
-| **Agent / AgentVersion** | Also **owned by exactly one project** (`Agent.projectId`, `key` unique per project). Real create/publish API exists (`apps/api/src/routes/agents.ts`), but **zero web UI or client functions exist for it either**. |
+| Concept                           | Current reality                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Organisation**                  | A real table (`organisations`, migration `0001`) and a real domain type (`packages/domain/src/organisations/organisation.ts`) exist. The repository implements only `getById`. There is **no** create/list/update, and **no API route** — `apps/api/src/routes/projects.ts` hardcodes every created project to the one seeded `SEED_ORGANISATION_ID`. There is no way to create or select an organisation today.                                                                                                                                                                                                                                                               |
+| **Project**                       | `{ id, organisationId, name, slug, description?, status, budgetUsd?, createdAt, updatedAt }` — **no `type`/`kind` field exists**. Full CRUD exists (minus delete) at `POST/GET/PATCH /projects`, plus membership routes.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **WorkflowDefinition**            | `{ id, projectId, key, name, description?, createdAt, updatedAt }` — **owned by exactly one project**; `key` is unique _per project_, not globally. There is no template or cross-project sharing mechanism today.                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **WorkflowVersion**               | `{ id, workflowDefinitionId, version, status, definition (the graph), publishedAt?, createdBy, createdAt }`. Full draft → validate → publish lifecycle exists via `apps/api/src/routes/workflows.ts`, but **the web app has zero client functions or UI for it** — `api-client.ts` has no `createWorkflow`/`validateDraftWorkflow`/`publishWorkflowVersion`.                                                                                                                                                                                                                                                                                                                   |
+| **Agent / AgentVersion**          | Also **owned by exactly one project** (`Agent.projectId`, `key` unique per project). Real create/publish API exists (`apps/api/src/routes/agents.ts`), but **zero web UI or client functions exist for it either**.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | **`agentRef` runtime resolution** | This is the most important gap. A workflow node's `agentRef` is a bare string. Today, `apps/worker/src/agent-task-router.ts` does **not** look it up against the `agents`/`agent_versions` tables at all — it's a hardcoded `switch` over 6 literal seed-key constants (`SEED_DISCOVERY_AGENT_KEY`, etc.), each dispatching to its own bespoke handler function. Any `agentRef` outside those 6 exact strings throws at run time. **This means the moment a second project exists with its own cloned/created agents, none of their tasks would actually execute** — this has to be fixed as part of this work, not as a follow-up, or the rest of this feature is UI theatre. |
-| **Membership / RBAC** | `Membership.projectId` is already **nullable** — `resolveMembership()` already falls back to an organisation-level membership (`projectId: null`) when no project-level one exists. This is unused today (every membership created by the product is project-scoped) but is exactly the mechanism to reuse for organisation ownership — no new membership table needed. Only two roles exist anywhere (`OWNER`, `MEMBER`); every consequential-action gate collapses to `role === 'OWNER'`. |
-| **Seed data** | One organisation, one project ("DevOS POC"), **4 separate workflow definitions** (`intake-to-artifact`, `planning-path`, `development-path`, `release-path` — chained by convention through a shared work item, each with its own human-approval gate or rework loop), and 6 agents (discovery/requirements/technical-design/planning/development/review), all hardcoded to the one seeded project. |
-| **Web app CRUD pattern** | `ProjectsPage.tsx` is the established pattern to follow: MUI `List`/`ListItemButton` for selection + a local-state `<form>` calling an `api-client.ts` function, then `refresh()`. `ProjectProvider`/`useProjectContext` (`apps/web/src/project-context.tsx`) is the pattern for a "currently selected X" context. |
+| **Membership / RBAC**             | `Membership.projectId` is already **nullable** — `resolveMembership()` already falls back to an organisation-level membership (`projectId: null`) when no project-level one exists. This is unused today (every membership created by the product is project-scoped) but is exactly the mechanism to reuse for organisation ownership — no new membership table needed. Only two roles exist anywhere (`OWNER`, `MEMBER`); every consequential-action gate collapses to `role === 'OWNER'`.                                                                                                                                                                                    |
+| **Seed data**                     | One organisation, one project ("DevOS POC"), **4 separate workflow definitions** (`intake-to-artifact`, `planning-path`, `development-path`, `release-path` — chained by convention through a shared work item, each with its own human-approval gate or rework loop), and 6 agents (discovery/requirements/technical-design/planning/development/review), all hardcoded to the one seeded project.                                                                                                                                                                                                                                                                            |
+| **Web app CRUD pattern**          | `ProjectsPage.tsx` is the established pattern to follow: MUI `List`/`ListItemButton` for selection + a local-state `<form>` calling an `api-client.ts` function, then `refresh()`. `ProjectProvider`/`useProjectContext` (`apps/web/src/project-context.tsx`) is the pattern for a "currently selected X" context.                                                                                                                                                                                                                                                                                                                                                             |
 
 ---
 
@@ -60,7 +60,7 @@ The request describes "a specific workflow" (singular) and "a Workflow has one o
 
 Collapsing these into one `WorkflowDefinition` would fight that existing gate/rework design (a single long-running workflow run spanning a human approval that might take days doesn't fit this engine's run-to-completion model as cleanly as separate runs chained by work item).
 
-**This spec therefore models a Project Type as owning a *set* of named workflow templates** (§5.3), defaulting to the same 4 for "Software Development," rather than forcing a single template. If a literal single consolidated workflow is what was actually intended, that is a separate, larger piece of work (redesigning the gate/rework mechanics around one long-running run) — flag it in review and it will be scoped on its own, not folded into this change silently.
+**This spec therefore models a Project Type as owning a _set_ of named workflow templates** (§5.3), defaulting to the same 4 for "Software Development," rather than forcing a single template. If a literal single consolidated workflow is what was actually intended, that is a separate, larger piece of work (redesigning the gate/rework mechanics around one long-running run) — flag it in review and it will be scoped on its own, not folded into this change silently.
 
 ---
 
@@ -92,16 +92,24 @@ WorkflowNode.agentRef (string) ──resolves by key──> Agent (within the sa
 // packages/domain/src/project-types/project-type.ts
 export interface ProjectType {
   id: ProjectTypeId;
-  key: string;                 // e.g. 'software-development' — globally unique
-  name: string;                // e.g. 'Software Development'
+  key: string; // e.g. 'software-development' — globally unique
+  name: string; // e.g. 'Software Development'
   description?: string;
   status: 'ACTIVE' | 'DISABLED';
   createdAt: string;
   updatedAt: string;
 }
 
-export interface CreateProjectTypeInput { key: string; name: string; description?: string; }
-export interface UpdateProjectTypeInput { name?: string; description?: string; status?: 'ACTIVE' | 'DISABLED'; }
+export interface CreateProjectTypeInput {
+  key: string;
+  name: string;
+  description?: string;
+}
+export interface UpdateProjectTypeInput {
+  name?: string;
+  description?: string;
+  status?: 'ACTIVE' | 'DISABLED';
+}
 
 export interface ProjectTypeRepository {
   getById: (id: ProjectTypeId) => Promise<ProjectType | null>;
@@ -120,15 +128,18 @@ export interface ProjectTypeRepository {
 export interface ProjectTypeWorkflow {
   id: ProjectTypeWorkflowId;
   projectTypeId: ProjectTypeId;
-  key: string;                  // unique per project type, e.g. 'planning-path'
+  key: string; // unique per project type, e.g. 'planning-path'
   name: string;
-  definition: WorkflowGraph;    // the exact same shape cloned onto WorkflowVersion.definition
+  definition: WorkflowGraph; // the exact same shape cloned onto WorkflowVersion.definition
   createdAt: string;
   updatedAt: string;
 }
 
 export interface ProjectTypeWorkflowRepository {
-  getById; listForProjectType(projectTypeId); create; update;
+  getById;
+  listForProjectType(projectTypeId);
+  create;
+  update;
 }
 ```
 
@@ -138,16 +149,19 @@ export interface ProjectTypeWorkflowRepository {
 export interface ProjectTypeAgent {
   id: ProjectTypeAgentId;
   projectTypeId: ProjectTypeId;
-  key: string;                        // unique per project type, e.g. 'discovery-agent'
+  key: string; // unique per project type, e.g. 'discovery-agent'
   name: string;
-  configuration: AgentConfiguration;  // reuses the existing AgentVersion.configuration shape
+  configuration: AgentConfiguration; // reuses the existing AgentVersion.configuration shape
   promptReference?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface ProjectTypeAgentRepository {
-  getById; listForProjectType(projectTypeId); create; update;
+  getById;
+  listForProjectType(projectTypeId);
+  create;
+  update;
 }
 ```
 
@@ -158,7 +172,7 @@ export interface ProjectTypeAgentRepository {
 export interface Project {
   id: ProjectId;
   organisationId: OrganisationId;
-  projectTypeId: ProjectTypeId;   // NEW — required going forward
+  projectTypeId: ProjectTypeId; // NEW — required going forward
   name: string;
   slug: string;
   description?: string;
@@ -169,7 +183,7 @@ export interface Project {
 }
 export interface CreateProjectInput {
   organisationId: OrganisationId;
-  projectTypeId: ProjectTypeId;   // NEW — required
+  projectTypeId: ProjectTypeId; // NEW — required
   name: string;
   slug: string;
   description?: string;
@@ -180,12 +194,22 @@ export interface CreateProjectInput {
 // packages/domain/src/organisations/organisation.ts — repository extended, type unchanged
 export interface OrganisationRepository {
   getById: (id: OrganisationId) => Promise<Organisation | null>;
-  list: () => Promise<Organisation[]>;                              // NEW
-  create: (organisation: Organisation) => Promise<void>;             // NEW
-  update: (id: OrganisationId, changes: UpdateOrganisationInput, updatedAt: string) => Promise<void>; // NEW
+  list: () => Promise<Organisation[]>; // NEW
+  create: (organisation: Organisation) => Promise<void>; // NEW
+  update: (
+    id: OrganisationId,
+    changes: UpdateOrganisationInput,
+    updatedAt: string,
+  ) => Promise<void>; // NEW
 }
-export interface CreateOrganisationInput { name: string; slug: string; }   // NEW
-export interface UpdateOrganisationInput { name?: string; status?: string; } // NEW
+export interface CreateOrganisationInput {
+  name: string;
+  slug: string;
+} // NEW
+export interface UpdateOrganisationInput {
+  name?: string;
+  status?: string;
+} // NEW
 ```
 
 ---
@@ -263,9 +287,9 @@ This is not optional polish; it's load-bearing. Today's hardcoded 6-way `switch`
 
 **Fix**: resolve by the agent's **role** (`AgentVersion.configuration.role` — already present on every agent today: `DISCOVERY`/`REQUIREMENTS`/`TECHNICAL_DESIGN`/`PLANNING`/`DEVELOPMENT`/`REVIEW`), not by literal key string:
 
-1. `agentRef` still names an `Agent.key` within the project (unchanged — this is how a workflow node picks *which* agent instance handles it, and stays fully backward compatible with every existing seeded workflow).
+1. `agentRef` still names an `Agent.key` within the project (unchanged — this is how a workflow node picks _which_ agent instance handles it, and stays fully backward compatible with every existing seeded workflow).
 2. The router resolves `agents.getByProjectAndKey(projectId, agentRef)` → its published `AgentVersion` → reads `configuration.role` → dispatches to the one of the 6 existing role-specific handler functions (`runDiscoveryAgentTask`, `runRequirementsAgentTask`, etc. — these stay exactly as they are; only the dispatch key changes from a literal string match to a role lookup).
-3. An `agentRef` that resolves to an agent whose role isn't one of the 6 known roles fails clearly (same as today's "no handler" error, just for a different reason) — this codebase's agent behaviors are role-specific (each role publishes a specific artifact type and reads specific prior-stage context), so "any agent for any step" was never a coherent goal; "any *role-matching* agent for that step" is.
+3. An `agentRef` that resolves to an agent whose role isn't one of the 6 known roles fails clearly (same as today's "no handler" error, just for a different reason) — this codebase's agent behaviors are role-specific (each role publishes a specific artifact type and reads specific prior-stage context), so "any agent for any step" was never a coherent goal; "any _role-matching_ agent for that step" is.
 
 This is real, scoped, testable work: a project created from a Project Type template, with its own cloned agents, must be proven — via a real end-to-end run, not just a unit test — to actually execute through this generalized router. This closes gap **G1** already flagged in `DEVOS-PRODUCTION-READINESS-ROADMAP.md`.
 
@@ -279,7 +303,7 @@ This is real, scoped, testable work: a project created from a Project Type templ
 4. Seed 6 `ProjectTypeAgent` rows under it, populated from the current 6 seeded agents' own configurations verbatim.
 5. Backfill: set `projects.project_type_id` to this new type's id for every existing project row (the seeded project and every real leftover test project in the shared dev database).
 6. Run the second migration to tighten `project_type_id` to `NOT NULL`.
-7. **No change to the seeded project's own existing `WorkflowDefinition`/`Agent` rows** — they already exist and keep running exactly as they do today. Only *new* projects go through the clone pipeline (§8). This is why the real `tests/e2e` suite (`full-workflow.test.ts` et al., which all target `SEED_PROJECT_ID`'s existing workflows/agents directly) needs zero changes.
+7. **No change to the seeded project's own existing `WorkflowDefinition`/`Agent` rows** — they already exist and keep running exactly as they do today. Only _new_ projects go through the clone pipeline (§8). This is why the real `tests/e2e` suite (`full-workflow.test.ts` et al., which all target `SEED_PROJECT_ID`'s existing workflows/agents directly) needs zero changes.
 
 ---
 
@@ -292,7 +316,7 @@ Extends `packages/application/src/projects/create-project.ts`:
 3. Create the OWNER membership for the creating principal — unchanged.
 4. **New**: for every `ProjectTypeWorkflow` under the type, create a `WorkflowDefinition` (same `key`/`name`, `projectId` = the new project) + an initial `WorkflowVersion` (`version: 1`), its `definition` cloned verbatim from the template. Published immediately (`status: 'PUBLISHED'`, `publishedAt: now`) — matching how every seeded workflow today is already usable immediately, and consistent with a new project needing to actually run something right away, not sit in an empty draft state.
 5. **New**: for every `ProjectTypeAgent` under the type, create an `Agent` (same `key`/`name`, `projectId` = the new project) + an initial, immediately-`PUBLISHED` `AgentVersion` (`configuration`/`promptReference` cloned verbatim).
-6. Because step 4 clones the graph verbatim (including its `agentRef` strings) and step 5 creates agents under the *same* keys those `agentRef` strings already name, no rewriting is needed — the cloned workflow's `agentRef`s resolve correctly against the cloned agents purely because the keys already match, exactly like the existing single-project seed data does today.
+6. Because step 4 clones the graph verbatim (including its `agentRef` strings) and step 5 creates agents under the _same_ keys those `agentRef` strings already name, no rewriting is needed — the cloned workflow's `agentRef`s resolve correctly against the cloned agents purely because the keys already match, exactly like the existing single-project seed data does today.
 
 All of steps 4–6 happen inside the same transaction as project creation (matching this codebase's existing transactional-creation discipline, e.g. `createWorkflowDraftCreator`) — a project is never left half-cloned.
 
@@ -303,12 +327,14 @@ All of steps 4–6 happen inside the same transaction as project creation (match
 New route files, following the existing `createXRoutes(prefix, deps)` pattern:
 
 **`apps/api/src/routes/organisations.ts`** (new)
+
 - `GET {prefix}/organisations` — list (every organisation the principal has any membership in, direct or via a project)
 - `POST {prefix}/organisations` — create; creator becomes OWNER via a `projectId: null` membership (§2)
 - `GET {prefix}/organisations/:organisationId`
 - `PATCH {prefix}/organisations/:organisationId`
 
 **`apps/api/src/routes/project-types.ts`** (new)
+
 - `GET {prefix}/project-types` — list all (global, not organisation-scoped — see §12.1)
 - `POST {prefix}/project-types`
 - `GET {prefix}/project-types/:projectTypeId`
@@ -321,6 +347,7 @@ New route files, following the existing `createXRoutes(prefix, deps)` pattern:
 - `PATCH {prefix}/project-types/:projectTypeId/agents/:agentKey` — edit a template
 
 **`apps/api/src/routes/projects.ts`** (extended)
+
 - `POST {prefix}/projects` — body gains required `projectTypeId`
 - `toProjectDto` — response gains `projectTypeId`
 
@@ -367,12 +394,12 @@ updateProjectTypeAgent(projectTypeId, key, input): Promise<ApiResult<ProjectType
 
 ## 11. Authorization
 
-| Action | Proposed gate |
-|---|---|
-| Create an Organisation | Any authenticated principal (matches today's ungated project creation) — becomes OWNER via a new `projectId: null` membership. |
-| Update an Organisation | OWNER of that organisation (an org-level membership, or — for backward compatibility with today's single-org reality — an OWNER of any project within it, since no organisation currently has an explicit org-level OWNER yet). |
-| Create/update a Project Type, its workflow templates, its agent templates | Any authenticated principal — see §12.1, this is flagged as accepted risk consistent with this POC's existing security posture, not a new gap. |
-| Create a Project | Unchanged (any authenticated principal, organisation membership implied), plus: the target `ProjectType` must be `ACTIVE`. |
+| Action                                                                    | Proposed gate                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create an Organisation                                                    | Any authenticated principal (matches today's ungated project creation) — becomes OWNER via a new `projectId: null` membership.                                                                                                  |
+| Update an Organisation                                                    | OWNER of that organisation (an org-level membership, or — for backward compatibility with today's single-org reality — an OWNER of any project within it, since no organisation currently has an explicit org-level OWNER yet). |
+| Create/update a Project Type, its workflow templates, its agent templates | Any authenticated principal — see §12.1, this is flagged as accepted risk consistent with this POC's existing security posture, not a new gap.                                                                                  |
+| Create a Project                                                          | Unchanged (any authenticated principal, organisation membership implied), plus: the target `ProjectType` must be `ACTIVE`.                                                                                                      |
 
 ---
 
@@ -381,8 +408,8 @@ updateProjectTypeAgent(projectTypeId, key, input): Promise<ApiResult<ProjectType
 These are genuine calls made to produce a concrete, buildable spec rather than leaving gaps — correct any of them in review and the affected sections above get revised before implementation starts.
 
 1. **Project Types are modeled as global (system-wide), not organisation-scoped.** The request didn't say whether each organisation should define its own types or share one platform-wide list. Global was chosen because the request framed this as general extensibility ("the ability to add different project types"), not per-organisation customization, and because it's the simpler model to start from — adding an `organisationId` scope later is a small, additive change (one nullable column + a query filter) if it turns out to be wanted.
-2. **The Project Type workflow/agent editors are form-based, not a visual graph canvas.** Building a drag-and-drop node/edge canvas is a substantial, separate UI effort (this app currently has *zero* workflow-authoring UI of any kind to build on) — a structured table-based form editor (nodes table + edges table) is proposed as the real, shippable MVP; a visual canvas is a natural, larger follow-up if the form editor proves too limiting in practice.
-3. **§3.1** — modeling a Project Type as owning a *set* of named workflow templates (defaulting to today's existing 4), rather than literally one workflow, because collapsing the existing 4-workflow chain into one would fight the deliberate human-approval-gate and rework-loop design already in place. Flag in review if a literal single consolidated workflow was actually intended — that's separable, larger work.
+2. **The Project Type workflow/agent editors are form-based, not a visual graph canvas.** Building a drag-and-drop node/edge canvas is a substantial, separate UI effort (this app currently has _zero_ workflow-authoring UI of any kind to build on) — a structured table-based form editor (nodes table + edges table) is proposed as the real, shippable MVP; a visual canvas is a natural, larger follow-up if the form editor proves too limiting in practice.
+3. **§3.1** — modeling a Project Type as owning a _set_ of named workflow templates (defaulting to today's existing 4), rather than literally one workflow, because collapsing the existing 4-workflow chain into one would fight the deliberate human-approval-gate and rework-loop design already in place. Flag in review if a literal single consolidated workflow was actually intended — that's separable, larger work.
 4. **Cloned workflows/agents publish immediately** on project creation rather than starting as an editable draft, matching how every seeded workflow/agent is already immediately usable today. If new projects should instead start with an editable draft requiring an explicit first publish, §8 step 4/5 change from `PUBLISHED` to `DRAFT`.
 5. **No delete** is proposed for Organisation, Project Type, or their templates in this pass — matches the existing product's own pattern (Projects also have no delete route today). Disabling (`status: 'DISABLED'`) is the only lifecycle-ending action modeled, consistent with `ToolCapabilityStatus`/`IntegrationStatus`'s existing two-state precedent elsewhere in this codebase.
 
@@ -395,7 +422,7 @@ Mirrors this repo's own established sequential-sprint delivery model (not a comm
 1. **Organisation CRUD** — repository, use-cases, RBAC, routes, `OrganisationsPage.tsx` + `OrganisationProvider`. Fully shippable and useful on its own.
 2. **Project Type data model** — new tables/domain/repos/routes for `ProjectType`/`ProjectTypeWorkflow`/`ProjectTypeAgent`; `projects.project_type_id` migration + backfill (§5.4, §7). No editing UI yet — seed-only.
 3. **Clone pipeline** (§8) — extend `create-project.ts`; live-verified by actually creating a second project and confirming its cloned workflow/agents exist and are correctly keyed.
-4. **Router generalization** (§6) — the G1 fix; live-verified by running a real workflow to completion on the *new* project created in phase 3, proving its cloned agents actually execute, not just exist.
+4. **Router generalization** (§6) — the G1 fix; live-verified by running a real workflow to completion on the _new_ project created in phase 3, proving its cloned agents actually execute, not just exist.
 5. **Frontend CRUD** (§10) — `ProjectTypesPage.tsx` and its two embedded editors, `ProjectsPage.tsx`'s new type selector, the organisation selector in `App.tsx`.
 
 Phases 1–4 are independently testable backend milestones; phase 5 is the frontend layer the user asked for, sequenced last because it depends on every API surface below it existing and working for real.

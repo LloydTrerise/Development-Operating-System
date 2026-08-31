@@ -1,3 +1,4 @@
+import { createServer, type Server } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -136,4 +137,49 @@ describe('github adapter (real local git repository)', () => {
       await rm(clonePath, { recursive: true, force: true });
     }
   });
+});
+
+/**
+ * DEVOS-108 finding: live-verifying the real pilot run against a real
+ * private GitHub remote hung a real `TOOL_TASK` for 5+ minutes — `git
+ * clone` against a URL git can't authenticate falls back to an interactive
+ * credential prompt (Windows: Git Credential Manager, a GUI dialog nothing
+ * in a headless worker process can ever answer) and blocks forever, with no
+ * error anywhere. `runGit` now sets `GIT_TERMINAL_PROMPT=0` (git's own
+ * documented mechanism for exactly this). Reproduces the real hang
+ * condition deterministically and offline: a local HTTP server that always
+ * responds 401 to the smart-HTTP `info/refs` request is exactly what
+ * triggers git's credential-prompt fallback for a real unauthenticated
+ * remote — the fix must turn that into a fast rejection, not a hang.
+ */
+describe('runGit against an unauthenticated remote (DEVOS-108: no interactive credential hang)', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    server = createServer((_req, res) => {
+      res.writeHead(401, { 'content-type': 'text/plain' });
+      res.end('Unauthorized');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('Failed to determine test server address.');
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it('fails fast instead of hanging on an interactive credential prompt', async () => {
+    const start = Date.now();
+    await expect(
+      runGit(['ls-remote', `${baseUrl}/unauthorized-repo.git`], tmpdir()),
+    ).rejects.toThrow();
+    // The point of the fix: this resolves in seconds, not the 5+ minutes
+    // (or "never") the real hang took before GIT_TERMINAL_PROMPT=0 existed.
+    expect(Date.now() - start).toBeLessThan(15_000);
+  }, 20_000);
 });

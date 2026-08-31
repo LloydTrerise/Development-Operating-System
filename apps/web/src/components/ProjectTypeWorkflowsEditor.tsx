@@ -177,7 +177,11 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
           name: draft.name,
           definition,
         })
-      : await createProjectTypeWorkflow(projectTypeId, { key: newKey, name: draft.name, definition });
+      : await createProjectTypeWorkflow(projectTypeId, {
+          key: newKey,
+          name: draft.name,
+          definition,
+        });
 
     setSubmitting(false);
 
@@ -278,7 +282,11 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
                     />
                   </TableCell>
                   <TableCell>
-                    <FormControl size="small" sx={{ minWidth: 160 }} disabled={node.type !== 'AGENT_TASK'}>
+                    <FormControl
+                      size="small"
+                      sx={{ minWidth: 160 }}
+                      disabled={node.type !== 'AGENT_TASK'}
+                    >
                       <Select
                         value={node.agentRef ?? ''}
                         displayEmpty
@@ -296,7 +304,11 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
                     </FormControl>
                   </TableCell>
                   <TableCell>
-                    <IconButton size="small" onClick={() => removeNode(index)} aria-label="Remove node">
+                    <IconButton
+                      size="small"
+                      onClick={() => removeNode(index)}
+                      aria-label="Remove node"
+                    >
                       <DeleteIcon fontSize="small" />
                     </IconButton>
                   </TableCell>
@@ -335,7 +347,11 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
                     />
                   </TableCell>
                   <TableCell>
-                    <IconButton size="small" onClick={() => removeEdge(index)} aria-label="Remove edge">
+                    <IconButton
+                      size="small"
+                      onClick={() => removeEdge(index)}
+                      aria-label="Remove edge"
+                    >
                       <DeleteIcon fontSize="small" />
                     </IconButton>
                   </TableCell>
@@ -347,7 +363,12 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
             + Add edge
           </Button>
 
-          <Button type="submit" variant="contained" disabled={submitting} sx={{ alignSelf: 'flex-start' }}>
+          <Button
+            type="submit"
+            variant="contained"
+            disabled={submitting}
+            sx={{ alignSelf: 'flex-start' }}
+          >
             {submitting ? 'Saving…' : selectedKey ? 'Save changes' : 'Create workflow template'}
           </Button>
           {submitError && <ErrorAlert message={submitError} />}

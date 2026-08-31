@@ -1,12 +1,12 @@
 /**
- * "Create pull request through gateway" (DEVOS-058's own task spec). No
- * concrete GitHub PR request/response schema, endpoint, or auth scope
- * exists anywhere in the spec corpus — this port exists so the
- * `pull-request-create` capability (DEVOS-051) can be wired to a real
- * GitHub implementation later without changing anything upstream of it.
- * Per this sprint's user-authorized scoping decision, only a fake/local
- * implementation (`createLocalPullRequestProvider`) is built and
- * live-verified this sprint — no real GitHub API call is made anywhere.
+ * "Create pull request through gateway" (DEVOS-058's own task spec) — this
+ * port exists so the `pull-request-create` capability (DEVOS-051) can be
+ * wired to different implementations without changing anything upstream of
+ * it. Sprints 4-8 built and live-verified only a fake/local implementation
+ * (`createLocalPullRequestProvider`), per that period's own user-authorized
+ * scoping decision. DEVOS-104 (Sprint 9) added a real one
+ * (`createGitHubPullRequestProvider`, backed by the GitHub REST API) behind
+ * this same, unchanged port.
  */
 export interface CreatePullRequestRequest {
   sourceBranch: string;

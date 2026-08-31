@@ -146,7 +146,12 @@ export function ProjectTypesPage() {
           onChange={(event) => setDescription(event.target.value)}
           size="small"
         />
-        <Button type="submit" variant="contained" disabled={submitting} sx={{ alignSelf: 'flex-start' }}>
+        <Button
+          type="submit"
+          variant="contained"
+          disabled={submitting}
+          sx={{ alignSelf: 'flex-start' }}
+        >
           {submitting ? 'Creating…' : 'Create project type'}
         </Button>
         {submitError && <ErrorAlert message={submitError} />}
@@ -159,7 +164,12 @@ export function ProjectTypesPage() {
             <Typography variant="h5" component="h3">
               {selected.name}
             </Typography>
-            <Button size="small" variant="outlined" disabled={statusUpdating} onClick={toggleStatus}>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={statusUpdating}
+              onClick={toggleStatus}
+            >
               {selected.status === 'ACTIVE' ? 'Disable' : 'Activate'}
             </Button>
           </Stack>

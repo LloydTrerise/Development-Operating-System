@@ -11,7 +11,7 @@ const BEARER_PREFIX = 'Bearer ';
  */
 export function createLocalAuthProvider(): AuthProvider {
   return {
-    authenticate(authorizationHeader): Principal | null {
+    async authenticate(authorizationHeader): Promise<Principal | null> {
       if (authorizationHeader === undefined || !authorizationHeader.startsWith(BEARER_PREFIX)) {
         return null;
       }

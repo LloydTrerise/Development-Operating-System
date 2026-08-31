@@ -1,19 +1,21 @@
 import { useState, type FormEvent } from 'react';
-import { Button, List, ListItemButton, ListItemText, Stack, TextField, Typography } from '@mui/material';
+import {
+  Button,
+  List,
+  ListItemButton,
+  ListItemText,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import { createOrganisation } from '../api-client.js';
 import { ErrorAlert } from '../components/ErrorAlert.js';
 import { LoadingState } from '../components/LoadingState.js';
 import { useOrganisationContext } from '../organisation-context.js';
 
 export function OrganisationsPage() {
-  const {
-    organisations,
-    selectedOrganisationId,
-    selectOrganisation,
-    loading,
-    error,
-    refresh,
-  } = useOrganisationContext();
+  const { organisations, selectedOrganisationId, selectOrganisation, loading, error, refresh } =
+    useOrganisationContext();
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -80,7 +82,12 @@ export function OrganisationsPage() {
           required
           size="small"
         />
-        <Button type="submit" variant="contained" disabled={submitting} sx={{ alignSelf: 'flex-start' }}>
+        <Button
+          type="submit"
+          variant="contained"
+          disabled={submitting}
+          sx={{ alignSelf: 'flex-start' }}
+        >
           {submitting ? 'Creating…' : 'Create organisation'}
         </Button>
         {submitError && <ErrorAlert message={submitError} />}
