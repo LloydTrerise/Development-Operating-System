@@ -5,7 +5,7 @@ import type {
   WorkflowVersionId,
   WorkItemId,
 } from '@devos/contracts';
-import type { WorkflowRun, WorkflowRunRepository } from '@devos/domain';
+import type { ListWorkflowRunsForDefinition, WorkflowRun, WorkflowRunRepository } from '@devos/domain';
 import type { WorkflowRunsTable } from '../database.js';
 import type { QueryExecutor } from './base.js';
 
@@ -78,5 +78,23 @@ export function createWorkflowRunRepository(db: QueryExecutor): WorkflowRunRepos
         })
         .execute();
     },
+  };
+}
+
+/** DEVOS-135: a real join against `workflow_versions` — see
+ * `ListWorkflowRunsForDefinition`'s own doc comment (`@devos/domain`) for
+ * why this is a standalone function, not a `WorkflowRunRepository` method. */
+export function createWorkflowRunsForDefinitionLister(
+  db: QueryExecutor,
+): ListWorkflowRunsForDefinition {
+  return async (workflowDefinitionId) => {
+    const rows = await db
+      .selectFrom('workflow_runs')
+      .innerJoin('workflow_versions', 'workflow_versions.id', 'workflow_runs.workflow_version_id')
+      .where('workflow_versions.workflow_definition_id', '=', workflowDefinitionId)
+      .selectAll('workflow_runs')
+      .orderBy('workflow_runs.created_at', 'desc')
+      .execute();
+    return rows.map(toDomain);
   };
 }

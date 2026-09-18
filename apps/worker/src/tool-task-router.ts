@@ -1,5 +1,8 @@
 import {
   runClosureTask,
+  runDiagnoseIncidentTask,
+  runIncidentLogTask,
+  runNotifyStakeholdersTask,
   runReleaseReadinessCheckTask,
   runReleaseRollbackTask,
   runReleaseTask,
@@ -11,16 +14,17 @@ import {
 import type { WorkflowTask } from '@devos/domain';
 
 /**
- * DEVOS-073/076/078/113/114: mirrors `agent-task-router.ts`'s exact pattern —
- * one 'TOOL_TASK' WorkflowNodeType, now six deterministic (non-agent)
- * handlers behind it (DEVOS-064's build/test validation, DEVOS-113's
- * security scan, DEVOS-073's release-readiness check, DEVOS-076's release,
- * DEVOS-114's rollback, DEVOS-078's closure), so the
- * dispatcher's single registration for that type routes internally. Keyed
- * by `task.taskKey` (the node's own `id`, unconditionally threaded through
- * by `run-creation.ts` for every node — unlike `agentRef`, no new per-node
- * config needed to make this routable). An unrecognized taskKey fails the
- * task clearly rather than silently doing nothing.
+ * DEVOS-073/076/078/113/114/125: mirrors `agent-task-router.ts`'s exact
+ * pattern — one 'TOOL_TASK' WorkflowNodeType, now nine deterministic
+ * (non-agent) handlers behind it (DEVOS-064's build/test validation,
+ * DEVOS-113's security scan, DEVOS-073's release-readiness check,
+ * DEVOS-076's release, DEVOS-114's rollback, DEVOS-078's closure, and
+ * DEVOS-125's diagnose/notify/incident-log for the "Incident Response"
+ * workflow), so the dispatcher's single registration for that type routes
+ * internally. Keyed by `task.taskKey` (the node's own `id`, unconditionally
+ * threaded through by `run-creation.ts` for every node — unlike `agentRef`,
+ * no new per-node config needed to make this routable). An unrecognized
+ * taskKey fails the task clearly rather than silently doing nothing.
  *
  * `deps` is typed as `ToolTaskHandlerDeps & ClosureUseCaseDeps` (a
  * structural superset of what every handler needs) rather than either
@@ -44,6 +48,12 @@ export async function routeToolTask(
       return runReleaseRollbackTask(deps, task);
     case 'closure':
       return runClosureTask(deps, task);
+    case 'diagnose':
+      return runDiagnoseIncidentTask(deps, task);
+    case 'notify':
+      return runNotifyStakeholdersTask(deps, task);
+    case 'log-only':
+      return runIncidentLogTask(deps, task);
     default:
       throw new Error(
         `No tool-task handler registered for taskKey "${task.taskKey}" (task ${task.id}).`,

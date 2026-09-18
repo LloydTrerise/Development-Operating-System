@@ -23,6 +23,9 @@ import {
   SEED_DISCOVERY_AGENT_KEY,
   SEED_DISCOVERY_AGENT_PROMPT_REFERENCE,
   SEED_DISCOVERY_AGENT_VERSION_ID,
+  SEED_INCIDENT_RESPONSE_PROJECT_TYPE_ID,
+  SEED_INCIDENT_RESPONSE_WORKFLOW_GRAPH,
+  SEED_INCIDENT_RESPONSE_WORKFLOW_KEY,
   SEED_MEMBERSHIP_ID,
   SEED_ORGANISATION_ID,
   SEED_PLANNING_AGENT_CONFIGURATION,
@@ -42,6 +45,7 @@ import {
   SEED_PT_AGENT_REQUIREMENTS_ID,
   SEED_PT_AGENT_REVIEW_ID,
   SEED_PT_AGENT_TECHNICAL_DESIGN_ID,
+  SEED_PT_INCIDENT_RESPONSE_WORKFLOW_ID,
   SEED_PT_WORKFLOW_DEVELOPMENT_PATH_ID,
   SEED_PT_WORKFLOW_INTAKE_ID,
   SEED_PT_WORKFLOW_PLANNING_PATH_ID,
@@ -104,6 +108,23 @@ async function main(): Promise<void> {
       id: SEED_SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
       key: 'software-development',
       name: 'Software Development',
+      description: null,
+      status: 'ACTIVE',
+      created_at: now,
+      updated_at: now,
+    })
+    .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
+
+  // DEVOS-125 (Sprint 12): a second, sibling ProjectType — the first real
+  // proof the clone pipeline generalizes beyond the one type it has ever
+  // cloned until now (specs/sprints/sprint-12/DEVOS-125.md).
+  await db
+    .insertInto('project_types')
+    .values({
+      id: SEED_INCIDENT_RESPONSE_PROJECT_TYPE_ID,
+      key: 'incident-response',
+      name: 'Incident Response',
       description: null,
       status: 'ACTIVE',
       created_at: now,
@@ -577,6 +598,23 @@ async function main(): Promise<void> {
       .onConflict((oc) => oc.column('id').doNothing())
       .execute();
   }
+
+  // DEVOS-125 (Sprint 12): the one ProjectTypeWorkflow template for the new
+  // "Incident Response" type — deliberately zero ProjectTypeAgent rows for
+  // it (no new agent role this sprint, specs/sprints/sprint-12/README.md).
+  await db
+    .insertInto('project_type_workflows')
+    .values({
+      id: SEED_PT_INCIDENT_RESPONSE_WORKFLOW_ID,
+      project_type_id: SEED_INCIDENT_RESPONSE_PROJECT_TYPE_ID,
+      key: SEED_INCIDENT_RESPONSE_WORKFLOW_KEY,
+      name: SEED_INCIDENT_RESPONSE_WORKFLOW_GRAPH.name,
+      definition: JSON.stringify(SEED_INCIDENT_RESPONSE_WORKFLOW_GRAPH),
+      created_at: now,
+      updated_at: now,
+    })
+    .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
 
   const projectTypeAgentSeeds = [
     {

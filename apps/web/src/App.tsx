@@ -27,6 +27,8 @@ import { ProjectTypesPage } from './pages/ProjectTypesPage.js';
 import { ProjectsPage } from './pages/ProjectsPage.js';
 import { RunsPage } from './pages/RunsPage.js';
 import { WorkItemsPage } from './pages/WorkItemsPage.js';
+import { WorkflowLibraryPage } from './pages/WorkflowLibraryPage.js';
+import { WorkflowsPage } from './pages/WorkflowsPage.js';
 import { useOrganisationContext } from './organisation-context.js';
 import { useProjectContext } from './project-context.js';
 import { useSession } from './session.js';
@@ -42,6 +44,8 @@ const NAV_ITEMS = [
   { to: '/projects', label: 'Projects' },
   { to: '/project-types', label: 'Project Types' },
   { to: '/work-items', label: 'Work Items' },
+  { to: '/workflows', label: 'Workflows' },
+  { to: '/workflow-library', label: 'Workflow Library' },
   { to: '/runs', label: 'Runs' },
   { to: '/approvals', label: 'Approvals' },
   { to: '/governance', label: 'Governance' },
@@ -290,6 +294,8 @@ export function App() {
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/project-types" element={<ProjectTypesPage />} />
           <Route path="/work-items" element={<WorkItemsPage />} />
+          <Route path="/workflows" element={<WorkflowsPage />} />
+          <Route path="/workflow-library" element={<WorkflowLibraryPage />} />
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/governance" element={<GovernancePage />} />

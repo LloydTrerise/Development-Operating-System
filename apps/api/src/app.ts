@@ -7,6 +7,7 @@ import {
 } from '@devos/application';
 import { loadConfig, type DevosConfig } from '@devos/config';
 import type { ApiError, ApiErrorResponse, ApiResponse } from '@devos/contracts';
+import type { ListWorkflowRunsForDefinition } from '@devos/domain';
 import { Redis } from 'ioredis';
 import {
   createAgentDraftCreator,
@@ -37,6 +38,7 @@ import {
   createWorkflowDraftCreator,
   createWorkflowRunRepository,
   createWorkflowRunStarter,
+  createWorkflowRunsForDefinitionLister,
   createWorkflowTaskRepository,
   createWorkflowVersionRepository,
   type DatabaseClient,
@@ -205,6 +207,11 @@ export interface CreateAppOptions {
   approvalDeps?: ApprovalUseCaseDeps;
   /** DEVOS-091: overridable so tests can exercise a real 429 without firing 60+ requests. */
   mutationRateLimiter?: RateLimiter;
+  /** DEVOS-135: overridable the same way `database` itself is — a real
+   * join against `workflow_versions`/`workflow_runs` by default, but tests
+   * exercising an in-memory `workflowDeps` need an in-memory equivalent
+   * instead of hitting a real (here, fake/null) database connection. */
+  listRunsForDefinition?: ListWorkflowRunsForDefinition;
 }
 
 export function createApp(options: CreateAppOptions = {}): DevosApi {
@@ -370,6 +377,8 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createWorkflowRoutes(API_PREFIX, {
       ...workflowDeps,
       auditRecords: projectDeps.auditRecords,
+      listRunsForDefinition:
+        options.listRunsForDefinition ?? createWorkflowRunsForDefinitionLister(database.db),
     }),
     ...createWorkflowRunRoutes(API_PREFIX, workflowDeps),
     ...createArtifactRoutes(API_PREFIX, artifactDeps),

@@ -29,6 +29,9 @@ Thumbs.db
 tmp/
 temp/
 
+# Local pnpm shim (corepack-generated, machine-specific)
+.pnpm-bin/
+
 # Test artifacts
 playwright-report/
 test-results/

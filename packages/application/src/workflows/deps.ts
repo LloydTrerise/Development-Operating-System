@@ -7,6 +7,7 @@ import type {
   ArtifactVersionRepository,
   AuditRecordRepository,
   ContextManifestRepository,
+  ListWorkflowRunsForDefinition,
   MembershipRepository,
   ProjectRepository,
   ToolCapabilityRepository,
@@ -134,4 +135,18 @@ export interface ClosureUseCaseDeps {
    * -> `workItemId`, the same lookup every other task handler already
    * performs first. */
   workflowRuns: WorkflowRunRepository;
+}
+
+/**
+ * DEVOS-135: a workflow's own real run-health summary (library page) —
+ * a separate flat interface (same precedent as `AgentExecutionSummaryUseCaseDeps`/
+ * `ToolInvocationSummaryUseCaseDeps` above) rather than widening
+ * `WorkflowUseCaseDeps` itself, so every one of `WorkflowRunRepository`'s
+ * many existing test fakes stays valid unchanged.
+ */
+export interface ListWorkflowRunsForDefinitionDeps {
+  projects: ProjectRepository;
+  memberships: MembershipRepository;
+  workflowDefinitions: WorkflowDefinitionRepository;
+  listRunsForDefinition: ListWorkflowRunsForDefinition;
 }

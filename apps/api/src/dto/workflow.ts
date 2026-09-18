@@ -1,5 +1,6 @@
 import type { WorkflowDefinition as WorkflowGraph } from '@devos/contracts';
 import type { WorkflowDefinition, WorkflowVersion } from '@devos/domain';
+import type { WorkflowDefinitionSummary } from '@devos/application';
 import { BadRequestError } from '../http/errors.js';
 
 export function toWorkflowDefinitionDto(definition: WorkflowDefinition) {
@@ -11,6 +12,14 @@ export function toWorkflowDefinitionDto(definition: WorkflowDefinition) {
     description: definition.description,
     createdAt: definition.createdAt,
     updatedAt: definition.updatedAt,
+  };
+}
+
+export function toWorkflowDefinitionSummaryDto(summary: WorkflowDefinitionSummary) {
+  return {
+    ...toWorkflowDefinitionDto(summary),
+    latestVersionStatus: summary.latestVersionStatus,
+    versionCount: summary.versionCount,
   };
 }
 

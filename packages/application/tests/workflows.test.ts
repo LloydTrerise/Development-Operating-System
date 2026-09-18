@@ -26,8 +26,10 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../src/projects/create-project.js';
 import type { CreateProjectWithClones } from '../src/projects/deps.js';
+import { createNewWorkflowVersion } from '../src/workflows/create-new-workflow-version.js';
 import { createWorkflowDefinition } from '../src/workflows/create-workflow-definition.js';
 import type { CreateWorkflowDraft, StartWorkflowRun } from '../src/workflows/deps.js';
+import { listWorkflowDefinitionsForProject } from '../src/workflows/list-workflow-definitions.js';
 import { publishWorkflowVersion } from '../src/workflows/publish-workflow-version.js';
 import { startWorkflowRunFromActiveVersion } from '../src/workflows/start-run-from-active-version.js';
 import { updateDraftWorkflow } from '../src/workflows/update-draft-workflow.js';
@@ -276,6 +278,32 @@ describe('workflow use cases', () => {
         outcome: 'SUCCESS',
       }),
     );
+  });
+
+  it('DEVOS-135: lists a project workflow with its own real latest-version status and version count', async () => {
+    const { definition } = await createWorkflowDefinition(deps, 'alice', projectId, {
+      key: 'library-summary',
+      name: 'Library Summary',
+      definition: VALID_GRAPH,
+    });
+
+    const [beforePublish] = await listWorkflowDefinitionsForProject(deps, 'alice', projectId);
+    expect(beforePublish).toMatchObject({
+      id: definition.id,
+      latestVersionStatus: 'DRAFT',
+      versionCount: 1,
+    });
+
+    await publishWorkflowVersion(deps, 'alice', definition.id);
+    await createNewWorkflowVersion(deps, 'alice', definition.id);
+
+    // the newest version (v2, DRAFT) is reported, not the now-PUBLISHED v1.
+    const [afterDraftV2] = await listWorkflowDefinitionsForProject(deps, 'alice', projectId);
+    expect(afterDraftV2).toMatchObject({
+      id: definition.id,
+      latestVersionStatus: 'DRAFT',
+      versionCount: 2,
+    });
   });
 
   it('rejects a duplicate key within the same project', async () => {
@@ -533,6 +561,51 @@ describe('workflow use cases', () => {
     expect(byKey.discovery?.input).not.toHaveProperty('dependsOn');
     expect(byKey.requirements?.input).toMatchObject({ dependsOn: ['discovery'] });
     expect(byKey.planning?.input).toMatchObject({ dependsOn: ['requirements'] });
+  });
+
+  it('DEVOS-136: creates version 2 as a new draft, copying the latest published version’s definition verbatim', async () => {
+    const { definition } = await createWorkflowDefinition(deps, 'alice', projectId, {
+      key: 'redraftable',
+      name: 'Redraftable',
+      definition: VALID_GRAPH,
+    });
+    await publishWorkflowVersion(deps, 'alice', definition.id);
+
+    const draft = await createNewWorkflowVersion(deps, 'alice', definition.id);
+    expect(draft.version).toBe(2);
+    expect(draft.status).toBe('DRAFT');
+    expect(draft.definition).toEqual(VALID_GRAPH);
+
+    const auditRecords = await deps.auditRecords.listForProject(projectId);
+    expect(auditRecords).toContainEqual(
+      expect.objectContaining({
+        action: 'workflow.version.drafted',
+        targetType: 'WorkflowDefinition',
+        targetId: definition.id,
+        outcome: 'SUCCESS',
+      }),
+    );
+
+    // The new draft is now real and editable through the existing,
+    // unmodified draft-only mutation path.
+    const updated = await updateDraftWorkflow(deps, 'alice', definition.id, {
+      ...VALID_GRAPH,
+      name: 'Redrafted',
+    });
+    expect(updated.version).toBe(2);
+    expect(updated.definition.name).toBe('Redrafted');
+  });
+
+  it('DEVOS-136: rejects creating a new draft when the latest version is already an unpublished draft', async () => {
+    const { definition } = await createWorkflowDefinition(deps, 'alice', projectId, {
+      key: 'still-draft',
+      name: 'Still Draft',
+      definition: VALID_GRAPH,
+    });
+
+    await expect(createNewWorkflowVersion(deps, 'alice', definition.id)).rejects.toThrow(
+      ValidationError,
+    );
   });
 
   it('is idempotent: starting a run twice with the same key returns the same run', async () => {

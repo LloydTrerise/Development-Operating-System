@@ -1,25 +1,33 @@
 import type { ProjectId, WorkflowId } from '@devos/contracts';
 import {
+  createNewWorkflowVersion,
   createWorkflowDefinition,
   getWorkflowDefinitionForPrincipal,
   getWorkflowVersionByNumber,
   listWorkflowDefinitionsForProject,
+  listWorkflowRunsForDefinition,
   listWorkflowVersions,
   publishWorkflowVersion,
   updateDraftWorkflow,
   validateDraftWorkflow,
   type CreateWorkflowDefinitionDeps,
+  type ListWorkflowRunsForDefinitionDeps,
 } from '@devos/application';
 import {
   parseCreateWorkflowBody,
   parseVersionNumber,
   parseWorkflowGraphBody,
   toWorkflowDefinitionDto,
+  toWorkflowDefinitionSummaryDto,
   toWorkflowVersionDto,
 } from '../dto/workflow.js';
+import { toWorkflowRunDto } from '../dto/workflow-run.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
-export function createWorkflowRoutes(prefix: string, deps: CreateWorkflowDefinitionDeps): Route[] {
+export function createWorkflowRoutes(
+  prefix: string,
+  deps: CreateWorkflowDefinitionDeps & ListWorkflowRunsForDefinitionDeps,
+): Route[] {
   return [
     {
       method: 'GET',
@@ -32,7 +40,7 @@ export function createWorkflowRoutes(prefix: string, deps: CreateWorkflowDefinit
           user.id,
           params.projectId as ProjectId,
         );
-        return definitions.map(toWorkflowDefinitionDto);
+        return definitions.map(toWorkflowDefinitionSummaryDto);
       },
     },
     {
@@ -92,6 +100,23 @@ export function createWorkflowRoutes(prefix: string, deps: CreateWorkflowDefinit
       },
     },
     {
+      // DEVOS-136: creates the next draft version of an already-published
+      // workflow — the missing primitive this codebase never needed until
+      // a real project's own workflow needed to become editable again.
+      method: 'POST',
+      pattern: `${prefix}/workflows/:workflowId/versions`,
+      protected: true,
+      handler: async ({ principal, params }) => {
+        const user = requirePrincipal(principal);
+        const version = await createNewWorkflowVersion(
+          deps,
+          user.id,
+          params.workflowId as WorkflowId,
+        );
+        return toWorkflowVersionDto(version);
+      },
+    },
+    {
       method: 'GET',
       pattern: `${prefix}/workflows/:workflowId/versions/:version`,
       protected: true,
@@ -114,6 +139,22 @@ export function createWorkflowRoutes(prefix: string, deps: CreateWorkflowDefinit
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         return validateDraftWorkflow(deps, user.id, params.workflowId as WorkflowId);
+      },
+    },
+    {
+      // DEVOS-135: a workflow's own real run-health summary (library page) —
+      // every run across every one of its versions.
+      method: 'GET',
+      pattern: `${prefix}/workflows/:workflowId/runs`,
+      protected: true,
+      handler: async ({ principal, params }) => {
+        const user = requirePrincipal(principal);
+        const runs = await listWorkflowRunsForDefinition(
+          deps,
+          user.id,
+          params.workflowId as WorkflowId,
+        );
+        return runs.map(toWorkflowRunDto);
       },
     },
     {

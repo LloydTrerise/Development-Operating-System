@@ -29,6 +29,10 @@ import {
 } from '../api-client.js';
 import { ErrorAlert } from './ErrorAlert.js';
 import { LoadingState } from './LoadingState.js';
+import { WorkflowCanvas } from './WorkflowCanvas.js';
+import { WorkflowNodeInspector } from './WorkflowNodeInspector.js';
+import { WorkflowPalette } from './WorkflowPalette.js';
+import { useWorkflowGraphValidation } from '../workflow-graph-validation.js';
 
 const WORKFLOW_NODE_TYPES = [
   'TRIGGER',
@@ -74,6 +78,8 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
   const [draft, setDraft] = useState<DraftState>(EMPTY_DRAFT);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const validationIssues = useWorkflowGraphValidation(draft);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +113,7 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
     setNewKey('');
     setDraft(toDraft(workflow));
     setSubmitError(null);
+    setSelectedNodeId(null);
   }
 
   function startNew() {
@@ -115,6 +122,7 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
     setNewKey('');
     setDraft(EMPTY_DRAFT);
     setSubmitError(null);
+    setSelectedNodeId(null);
   }
 
   function addNode() {
@@ -139,6 +147,16 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
     setDraft({ ...draft, edges: [...draft.edges, { from: '', to: '' }] });
   }
 
+  /** DEVOS-129: a real node dropped from the palette onto the canvas, or a
+   * real edge created by dragging a connection between two nodes there. */
+  function addNodeFromCanvas(node: WorkflowNode) {
+    setDraft({ ...draft, nodes: [...draft.nodes, node] });
+  }
+
+  function addEdgeFromCanvas(edge: WorkflowEdge) {
+    setDraft({ ...draft, edges: [...draft.edges, edge] });
+  }
+
   function updateEdge(index: number, changes: Partial<WorkflowEdge>) {
     setDraft({
       ...draft,
@@ -161,6 +179,7 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
       type: node.type,
       ...(node.name ? { name: node.name } : {}),
       ...(node.type === 'AGENT_TASK' && node.agentRef ? { agentRef: node.agentRef } : {}),
+      ...(node.config ? { config: node.config } : {}),
     }));
     const definition = {
       name: draft.name,
@@ -239,6 +258,41 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
             required
             size="small"
           />
+
+          <Typography variant="body2">Canvas</Typography>
+          <WorkflowPalette />
+          <WorkflowCanvas
+            nodes={draft.nodes}
+            edges={draft.edges}
+            onNodesReposition={(nodes) => setDraft({ ...draft, nodes })}
+            onNodeCreate={addNodeFromCanvas}
+            onEdgeCreate={addEdgeFromCanvas}
+            selectedNodeId={selectedNodeId}
+            onNodeSelect={setSelectedNodeId}
+          />
+          {(() => {
+            const selectedIndex = draft.nodes.findIndex((node) => node.id === selectedNodeId);
+            if (selectedIndex === -1) return null;
+            const selectedNode = draft.nodes[selectedIndex]!;
+            return (
+              <WorkflowNodeInspector
+                node={selectedNode}
+                otherNodeIds={draft.nodes
+                  .map((node) => node.id)
+                  .filter((id) => id !== selectedNode.id && id.length > 0)}
+                agentKeys={agentKeys}
+                onChange={(changes) => updateNode(selectedIndex, changes)}
+              />
+            );
+          })()}
+
+          {validationIssues.length > 0 && (
+            <ErrorAlert
+              message={`This graph has ${validationIssues.length} real structural issue${validationIssues.length === 1 ? '' : 's'} (cannot save until fixed): ${validationIssues
+                .map((issue) => `${issue.field}: ${issue.message}`)
+                .join(' | ')}`}
+            />
+          )}
 
           <Typography variant="body2">Nodes</Typography>
           <Table size="small">
@@ -366,7 +420,7 @@ export function ProjectTypeWorkflowsEditor({ projectTypeId }: { projectTypeId: s
           <Button
             type="submit"
             variant="contained"
-            disabled={submitting}
+            disabled={submitting || validationIssues.length > 0}
             sx={{ alignSelf: 'flex-start' }}
           >
             {submitting ? 'Saving…' : selectedKey ? 'Save changes' : 'Create workflow template'}

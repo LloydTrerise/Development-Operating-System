@@ -455,6 +455,95 @@ export const SEED_PT_AGENT_PLANNING_ID = '00000000-0000-4000-8000-00000000002b';
 export const SEED_PT_AGENT_DEVELOPMENT_ID = '00000000-0000-4000-8000-00000000002c';
 export const SEED_PT_AGENT_REVIEW_ID = '00000000-0000-4000-8000-00000000002d';
 
+/**
+ * DEVOS-125 (Sprint 12): a second, sibling `ProjectType` alongside
+ * `SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID` — "Incident Response" — the first
+ * real proof the clone pipeline (`specs/architecture/organisations-and-project-types.md`
+ * §8) generalizes beyond the one type it has ever cloned until now.
+ * Deliberately zero `ProjectTypeAgent` rows (no new agent role this sprint,
+ * per explicit user decision — `specs/sprints/sprint-12/README.md`).
+ */
+export const SEED_INCIDENT_RESPONSE_PROJECT_TYPE_ID = '00000000-0000-4000-8000-000000000032';
+export const SEED_PT_INCIDENT_RESPONSE_WORKFLOW_ID = '00000000-0000-4000-8000-000000000033';
+export const SEED_INCIDENT_RESPONSE_WORKFLOW_KEY = 'incident-response';
+
+/**
+ * DEVOS-124's own scoping output (`specs/sprints/sprint-12/DEVOS-124.md`):
+ * a single workflow (not a multi-run chain like the Software Change
+ * Workflow — `APPROVAL` being a real graph node, DEVOS-122, removes the need
+ * for that older "a gate needs a run of its own" pattern) exercising every
+ * Sprint 11 primitive together. `severity-check` (CONDITION) branches on the
+ * run's own `severity` input; the `high` branch runs `diagnose`/`notify`
+ * concurrently under a `PARALLEL`, joins them with a tolerant `JOIN`, waits
+ * (duration) for a simulated external confirmation, then gates `remediation`
+ * (reusing the existing `rollback` handler unchanged) behind a graph-native
+ * `APPROVAL` node placed mid-branch; the untaken `low` branch runs
+ * `log-only`. See `specs/sprints/sprint-12/DEVOS-124.md` for full grounding.
+ */
+export const SEED_INCIDENT_RESPONSE_WORKFLOW_GRAPH = {
+  name: 'Incident Response',
+  description:
+    'Diagnoses and notifies on a high-severity incident, waits for confirmation, and gates remediation behind approval; logs a low-severity incident without escalation (Sprint 12).',
+  trigger: { type: 'WORK_ITEM_MANUAL' },
+  inputs: [
+    { name: 'workItemId', type: 'WORK_ITEM', required: true },
+    { name: 'severity', type: 'STRING', required: true },
+    { name: 'rollbackToRevision', type: 'STRING', required: false },
+  ],
+  nodes: [
+    {
+      id: 'severity-check',
+      type: 'CONDITION',
+      name: 'Severity Check',
+      config: {
+        rule: { source: 'variable', path: 'severity', operator: 'equals', value: 'high' },
+        whenTrue: 'high',
+        whenFalse: 'low',
+      },
+    },
+    { id: 'diagnose-and-notify', type: 'PARALLEL', name: 'Diagnose and Notify' },
+    { id: 'diagnose', type: 'TOOL_TASK', name: 'Diagnose' },
+    { id: 'notify', type: 'TOOL_TASK', name: 'Notify Stakeholders' },
+    {
+      id: 'diagnosis-join',
+      type: 'JOIN',
+      name: 'Diagnosis Join',
+      config: { branchFailurePolicy: 'tolerant' },
+    },
+    {
+      id: 'await-confirmation',
+      type: 'WAIT',
+      name: 'Await Confirmation',
+      config: { waitType: 'duration', durationSeconds: 1 },
+    },
+    {
+      id: 'remediation-approval',
+      type: 'APPROVAL',
+      name: 'Remediation Approval',
+      config: { approvalType: 'incident-remediation' },
+    },
+    // Node id deliberately 'rollback', not 'remediation' — `task.taskKey`
+    // is always the node's own `id` (`run-creation.ts`), and `routeToolTask`
+    // dispatches by that literal taskKey; naming this node 'rollback' is
+    // what makes it resolve to the existing `runReleaseRollbackTask`
+    // completely unchanged, per DEVOS-124's own design.
+    { id: 'rollback', type: 'TOOL_TASK', name: 'Remediation (Rollback)' },
+    { id: 'log-only', type: 'TOOL_TASK', name: 'Log Only' },
+  ],
+  edges: [
+    { from: 'severity-check', to: 'diagnose-and-notify', branch: 'high' },
+    { from: 'severity-check', to: 'log-only', branch: 'low' },
+    { from: 'diagnose-and-notify', to: 'diagnose' },
+    { from: 'diagnose-and-notify', to: 'notify' },
+    { from: 'diagnose', to: 'diagnosis-join' },
+    { from: 'notify', to: 'diagnosis-join' },
+    { from: 'diagnosis-join', to: 'await-confirmation' },
+    { from: 'await-confirmation', to: 'remediation-approval' },
+    { from: 'remediation-approval', to: 'rollback' },
+  ],
+  outputs: [],
+};
+
 export const SEED_TOOL_CAPABILITIES = [
   {
     id: SEED_REPO_READ_CAPABILITY_ID,

@@ -1,5 +1,6 @@
 import type {
   ProjectId,
+  WorkflowId,
   WorkflowRunId,
   WorkflowRunStatus,
   WorkflowVersionId,
@@ -35,3 +36,18 @@ export interface WorkflowRunRepository {
   listForWorkItem: (workItemId: WorkItemId) => Promise<WorkflowRun[]>;
   create: (run: WorkflowRun) => Promise<void>;
 }
+
+/**
+ * DEVOS-135: a workflow definition's own real run-health summary needs
+ * every run across every one of its versions — `WorkflowRun` only stores
+ * `workflowVersionId`, so listing by definition is a real join against
+ * `workflow_versions`, not a fabricated metric. Deliberately a standalone
+ * function type, not a new `WorkflowRunRepository` method — this codebase's
+ * own established precedent (`AgentExecutionSummaryUseCaseDeps`,
+ * `ToolInvocationSummaryUseCaseDeps`) is a separate flat port for a
+ * narrowly-scoped read side, so every one of `WorkflowRunRepository`'s many
+ * existing test fakes stays valid unchanged.
+ */
+export type ListWorkflowRunsForDefinition = (
+  workflowDefinitionId: WorkflowId,
+) => Promise<WorkflowRun[]>;

@@ -40,6 +40,7 @@ import {
   type ContextManifestRepository,
   type KnowledgeSource,
   type KnowledgeSourceRepository,
+  type ListWorkflowRunsForDefinition,
   type Membership,
   type MembershipRepository,
   type Organisation,
@@ -292,7 +293,7 @@ function createInMemoryWorkItemDeps(projectDeps: ProjectUseCaseDeps): WorkItemUs
 function createInMemoryWorkflowDeps(
   projectDeps: ProjectUseCaseDeps,
   workItemDeps: WorkItemUseCaseDeps,
-): WorkflowUseCaseDeps {
+): WorkflowUseCaseDeps & { listRunsForDefinition: ListWorkflowRunsForDefinition } {
   const definitions = new Map<string, WorkflowDefinition>();
   const versions = new Map<string, WorkflowVersion>();
   const runs = new Map<string, WorkflowRun>();
@@ -376,6 +377,15 @@ function createInMemoryWorkflowDeps(
       await workflowRuns.create(run);
       for (const task of runTasks) await workflowTasks.create(task);
     },
+    // DEVOS-135: the same real join `createWorkflowRunsForDefinitionLister`
+    // performs against real Postgres, reimplemented over these same
+    // in-memory maps — a run's own `workflowVersionId` resolved back to its
+    // version's `workflowDefinitionId`.
+    listRunsForDefinition: async (workflowDefinitionId) =>
+      [...runs.values()].filter((run) => {
+        const version = versions.get(run.workflowVersionId);
+        return version?.workflowDefinitionId === workflowDefinitionId;
+      }),
   };
 }
 
@@ -1122,7 +1132,7 @@ describe('workflow routes', () => {
     const projectDeps = createInMemoryProjectDeps();
     const workItemDeps = createInMemoryWorkItemDeps(projectDeps);
     const workflowDeps = createInMemoryWorkflowDeps(projectDeps, workItemDeps);
-    const started = await startServer({ projectDeps, workItemDeps, workflowDeps });
+    const started = await startServer({ projectDeps, workItemDeps, workflowDeps, listRunsForDefinition: workflowDeps.listRunsForDefinition });
     server = started.server;
     baseUrl = started.baseUrl;
 
@@ -1205,6 +1215,52 @@ describe('workflow routes', () => {
     expect(rejectedUpdate.status).toBe(400);
   });
 
+  it('DEVOS-136: creates a real new draft version after publishing, editable and publishable again', async () => {
+    const createResponse = await authed(`/api/v1/projects/${projectId}/workflows`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'redraftable', name: 'Redraftable', definition: validGraph }),
+    });
+    const workflowId = (await createResponse.json()).data.id;
+
+    await authed(`/api/v1/workflows/${workflowId}/publish`, 'alice', { method: 'POST' });
+
+    const draftResponse = await authed(`/api/v1/workflows/${workflowId}/versions`, 'alice', {
+      method: 'POST',
+    });
+    const draftBody = await draftResponse.json();
+    expect(draftResponse.status).toBe(200);
+    expect(draftBody.data).toMatchObject({ version: 2, status: 'DRAFT' });
+    expect(draftBody.data.definition).toEqual(validGraph);
+
+    const updateResponse = await authed(`/api/v1/workflows/${workflowId}`, 'alice', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...validGraph, description: 're-drafted' }),
+    });
+    expect(updateResponse.status).toBe(200);
+
+    const publishResponse = await authed(`/api/v1/workflows/${workflowId}/publish`, 'alice', {
+      method: 'POST',
+    });
+    const publishBody = await publishResponse.json();
+    expect(publishBody.data).toMatchObject({ version: 2, status: 'PUBLISHED' });
+  });
+
+  it('DEVOS-136: rejects creating a new draft version while the latest version is already an unpublished draft', async () => {
+    const createResponse = await authed(`/api/v1/projects/${projectId}/workflows`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'still-draft', name: 'Still Draft', definition: validGraph }),
+    });
+    const workflowId = (await createResponse.json()).data.id;
+
+    const response = await authed(`/api/v1/workflows/${workflowId}/versions`, 'alice', {
+      method: 'POST',
+    });
+    expect(response.status).toBe(400);
+  });
+
   it('denies a non-member from reading a workflow', async () => {
     const createResponse = await authed(`/api/v1/projects/${projectId}/workflows`, 'alice', {
       method: 'POST',
@@ -1215,6 +1271,31 @@ describe('workflow routes', () => {
 
     const response = await authed(`/api/v1/workflows/${workflowId}`, 'mallory');
     expect(response.status).toBe(404);
+  });
+
+  it('DEVOS-135: lists a project workflow with its own real latest-version status and version count', async () => {
+    const createResponse = await authed(`/api/v1/projects/${projectId}/workflows`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'library-listed', name: 'Library Listed', definition: validGraph }),
+    });
+    const workflowId = (await createResponse.json()).data.id;
+
+    const listResponse = await authed(`/api/v1/projects/${projectId}/workflows`, 'alice');
+    const listBody = await listResponse.json();
+    expect(listResponse.status).toBe(200);
+    expect(listBody.data).toContainEqual(
+      expect.objectContaining({ id: workflowId, latestVersionStatus: 'DRAFT', versionCount: 1 }),
+    );
+
+    await authed(`/api/v1/workflows/${workflowId}/publish`, 'alice', { method: 'POST' });
+    await authed(`/api/v1/workflows/${workflowId}/versions`, 'alice', { method: 'POST' });
+
+    const listAfterRedraft = await authed(`/api/v1/projects/${projectId}/workflows`, 'alice');
+    const listAfterRedraftBody = await listAfterRedraft.json();
+    expect(listAfterRedraftBody.data).toContainEqual(
+      expect.objectContaining({ id: workflowId, latestVersionStatus: 'DRAFT', versionCount: 2 }),
+    );
   });
 });
 
@@ -1368,7 +1449,7 @@ describe('workflow run routes', () => {
     const projectDeps = createInMemoryProjectDeps();
     const workItemDeps = createInMemoryWorkItemDeps(projectDeps);
     const workflowDeps = createInMemoryWorkflowDeps(projectDeps, workItemDeps);
-    const started = await startServer({ projectDeps, workItemDeps, workflowDeps });
+    const started = await startServer({ projectDeps, workItemDeps, workflowDeps, listRunsForDefinition: workflowDeps.listRunsForDefinition });
     server = started.server;
     baseUrl = started.baseUrl;
 
@@ -1435,6 +1516,21 @@ describe('workflow run routes', () => {
 
     const getResponse = await authed(`/api/v1/runs/${body.data.id}`, 'alice');
     expect((await getResponse.json()).data.id).toBe(body.data.id);
+  });
+
+  it('DEVOS-135: lists every real run for a workflow definition across its own versions', async () => {
+    const startResponse = await authed(`/api/v1/workflows/${workflowId}/runs`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workItemId, inputs: {}, idempotencyKey: 'run-for-definition-list' }),
+    });
+    const runId = (await startResponse.json()).data.id;
+
+    const listResponse = await authed(`/api/v1/workflows/${workflowId}/runs`, 'alice');
+    const listBody = await listResponse.json();
+
+    expect(listResponse.status).toBe(200);
+    expect(listBody.data.some((run: { id: string }) => run.id === runId)).toBe(true);
   });
 
   it('DEVOS-080: lists every run for a work item, oldest first, and rejects a non-member', async () => {

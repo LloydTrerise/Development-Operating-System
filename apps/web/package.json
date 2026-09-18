@@ -14,10 +14,12 @@
   "dependencies": {
     "@auth0/auth0-react": "^2.24.1",
     "@devos/contracts": "workspace:*",
+    "@devos/domain": "workspace:*",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.11",
     "@mui/material": "^7.3.11",
+    "@xyflow/react": "^12.11.6",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "react-router-dom": "7.18.2"

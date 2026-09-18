@@ -74,11 +74,19 @@ export interface WorkflowNode {
   type: string;
   name?: string;
   agentRef?: string;
+  /** Mirrors @devos/contracts' WorkflowNode.config — the generic per-node
+   * extension point CONDITION/JOIN/WAIT/APPROVAL's real config lives in
+   * (DEVOS-130), and where the canvas stores a node's own on-screen
+   * position (DEVOS-128's `canvasPosition`, additive and purely visual). */
+  config?: Record<string, unknown>;
 }
 
 export interface WorkflowEdge {
   from: string;
   to: string;
+  /** Mirrors @devos/contracts' WorkflowEdge.branch (DEVOS-119) — which
+   * outgoing edge of a CONDITION node this represents. */
+  branch?: string;
 }
 
 /** Mirrors @devos/contracts WorkflowDefinition (the graph shape, not the
@@ -146,6 +154,37 @@ export interface WorkflowDefinitionSummary {
   key: string;
   name: string;
   description?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** DEVOS-135: only present on the project-list route (`toWorkflowDefinitionSummaryDto`) —
+   * absent on the single-definition GET, which still uses the plain `toWorkflowDefinitionDto`. */
+  latestVersionStatus?: string | null;
+  versionCount?: number;
+}
+
+/** Mirrors `apps/api/src/dto/workflow.ts`'s `toWorkflowVersionDto` — a real
+ * project's own `WorkflowVersion` (draft/published), as opposed to
+ * `ProjectTypeWorkflow` (a template, no version concept at all). */
+export interface WorkflowVersionDto {
+  id: string;
+  workflowId: string;
+  version: number;
+  status: string;
+  definition: WorkflowGraph;
+  publishedAt?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/** Mirrors `apps/api/src/dto/agent.ts`'s `toAgentDto` — a real project's own
+ * published `Agent` (as opposed to `ProjectTypeAgent`, a template). */
+export interface Agent {
+  id: string;
+  projectId: string;
+  key: string;
+  name: string;
+  description?: string;
+  status: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -413,6 +452,96 @@ export function createWorkItem(
 
 export function listWorkflows(projectId: string): Promise<ApiResult<WorkflowDefinitionSummary[]>> {
   return request<WorkflowDefinitionSummary[]>(`/api/v1/projects/${projectId}/workflows`);
+}
+
+/** DEVOS-135: the real `createWorkflowDefinition` use case had no client
+ * wrapper anywhere — every existing `WorkflowDefinition` reaches a project
+ * only via the project-type clone pipeline at project-creation time. The
+ * library page's "clone into new draft" action is the first UI-driven
+ * caller, so this wraps the existing, unmodified API exactly as it stands. */
+export function createWorkflow(
+  projectId: string,
+  input: { key: string; name: string; description?: string; definition: WorkflowGraph },
+): Promise<ApiResult<WorkflowDefinitionSummary & { version: WorkflowVersionDto }>> {
+  return request<WorkflowDefinitionSummary & { version: WorkflowVersionDto }>(
+    `/api/v1/projects/${projectId}/workflows`,
+    { method: 'POST', body: input },
+  );
+}
+
+/**
+ * DEVOS-136 (Sprint 14): the real per-project `WorkflowVersion` draft →
+ * validate → publish lifecycle already existed server-side
+ * (`apps/api/src/routes/workflows.ts`) with zero client function calling it
+ * — `specs/architecture/organisations-and-project-types.md` §2's own
+ * confirmed gap. These wrap that real, unmodified API exactly the way
+ * `createProjectTypeWorkflow`/`updateProjectTypeWorkflow` already wrap the
+ * template one.
+ */
+export function getWorkflowDefinition(
+  workflowId: string,
+): Promise<ApiResult<WorkflowDefinitionSummary>> {
+  return request<WorkflowDefinitionSummary>(`/api/v1/workflows/${workflowId}`);
+}
+
+export function listWorkflowVersions(workflowId: string): Promise<ApiResult<WorkflowVersionDto[]>> {
+  return request<WorkflowVersionDto[]>(`/api/v1/workflows/${workflowId}/versions`);
+}
+
+/** DEVOS-135: a workflow definition's own real run-health summary — every
+ * run across every one of its versions, powering the library page's
+ * "N succeeded / M failed" count via `RUN_TERMINAL_STATUSES` client-side. */
+export function listWorkflowRunsForDefinition(
+  workflowId: string,
+): Promise<ApiResult<WorkflowRun[]>> {
+  return request<WorkflowRun[]>(`/api/v1/workflows/${workflowId}/runs`);
+}
+
+export function getWorkflowVersionByNumber(
+  workflowId: string,
+  version: number,
+): Promise<ApiResult<WorkflowVersionDto>> {
+  return request<WorkflowVersionDto>(`/api/v1/workflows/${workflowId}/versions/${version}`);
+}
+
+/** Creates the next draft version of an already-published workflow — the
+ * new primitive this sprint added (`createNewWorkflowVersion`), mirroring
+ * `Policy`'s own already-proven "revise by drafting a new version" pattern. */
+export function createWorkflowVersionDraft(
+  workflowId: string,
+): Promise<ApiResult<WorkflowVersionDto>> {
+  return request<WorkflowVersionDto>(`/api/v1/workflows/${workflowId}/versions`, {
+    method: 'POST',
+  });
+}
+
+export function updateDraftWorkflow(
+  workflowId: string,
+  graph: WorkflowGraph,
+): Promise<ApiResult<WorkflowVersionDto>> {
+  return request<WorkflowVersionDto>(`/api/v1/workflows/${workflowId}`, {
+    method: 'PATCH',
+    body: graph,
+  });
+}
+
+export function validateDraftWorkflow(
+  workflowId: string,
+): Promise<ApiResult<{ valid: boolean; issues: { field: string; message: string }[] }>> {
+  return request(`/api/v1/workflows/${workflowId}/validate`, { method: 'POST' });
+}
+
+export function publishWorkflowVersion(workflowId: string): Promise<ApiResult<WorkflowVersionDto>> {
+  return request<WorkflowVersionDto>(`/api/v1/workflows/${workflowId}/publish`, {
+    method: 'POST',
+  });
+}
+
+/** A real project's own published `Agent` list (as opposed to
+ * `listProjectTypeAgents`, which lists a *type's* templates) — populates a
+ * real project's own `AGENT_TASK` nodes' `agentRef` from its real agents. */
+export function listAgents(projectId: string): Promise<ApiResult<Agent[]>> {
+  return request<Agent[]>(`/api/v1/projects/${projectId}/agents`);
 }
 
 export function startRun(
