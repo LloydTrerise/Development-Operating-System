@@ -39,4 +39,24 @@ export interface TaskQueue {
    * fail()). Returns the number of tasks reclaimed.
    */
   reclaimStale: (staleThresholdMs: number) => Promise<number>;
+  /**
+   * DEVOS-121: a `WAIT` node's handler (`runWaitTask`) reports it isn't
+   * ready yet by returning a reserved `waitUntil` output key instead of
+   * completing — the dispatcher (`task-dispatcher.ts`) calls this instead
+   * of `complete()` in that case. Transitions RUNNING -> WAITING (not
+   * SUCCEEDED, and not counted as a failure/retry) and records `readyAt`
+   * for `resumeReadyWaits()` to later find. Same attempt-fencing contract
+   * as `complete()`/`fail()`.
+   */
+  markWaiting: (taskId: WorkflowTask['id'], attempt: number, readyAt: string) => Promise<void>;
+  /**
+   * DEVOS-121: the `WAIT`-node counterpart to `reclaimStale()` — periodic
+   * maintenance, called from the same dispatcher poll loop, that finds
+   * every `WAITING` task whose recorded `readyAt` has passed and resets it
+   * to `PENDING` so `claimNext()` can pick it up again for real re-
+   * evaluation (a duration wait's own re-check confirms it's actually over;
+   * a dependency wait's own re-check tests its condition again). Returns
+   * the number of tasks resumed.
+   */
+  resumeReadyWaits: () => Promise<number>;
 }

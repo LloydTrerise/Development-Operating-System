@@ -29,6 +29,7 @@ function createFakeQueue(tasks: WorkflowTask[], reclaimedCount = 0) {
   const queue = [...tasks];
   const completed: { taskId: string; output: Record<string, unknown> }[] = [];
   const failed: { taskId: string; failure: TaskFailure; retryable: boolean }[] = [];
+  const waiting: { taskId: string; readyAt: string }[] = [];
   let reclaimCalls = 0;
 
   const taskQueue: TaskQueue = {
@@ -43,9 +44,13 @@ function createFakeQueue(tasks: WorkflowTask[], reclaimedCount = 0) {
       reclaimCalls += 1;
       return reclaimedCount;
     },
+    markWaiting: async (taskId, _attempt, readyAt) => {
+      waiting.push({ taskId, readyAt });
+    },
+    resumeReadyWaits: async () => 0,
   };
 
-  return { taskQueue, completed, failed, getReclaimCalls: () => reclaimCalls };
+  return { taskQueue, completed, failed, waiting, getReclaimCalls: () => reclaimCalls };
 }
 
 describe('task dispatcher', () => {
@@ -65,6 +70,19 @@ describe('task dispatcher', () => {
 
     expect(result).toEqual({ taskId: task.id, outcome: 'succeeded' });
     expect(completed).toEqual([{ taskId: task.id, output: { result: 'ok' } }]);
+  });
+
+  it('DEVOS-121: marks a task WAITING instead of completing it when the handler returns waitUntil', async () => {
+    const task = createTask();
+    const { taskQueue, completed, waiting } = createFakeQueue([task]);
+    const dispatcher = createTaskDispatcher(taskQueue);
+    dispatcher.registerHandler('TASK', async () => ({ waitUntil: '2099-01-01T00:00:00.000Z' }));
+
+    const result = await dispatcher.processNext();
+
+    expect(result).toEqual({ taskId: task.id, outcome: 'waiting' });
+    expect(waiting).toEqual([{ taskId: task.id, readyAt: '2099-01-01T00:00:00.000Z' }]);
+    expect(completed).toEqual([]);
   });
 
   it('fails a task gracefully when no handler is registered', async () => {
@@ -250,6 +268,8 @@ describe('task dispatcher', () => {
         },
         fail: async () => {},
         reclaimStale: async () => 0,
+        markWaiting: async () => {},
+        resumeReadyWaits: async () => 0,
       };
 
       const metrics = createMetricsRegistry();

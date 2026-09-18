@@ -7,7 +7,7 @@ export type DispatcherStatus = 'ready' | 'running' | 'stopping' | 'stopped';
 
 export interface TaskDispatchResult {
   taskId: string;
-  outcome: 'succeeded' | 'failed' | 'retrying';
+  outcome: 'succeeded' | 'failed' | 'retrying' | 'waiting';
 }
 
 export interface TaskDispatcher {
@@ -76,6 +76,16 @@ export function createTaskDispatcher(
 
     try {
       const output = await handler(task);
+      // DEVOS-121: a WAIT node's handler reports it isn't ready yet by
+      // returning this reserved output key instead of a normal completion
+      // — every other handler's output is untouched (this key has never
+      // existed before this task), so this only ever changes behavior for
+      // WAIT.
+      if (typeof output.waitUntil === 'string') {
+        await queue.markWaiting(task.id, task.attempt, output.waitUntil);
+        metrics?.incrementCounter('task_queue.waiting', labels);
+        return { taskId: task.id, outcome: 'waiting' };
+      }
       await queue.complete(task.id, task.attempt, output);
       metrics?.incrementCounter('task_queue.completed', labels);
       metrics?.observeHistogram('workflow_task.duration_ms', Date.now() - startedAt, labels);
@@ -101,6 +111,13 @@ export function createTaskDispatcher(
           const reclaimed = await queue.reclaimStale(staleThresholdMs);
           if (reclaimed > 0) {
             metrics?.incrementCounter('task_queue.reclaimed_stale', undefined, reclaimed);
+          }
+          // DEVOS-121: reuses this same periodic tick — no separate timer
+          // subsystem — to also resume any WAIT task whose own recorded
+          // readyAt has passed.
+          const resumed = await queue.resumeReadyWaits();
+          if (resumed > 0) {
+            metrics?.incrementCounter('task_queue.resumed_waiting', undefined, resumed);
           }
           nextReclaimAt = Date.now() + reclaimIntervalMs;
         }

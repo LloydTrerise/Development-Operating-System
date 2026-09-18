@@ -38,6 +38,14 @@ export const workflowTaskStatuses = [
   'WAITING',
   'SUCCEEDED',
   'FAILED',
+  /**
+   * DEVOS-119: a terminal status for a task on a graph branch a real
+   * `CONDITION` node determined was not taken — added to this already-
+   * PROVISIONAL enum (no authoritative spec enumeration exists for it,
+   * see the doc comment above), not previously present anywhere in this
+   * codebase.
+   */
+  'SKIPPED',
 ] as const;
 export type WorkflowTaskStatus = (typeof workflowTaskStatuses)[number];
 

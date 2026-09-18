@@ -61,6 +61,89 @@ export function validateWorkflowGraph(graph: unknown): WorkflowValidationIssue[]
           message: 'AGENT_TASK nodes require a non-empty agentRef.',
         });
       }
+      // DEVOS-119: a CONDITION node with no rule would previously pass
+      // validation and only fail at run time, once claimed, with no
+      // handler able to evaluate it — mirrors the AGENT_TASK/agentRef check
+      // above rather than introducing a new validation style.
+      if (n.type === 'CONDITION') {
+        const config = n.config as Record<string, unknown> | undefined;
+        if (typeof config !== 'object' || config === null || typeof config.rule !== 'object') {
+          issues.push({
+            field: `nodes[${index}].config.rule`,
+            message: 'CONDITION nodes require a config.rule object.',
+          });
+        }
+      }
+      // DEVOS-120: a JOIN node's config.branchFailurePolicy, when present,
+      // must be one of the two values task-queue.ts's failure-tolerance
+      // check actually understands — an unrecognized value would silently
+      // fall through to strict behavior at run time with no warning.
+      if (n.type === 'JOIN') {
+        const config = n.config as Record<string, unknown> | undefined;
+        const policy = config?.branchFailurePolicy;
+        if (policy !== undefined && policy !== 'strict' && policy !== 'tolerant') {
+          issues.push({
+            field: `nodes[${index}].config.branchFailurePolicy`,
+            message: 'JOIN config.branchFailurePolicy must be "strict" or "tolerant" if set.',
+          });
+        }
+      }
+      // DEVOS-121: a WAIT node with no config.waitType, or an unrecognized
+      // one, or missing the field its own variant requires, would
+      // previously pass validation and only fail at run time once claimed
+      // — mirrors the CONDITION/config.rule and JOIN/branchFailurePolicy
+      // checks above.
+      if (n.type === 'WAIT') {
+        const config = n.config as Record<string, unknown> | undefined;
+        const waitType = config?.waitType;
+        if (waitType === 'duration') {
+          if (typeof config?.durationSeconds !== 'number' || config.durationSeconds <= 0) {
+            issues.push({
+              field: `nodes[${index}].config.durationSeconds`,
+              message:
+                'WAIT nodes with waitType "duration" require a positive config.durationSeconds.',
+            });
+          }
+        } else if (waitType === 'dependency') {
+          if (typeof config?.taskKey !== 'string' || config.taskKey.trim().length === 0) {
+            issues.push({
+              field: `nodes[${index}].config.taskKey`,
+              message: 'WAIT nodes with waitType "dependency" require a non-empty config.taskKey.',
+            });
+          }
+        } else {
+          issues.push({
+            field: `nodes[${index}].config.waitType`,
+            message: 'WAIT nodes require config.waitType to be "duration" or "dependency".',
+          });
+        }
+      }
+      // DEVOS-122: an APPROVAL node's config is optional (unlike CONDITION/
+      // WAIT, it has a working default with no config at all) — this only
+      // catches a present-but-wrong-shaped field, mirroring the JOIN/
+      // branchFailurePolicy check's "only validate what's actually there"
+      // style.
+      if (n.type === 'APPROVAL') {
+        const config = n.config as Record<string, unknown> | undefined;
+        if (
+          config?.approvalType !== undefined &&
+          (typeof config.approvalType !== 'string' || config.approvalType.trim().length === 0)
+        ) {
+          issues.push({
+            field: `nodes[${index}].config.approvalType`,
+            message: 'APPROVAL config.approvalType must be a non-empty string if set.',
+          });
+        }
+        if (
+          config?.pollIntervalSeconds !== undefined &&
+          (typeof config.pollIntervalSeconds !== 'number' || config.pollIntervalSeconds <= 0)
+        ) {
+          issues.push({
+            field: `nodes[${index}].config.pollIntervalSeconds`,
+            message: 'APPROVAL config.pollIntervalSeconds must be a positive number if set.',
+          });
+        }
+      }
     });
   }
 
