@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
 import { DEV_PRINCIPAL_ID, setAccessTokenGetter } from './api-client.js';
 
@@ -32,20 +32,37 @@ const SessionContext = createContext<Session>(devSession);
 function Auth0SessionBridge({ children }: { children: ReactNode }) {
   const { isLoading, isAuthenticated, user, loginWithRedirect, logout, getAccessTokenSilently } =
     useAuth0();
+  // DEVOS-BUILD-STATE.md verification-debt item 13: `isAuthenticated` flips to true in this render, but
+  // `setAccessTokenGetter` below only runs in this component's own effect —
+  // which, in the same commit, fires *after* every already-mounted child's
+  // own effects (React runs effects child-before-parent). A child that reads
+  // `session.status === 'authenticated'` and fetches on mount could
+  // therefore run before the real getter is registered and silently fall
+  // back to the dev bearer identity (verification-debt item 13). Gating the
+  // exposed status on this flag means 'authenticated' is only ever reported
+  // once the getter has actually been set, in an *earlier* commit — so any
+  // child mounting in response to that status change already sees the real
+  // getter in place before its own effects run.
+  const [tokenGetterReady, setTokenGetterReady] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) {
       setAccessTokenGetter(null);
+      setTokenGetterReady(false);
       return;
     }
     setAccessTokenGetter(() =>
       getAccessTokenSilently({ authorizationParams: { audience: AUTH0_AUDIENCE } }),
     );
-    return () => setAccessTokenGetter(null);
+    setTokenGetterReady(true);
+    return () => {
+      setAccessTokenGetter(null);
+      setTokenGetterReady(false);
+    };
   }, [isAuthenticated, getAccessTokenSilently]);
 
   let session: Session;
-  if (isLoading) {
+  if (isLoading || (isAuthenticated && !tokenGetterReady)) {
     session = { status: 'loading' };
   } else if (isAuthenticated && user?.sub) {
     session = {

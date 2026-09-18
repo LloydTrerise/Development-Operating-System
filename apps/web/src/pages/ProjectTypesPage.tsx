@@ -19,8 +19,10 @@ import { ErrorAlert } from '../components/ErrorAlert.js';
 import { LoadingState } from '../components/LoadingState.js';
 import { ProjectTypeAgentsEditor } from '../components/ProjectTypeAgentsEditor.js';
 import { ProjectTypeWorkflowsEditor } from '../components/ProjectTypeWorkflowsEditor.js';
+import { useSession } from '../session.js';
 
 export function ProjectTypesPage() {
+  const session = useSession();
   const [projectTypes, setProjectTypes] = useState<ProjectType[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,7 +35,16 @@ export function ProjectTypesPage() {
   const [submitting, setSubmitting] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
 
+  // Verification-debt item 13 (DEVOS-BUILD-STATE.md): unlike
+  // organisation-context.tsx/project-context.tsx, this fetch isn't
+  // downstream of those providers' own selection state, so it needs the
+  // identical session-readiness gate directly — otherwise it can fire
+  // before a real Auth0 login has finished registering its access-token
+  // getter and permanently stick with the dev-fallback identity's result.
+  const sessionKey = session.status === 'authenticated' ? session.principalId : session.status;
+
   useEffect(() => {
+    if (session.status === 'loading') return;
     let cancelled = false;
     setLoading(true);
 
@@ -57,7 +68,7 @@ export function ProjectTypesPage() {
     return () => {
       cancelled = true;
     };
-  }, [refreshToken]);
+  }, [refreshToken, sessionKey]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
