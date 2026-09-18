@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { listOrganisations, type Organisation } from './api-client.js';
+import { useSession } from './session.js';
 
 export interface OrganisationContextValue {
   organisations: Organisation[];
@@ -13,13 +14,23 @@ export interface OrganisationContextValue {
 const OrganisationContext = createContext<OrganisationContextValue | null>(null);
 
 export function OrganisationProvider({ children }: { children: ReactNode }) {
+  const session = useSession();
   const [organisations, setOrganisations] = useState<Organisation[]>([]);
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
 
+  // DEVOS-BUILD-STATE.md verification-debt item 13: `session.status === 'loading'` while a real Auth0 login is
+  // still resolving (dev-identity/unauthenticated resolve synchronously, so
+  // this never blocks the existing no-Auth0 dev flow). Re-keying on the
+  // resolved identity, not just a boolean, means a real login after mount
+  // triggers a genuine re-fetch under the now-real access token, instead of
+  // silently keeping whatever the dev-fallback fetch already returned.
+  const sessionKey = session.status === 'authenticated' ? session.principalId : session.status;
+
   useEffect(() => {
+    if (session.status === 'loading') return;
     let cancelled = false;
     setLoading(true);
 
@@ -45,7 +56,7 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshToken]);
+  }, [refreshToken, sessionKey]);
 
   const selectOrganisation = useCallback((organisationId: string) => {
     setSelectedOrganisationId(organisationId);

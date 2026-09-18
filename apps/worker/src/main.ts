@@ -1,9 +1,17 @@
 import {
+  runApprovalTask,
+  runConditionTask,
   runDiscoveryTask,
+  runJoinTask,
+  runParallelTask,
+  runWaitTask,
+  type ApprovalTaskHandlerDeps,
   type ClosureUseCaseDeps,
+  type ConditionTaskHandlerDeps,
   type DevelopmentAgentTaskHandlerDeps,
   type ReviewAgentTaskHandlerDeps,
   type TaskHandlerDeps,
+  type WaitTaskHandlerDeps,
 } from '@devos/application';
 import {
   createFilesystemFixtureRepository,
@@ -99,6 +107,54 @@ const taskHandlerDeps: TaskHandlerDeps = {
 // separate 'AGENT_TASK' node type (DEVOS-035). Same swappable-handler
 // pattern either way; only which task type maps to which handler changes.
 dispatcher.registerHandler('TASK', (task) => runDiscoveryTask(taskHandlerDeps, task));
+
+/**
+ * DEVOS-119: CONDITION is real, deterministic, non-LLM node execution —
+ * registered unconditionally, the same way TASK is above, independent of
+ * whether a model adapter resolves below.
+ */
+const conditionTaskDeps: ConditionTaskHandlerDeps = {
+  workflowRuns,
+  workflowVersions: createWorkflowVersionRepository(database.db),
+  workflowTasks: createWorkflowTaskRepository(database.db),
+  artifacts: createArtifactRepository(database.db),
+};
+dispatcher.registerHandler('CONDITION', (task) => runConditionTask(conditionTaskDeps, task));
+
+/**
+ * DEVOS-120: PARALLEL/JOIN are also real, deterministic, non-LLM node
+ * execution — registered unconditionally like CONDITION/TASK above. Their
+ * real behavior lives in the shared queue/failure machinery
+ * (`packages/database`), not in these handlers themselves.
+ */
+dispatcher.registerHandler('PARALLEL', () => runParallelTask());
+dispatcher.registerHandler('JOIN', () => runJoinTask());
+
+/**
+ * DEVOS-121: WAIT is also real, deterministic, non-LLM node execution —
+ * registered unconditionally like CONDITION/PARALLEL/JOIN/TASK above.
+ */
+const waitTaskDeps: WaitTaskHandlerDeps = {
+  workflowRuns,
+  workflowVersions: createWorkflowVersionRepository(database.db),
+  workflowTasks: createWorkflowTaskRepository(database.db),
+};
+dispatcher.registerHandler('WAIT', (task) => runWaitTask(waitTaskDeps, task));
+
+/**
+ * DEVOS-122: APPROVAL is also real, deterministic, non-LLM node execution —
+ * registered unconditionally like CONDITION/PARALLEL/JOIN/WAIT/TASK above.
+ * Creates a real approval request at this node's own point in the graph,
+ * decided through the existing, unchanged DEVOS-110/111 decision path.
+ */
+const approvalTaskDeps: ApprovalTaskHandlerDeps = {
+  workflowRuns,
+  workflowVersions: createWorkflowVersionRepository(database.db),
+  workflowTasks: createWorkflowTaskRepository(database.db),
+  artifactVersions: createArtifactVersionRepository(database.db),
+  approvals: createApprovalRepository(database.db),
+};
+dispatcher.registerHandler('APPROVAL', (task) => runApprovalTask(approvalTaskDeps, task));
 
 /**
  * GEMINI_API_KEY is optional in @devos/config's shared schema (apps/api has

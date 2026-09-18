@@ -21,7 +21,7 @@ export interface RequestApprovalInput {
  * configured (unlike `packages/application`/`packages/database`, which
  * already do).
  */
-function computeScopeHash(artifactVersionIds: string[]): string {
+export function computeScopeHash(artifactVersionIds: string[]): string {
   const sorted = [...artifactVersionIds].sort();
   return createHash('sha256').update(JSON.stringify(sorted)).digest('hex');
 }

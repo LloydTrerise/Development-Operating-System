@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { listProjects, type Project } from './api-client.js';
 import { useOrganisationContext } from './organisation-context.js';
+import { useSession } from './session.js';
 
 export interface ProjectContextValue {
   projects: Project[];
@@ -23,13 +24,20 @@ const ProjectContext = createContext<ProjectContextValue | null>(null);
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const { selectedOrganisationId } = useOrganisationContext();
+  const session = useSession();
   const [allProjects, setAllProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
 
+  // Verification-debt item 13 (DEVOS-BUILD-STATE.md): see organisation-context.tsx's identical gate — waits for a
+  // real Auth0 login to resolve before fetching, and re-fetches once it
+  // does, instead of permanently keeping a dev-fallback-identity result.
+  const sessionKey = session.status === 'authenticated' ? session.principalId : session.status;
+
   useEffect(() => {
+    if (session.status === 'loading') return;
     let cancelled = false;
     setLoading(true);
 
@@ -49,7 +57,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshToken]);
+  }, [refreshToken, sessionKey]);
 
   // specs/architecture/organisations-and-project-types.md §10.2: the
   // project list is scoped to the selected organisation. There is no

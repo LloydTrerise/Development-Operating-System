@@ -36,6 +36,14 @@ export interface WorkflowNode {
 export interface WorkflowEdge {
   from: string;
   to: string;
+  /**
+   * DEVOS-119: which branch of a `CONDITION` node's own evaluated rule this
+   * edge represents (matched against that node's `config.whenTrue`/
+   * `whenFalse`, e.g. `'true'`/`'false'`) — optional, and meaningless for an
+   * edge whose `from` node isn't a `CONDITION`. Every edge in the codebase
+   * before this task had none; a `branch`-less edge is always taken.
+   */
+  branch?: string;
 }
 
 export interface WorkflowDefinition {

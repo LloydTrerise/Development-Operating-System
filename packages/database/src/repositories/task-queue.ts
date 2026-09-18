@@ -150,7 +150,27 @@ async function maybeCompleteRun(trx: QueryExecutor, workflowRunId: string): Prom
     .select(['status'])
     .where('workflow_run_id', '=', workflowRunId)
     .execute();
-  if (tasks.length === 0 || !tasks.every((task) => task.status === 'SUCCEEDED')) return;
+  // DEVOS-119: a task on a CONDITION node's untaken branch is marked
+  // SKIPPED (below, in complete()) rather than SUCCEEDED — a run made up of
+  // only SUCCEEDED/SKIPPED tasks (no PENDING/RUNNING/FAILED left) has still
+  // genuinely finished and must complete, not wait forever on a task that
+  // was deliberately never going to run.
+  //
+  // DEVOS-120: FAILED is also acceptable here — but only ever reachable at
+  // all when this task's failure was *tolerated* by a downstream JOIN
+  // (resolveTaskFailure, below), because a *non*-tolerated permanent
+  // failure already calls failRun() and flips run.status away from
+  // 'PENDING', which this function's own guard above already returns on
+  // before reaching this check. A FAILED task seen here is therefore
+  // always a deliberately-tolerated one, never a run that should have died.
+  if (
+    tasks.length === 0 ||
+    !tasks.every(
+      (task) =>
+        task.status === 'SUCCEEDED' || task.status === 'SKIPPED' || task.status === 'FAILED',
+    )
+  )
+    return;
 
   const version = await trx
     .selectFrom('workflow_versions')
@@ -240,6 +260,92 @@ async function failRun(trx: QueryExecutor, workflowRunId: string, message: strin
 }
 
 /**
+ * DEVOS-120: a permanently-failed task's failure is "tolerated" — the run
+ * survives it — only when *every* outgoing edge from its own node leads
+ * directly to a JOIN node whose config declares `branchFailurePolicy:
+ * 'tolerant'`, and it has at least one outgoing edge (a leaf task with none
+ * is never tolerated — otherwise "every edge" would be vacuously true for
+ * an empty set). Deliberately not a general graph-reachability engine: a
+ * task blocked behind this one through any *other* path is out of scope
+ * (DEVOS-123) — none exists in this sprint's own PARALLEL/JOIN graph shapes.
+ * Every graph without a tolerant JOIN (every workflow through Sprint 10)
+ * is completely unaffected — `outgoingEdges.length > 0` alone already fails
+ * for a graph with no edges naming this node, i.e. the pre-Sprint-11 norm.
+ */
+async function isFailureToleratedByDownstreamJoin(
+  trx: QueryExecutor,
+  workflowVersionId: string,
+  taskKey: string,
+): Promise<boolean> {
+  const version = await trx
+    .selectFrom('workflow_versions')
+    .select('definition')
+    .where('id', '=', workflowVersionId)
+    .executeTakeFirst();
+  const definition = version?.definition as
+    | {
+        nodes?: { id: string; type: string; config?: { branchFailurePolicy?: string } }[];
+        edges?: { from: string; to: string }[];
+      }
+    | undefined;
+  const nodes = definition?.nodes ?? [];
+  const edges = definition?.edges ?? [];
+
+  const outgoingEdges = edges.filter((edge) => edge.from === taskKey);
+  if (outgoingEdges.length === 0) return false;
+
+  return outgoingEdges.every((edge) => {
+    const target = nodes.find((node) => node.id === edge.to);
+    return target?.type === 'JOIN' && target.config?.branchFailurePolicy === 'tolerant';
+  });
+}
+
+/**
+ * DEVOS-123: generalizes DEVOS-119's one-hop-only `skipTaskKeys` mechanism
+ * (above, in `complete()`) into a real transitive closure — a task any
+ * number of hops downstream of a `CONDITION`'s untaken branch, through any
+ * chain of plain (non-`dependsOnTerminalOnly`) tasks, is now also marked
+ * `SKIPPED` instead of waiting on a `SUCCEEDED` its own upstream can never
+ * reach. Each pass marks `SKIPPED` any still-`PENDING`,
+ * non-`dependsOnTerminalOnly` task whose own `input.dependsOn` names a task
+ * that has already reached a terminal-but-not-`SUCCEEDED` status (`SKIPPED`,
+ * or a DEVOS-120-tolerated `FAILED` — included for the same general
+ * principle even though that specific case cannot currently arise, since
+ * DEVOS-120 only tolerates a failure whose own outgoing edges lead directly
+ * to a tolerant `JOIN`, which already reads any terminal status via its own
+ * `dependsOnTerminalOnly` barrier without needing this cascade). Looping
+ * until a pass finds nothing new computes the real closure rather than a
+ * single hop; this always terminates, since each pass only ever moves a
+ * task out of the finite `PENDING` pool for this run, never back into it.
+ * Deliberately still not a general graph-reachability engine (no
+ * `WITH RECURSIVE`, no edge/config lookups) — it reads only what
+ * `run-creation.ts` already wrote into each task's own `input`, the same
+ * minimal, additive style `claimNext()`'s own barrier already established.
+ */
+async function cascadeSkippedTasks(trx: QueryExecutor, workflowRunId: string): Promise<void> {
+  const now = new Date().toISOString();
+  for (;;) {
+    const result = await sql<{ id: string }>`
+      UPDATE workflow_tasks wt
+      SET status = 'SKIPPED', completed_at = ${now}, updated_at = ${now}
+      WHERE wt.workflow_run_id = ${workflowRunId}
+        AND wt.status = 'PENDING'
+        AND wt.input->>'dependsOnTerminalOnly' IS DISTINCT FROM 'true'
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(COALESCE(wt.input->'dependsOn', '[]'::jsonb)) AS dep(task_key)
+          JOIN workflow_tasks up
+            ON up.workflow_run_id = wt.workflow_run_id
+           AND up.task_key = dep.task_key
+          WHERE up.status IN ('SKIPPED', 'FAILED')
+        )
+      RETURNING wt.id
+    `.execute(trx);
+    if (result.rows.length === 0) return;
+  }
+}
+
+/**
  * Shared terminal-vs-retry accounting for a single task, used by both
  * fail() (a handler threw) and reclaimStale() (a worker died holding the
  * task). Identical MAX_TASK_ATTEMPTS logic and audit/event shape either
@@ -257,7 +363,7 @@ async function resolveTaskFailure(
   const now = new Date().toISOString();
   const shouldRetry = retryable && currentAttempt < MAX_TASK_ATTEMPTS;
 
-  await trx
+  const updatedTask = await trx
     .updateTable('workflow_tasks')
     .set({
       status: shouldRetry ? 'PENDING' : 'FAILED',
@@ -267,13 +373,14 @@ async function resolveTaskFailure(
       updated_at: now,
     })
     .where('id', '=', taskId)
-    .execute();
+    .returning(['task_key'])
+    .executeTakeFirstOrThrow();
 
   if (shouldRetry) return;
 
   const run = await trx
     .selectFrom('workflow_runs')
-    .select('project_id')
+    .select(['project_id', 'workflow_version_id'])
     .where('id', '=', workflowRunId)
     .executeTakeFirst();
   if (run) {
@@ -299,6 +406,20 @@ async function resolveTaskFailure(
       metadata: { message: failure.message },
       correlationId: envelope.correlationId,
     });
+  }
+
+  // DEVOS-120: skip the "whole run dies" path entirely when every one of
+  // this task's own outgoing edges leads straight to a tolerant JOIN — the
+  // task itself is already marked FAILED above; claimNext()'s
+  // dependsOnTerminalOnly barrier (for that JOIN's own task) is what lets
+  // the run keep making real progress past it, and maybeCompleteRun's own
+  // FAILED-is-acceptable check (above) is what lets the run still reach
+  // COMPLETED once everything else finishes.
+  if (
+    run &&
+    (await isFailureToleratedByDownstreamJoin(trx, run.workflow_version_id, updatedTask.task_key))
+  ) {
+    return;
   }
 
   await failRun(trx, workflowRunId, failure.message);
@@ -343,6 +464,14 @@ export function createPostgresTaskQueue(db: Kysely<Database>): TaskQueue {
         // a single sequential one) enforced atomically in the same query
         // that does the claiming, not a separate check with its own race
         // window.
+        //
+        // DEVOS-120: a task created with `input.dependsOnTerminalOnly: true`
+        // (a JOIN node with a 'tolerant' branchFailurePolicy, run-creation.ts)
+        // opts into a relaxed check — its named upstreams need only reach
+        // *any* terminal status (SUCCEEDED/FAILED/SKIPPED), not specifically
+        // SUCCEEDED, so a genuinely failed branch doesn't block it forever.
+        // Every other task (the default, and every pre-Sprint-11 workflow)
+        // keeps the original SUCCEEDED-only check unchanged.
         const result = await sql<{ id: string }>`
           SELECT wt.id
           FROM workflow_tasks wt
@@ -354,7 +483,12 @@ export function createPostgresTaskQueue(db: Kysely<Database>): TaskQueue {
                 SELECT 1 FROM workflow_tasks up
                 WHERE up.workflow_run_id = wt.workflow_run_id
                   AND up.task_key = dep.task_key
-                  AND up.status = 'SUCCEEDED'
+                  AND (
+                    CASE WHEN wt.input->>'dependsOnTerminalOnly' = 'true'
+                      THEN up.status IN ('SUCCEEDED', 'FAILED', 'SKIPPED')
+                      ELSE up.status = 'SUCCEEDED'
+                    END
+                  )
               )
             )
           ORDER BY wt.created_at ASC
@@ -454,6 +588,33 @@ export function createPostgresTaskQueue(db: Kysely<Database>): TaskQueue {
           });
         }
 
+        // DEVOS-119: a real CONDITION node's handler (run-condition-task.ts)
+        // reports the untaken branch's immediate target task(s) via this
+        // reserved output key. Marking them SKIPPED here, in the same
+        // transaction as this task's own SUCCEEDED commit, is what makes it
+        // race-free: claimNext()'s dependsOn barrier already prevents any
+        // other worker from claiming a task that depends on this one until
+        // this transaction commits, so there is no window where a
+        // to-be-skipped task could be claimed and run first.
+        const skipTaskKeys = Array.isArray(output.skipTaskKeys)
+          ? output.skipTaskKeys.filter((key): key is string => typeof key === 'string')
+          : [];
+        if (skipTaskKeys.length > 0) {
+          await trx
+            .updateTable('workflow_tasks')
+            .set({ status: 'SKIPPED', completed_at: now, updated_at: now })
+            .where('workflow_run_id', '=', task.workflowRunId)
+            .where('task_key', 'in', skipTaskKeys)
+            .where('status', '=', 'PENDING')
+            .execute();
+
+          // DEVOS-123: the skip must propagate past this one direct hop —
+          // same transaction, so no other worker can observe (or claim past)
+          // an intermediate state where a multi-hop-downstream task is still
+          // PENDING against an upstream that will never reach SUCCEEDED.
+          await cascadeSkippedTasks(trx, task.workflowRunId);
+        }
+
         await maybeCompleteRun(trx, task.workflowRunId);
       });
     },
@@ -522,6 +683,44 @@ export function createPostgresTaskQueue(db: Kysely<Database>): TaskQueue {
       }
 
       return stale.length;
+    },
+
+    async markWaiting(taskId, attempt, readyAt) {
+      await withTransaction(db, async (trx) => {
+        // DEVOS-121: same attempt-fencing contract as complete()/fail() — a
+        // stale worker's late markWaiting() for a task already reclaimed/
+        // resolved under a later attempt is a safe no-op.
+        await trx
+          .updateTable('workflow_tasks')
+          .set({
+            status: 'WAITING',
+            output: JSON.stringify({ waitUntil: readyAt }),
+            updated_at: new Date().toISOString(),
+          })
+          .where('id', '=', taskId)
+          .where('status', '=', 'RUNNING')
+          .where('attempt', '=', attempt)
+          .execute();
+      });
+    },
+
+    async resumeReadyWaits() {
+      // DEVOS-121: the WAIT-node counterpart to reclaimStale() — a WAITING
+      // task whose own recorded `output.waitUntil` has passed goes back to
+      // PENDING so claimNext() can pick it up for real re-evaluation
+      // (runWaitTask itself decides whether the wait is genuinely over).
+      // ISO 8601 UTC timestamps (the only kind `new Date().toISOString()`
+      // ever produces) sort correctly under plain text comparison, so this
+      // needs no timestamp casting.
+      const now = new Date().toISOString();
+      const result = await sql<{ id: string }>`
+        UPDATE workflow_tasks
+        SET status = 'PENDING', updated_at = ${now}
+        WHERE status = 'WAITING'
+          AND output ->> 'waitUntil' <= ${now}
+        RETURNING id
+      `.execute(db);
+      return result.rows.length;
     },
   };
 }

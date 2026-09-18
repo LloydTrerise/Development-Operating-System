@@ -88,6 +88,18 @@ export async function startRunForVersion(
       .filter((edge) => edge.to === node.id)
       .map((edge) => edge.from);
 
+    // DEVOS-120: a JOIN node whose own config declares a 'tolerant'
+    // branch-failure policy names an opt-in barrier mode — its dependsOn
+    // upstreams only need to reach *any* terminal status (SUCCEEDED/FAILED/
+    // SKIPPED), not specifically SUCCEEDED, so a genuinely failed branch
+    // doesn't block it forever. Every other task's barrier (the vast
+    // majority — no existing pre-Sprint-11 workflow uses this) is
+    // completely unaffected; see task-queue.ts's claimNext()/
+    // resolveTaskFailure() for the other half of this mechanism.
+    const dependsOnTerminalOnly =
+      node.type === 'JOIN' &&
+      (node.config as Record<string, unknown> | undefined)?.branchFailurePolicy === 'tolerant';
+
     return {
       id: randomUUID() as WorkflowTask['id'],
       workflowRunId: run.id,
@@ -112,6 +124,7 @@ export async function startRunForVersion(
         ...(node.agentRef !== undefined ? { agentRef: node.agentRef } : {}),
         ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
         ...(dependsOn.length > 0 ? { dependsOn } : {}),
+        ...(dependsOnTerminalOnly ? { dependsOnTerminalOnly: true } : {}),
       },
       // DEVOS-035: sibling tasks in one run previously all shared the exact
       // same `createdAt`, so claimNext()'s `ORDER BY created_at ASC` gave no
