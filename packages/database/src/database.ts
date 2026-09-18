@@ -10,12 +10,44 @@ export interface OrganisationsTable {
 export interface ProjectsTable {
   id: string;
   organisation_id: string;
+  project_type_id: string;
   name: string;
   slug: string;
   description: string | null;
   status: string;
   repository_id: string | null;
   budget_usd: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectTypesTable {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectTypeWorkflowsTable {
+  id: string;
+  project_type_id: string;
+  key: string;
+  name: string;
+  definition: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectTypeAgentsTable {
+  id: string;
+  project_type_id: string;
+  key: string;
+  name: string;
+  configuration: unknown;
+  prompt_reference: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -298,6 +330,9 @@ export interface IntegrationsTable {
 export interface Database {
   organisations: OrganisationsTable;
   projects: ProjectsTable;
+  project_types: ProjectTypesTable;
+  project_type_workflows: ProjectTypeWorkflowsTable;
+  project_type_agents: ProjectTypeAgentsTable;
   memberships: MembershipsTable;
   work_items: WorkItemsTable;
   agents: AgentsTable;

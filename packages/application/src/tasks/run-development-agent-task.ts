@@ -1,10 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentVersionId } from '@devos/contracts';
 import type { Artifact, ArtifactVersion, WorkflowTask } from '@devos/domain';
-import { createWorkspace, destroyWorkspace, runGit } from '@devos/integrations';
+import {
+  createGitHubPullRequestProvider,
+  createWorkspace,
+  destroyWorkspace,
+  runGit,
+  type PullRequestProvider,
+} from '@devos/integrations';
 import { listRepositoryFiles } from '@devos/knowledge';
 import { invokeTool } from '@devos/tools';
 import { createGitProviderAdapters } from './git-provider-adapters.js';
+import { buildAuthenticatedCloneUrl, resolveGitHubRepositoryTarget } from './github-context.js';
 import { createPullRequestProviderAdapter } from './pull-request-provider-adapter.js';
 import { runAgentTask } from './run-agent-task.js';
 import type { DevelopmentAgentTaskHandlerDeps } from './deps.js';
@@ -18,6 +25,57 @@ const CONTENT_TYPE = 'application/json';
 // real membership row for it must exist (seeded — see
 // SEED_AGENT_RUNTIME_MEMBERSHIP_ID).
 const SYSTEM_ACTOR_ID = 'devos-agent-runtime';
+
+interface GitHubContext {
+  cloneUrl: string;
+  pullRequestProvider: PullRequestProvider;
+}
+
+/**
+ * Resolves the real GitHub context (an authenticated clone URL and a real
+ * `PullRequestProvider`) when the project's Git integration configures a
+ * real GitHub target, resolving its live PAT through `deps.credentialResolver`
+ * (DEVOS-106) once and reusing it for both. Returns `undefined` — not an
+ * error — for any project without a real GitHub target configured (every
+ * existing test, and any project that hasn't set one up), so the caller
+ * falls back to `deps.pullRequestProvider`/the plain `repositoryPath`
+ * unchanged. Resolved fresh per task, not once at worker startup, mirroring
+ * `run-release-task.ts`'s identical per-call
+ * `createLocalStagingDeploymentProvider(stagingRoot)` pattern — a worker
+ * process serves many projects, each potentially targeting a different
+ * repository. `resolveGitHubRepositoryTarget`/`buildAuthenticatedCloneUrl`
+ * live in `github-context.ts`, shared with `run-validation-task.ts`
+ * (DEVOS-108).
+ */
+async function resolveGitHubContext(
+  deps: DevelopmentAgentTaskHandlerDeps,
+  gitIntegration: { credentialReference: string; configuration: Record<string, unknown> },
+  repositoryPath: string,
+): Promise<GitHubContext | undefined> {
+  const target = resolveGitHubRepositoryTarget(gitIntegration.configuration);
+  if (!target) return undefined;
+
+  if (!deps.credentialResolver) {
+    throw new Error(
+      'Git integration configures a real GitHub target (configuration.github) but no credentialResolver is available to resolve its token.',
+    );
+  }
+  const token = await deps.credentialResolver.resolve(gitIntegration.credentialReference);
+  if (token === null) {
+    throw new Error(
+      `Could not resolve a credential for reference "${gitIntegration.credentialReference}".`,
+    );
+  }
+
+  return {
+    cloneUrl: buildAuthenticatedCloneUrl(repositoryPath, token),
+    pullRequestProvider: createGitHubPullRequestProvider({
+      token,
+      owner: target.owner,
+      repo: target.repo,
+    }),
+  };
+}
 
 /**
  * Stage 7 — Development (specs/workflows/software-change-workflow.md §17):
@@ -126,7 +184,8 @@ export async function runDevelopmentAgentTask(
     throw new Error(`Git integration ${gitIntegration.id} has no configured "repositoryPath".`);
   }
 
-  const workspace = await createWorkspace(task.id, repositoryPath);
+  const githubContext = await resolveGitHubContext(deps, gitIntegration, repositoryPath);
+  const workspace = await createWorkspace(task.id, githubContext?.cloneUrl ?? repositoryPath);
 
   try {
     const { stdout: revisionOut } = await runGit(['rev-parse', 'HEAD'], workspace.path);
@@ -174,11 +233,12 @@ export async function runDevelopmentAgentTask(
         ? modelOutput.commitMessage
         : `DevOS: ${workItem.title}`;
 
+    const pullRequestProvider = githubContext?.pullRequestProvider ?? deps.pullRequestProvider;
     const gatewayDeps = {
       ...deps,
       adapters: {
         ...createGitProviderAdapters(workspace),
-        ...createPullRequestProviderAdapter(deps.pullRequestProvider),
+        ...createPullRequestProviderAdapter(pullRequestProvider),
       },
     };
 

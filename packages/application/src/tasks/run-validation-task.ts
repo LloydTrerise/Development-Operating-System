@@ -4,6 +4,7 @@ import { createWorkspace, destroyWorkspace, runGit } from '@devos/integrations';
 import { invokeTool } from '@devos/tools';
 import { createCommandProviderAdapters } from './command-provider-adapters.js';
 import type { ToolTaskHandlerDeps } from './deps.js';
+import { resolveAuthenticatedCloneUrl } from './github-context.js';
 
 const CONTENT_TYPE = 'application/json';
 
@@ -105,7 +106,18 @@ export async function runValidationTask(
     throw new Error(`Git integration ${gitIntegration.id} has no configured "testCommand".`);
   }
 
-  const workspace = await createWorkspace(task.id, repositoryPath);
+  // DEVOS-108 finding: a real, private GitHub remote needs the same
+  // authenticated clone URL run-development-agent-task.ts already resolves
+  // for its own clone — this task previously cloned the plain
+  // `repositoryPath` unauthenticated, which fails outright against a real
+  // private repository. No-op (returns `repositoryPath` unchanged) for every
+  // existing test and any project without a real GitHub target configured.
+  const cloneUrl = await resolveAuthenticatedCloneUrl(
+    deps.credentialResolver,
+    gitIntegration,
+    repositoryPath,
+  );
+  const workspace = await createWorkspace(task.id, cloneUrl);
 
   try {
     await runGit(['checkout', branchName], workspace.path);

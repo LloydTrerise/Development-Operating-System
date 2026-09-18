@@ -48,11 +48,11 @@ export async function runPlanningAgentTask(
     throw new Error(`Technical design artifact ${designArtifact.id} has no versions.`);
   }
 
+  // DEVOS-109: no `sources` entry needed here anymore — runAgentTask's own
+  // buildContext() call already records this artifact (and every other one
+  // this run has produced so far) in the manifest automatically.
   const { agentExecutionId, agentVersionId, ...modelOutput } = await runAgentTask(deps, task, {
     input: { technicalDesign: latestDesignVersion.metadata ?? {} },
-    sources: [
-      { type: 'ARTIFACT', ref: `artifact:${designArtifact.id}:v${latestDesignVersion.version}` },
-    ],
   });
 
   const now = new Date().toISOString();

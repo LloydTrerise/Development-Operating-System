@@ -15,5 +15,65 @@ services:
       timeout: 5s
       retries: 5
 
+  # DEVOS-106: real HashiCorp Vault, self-hosted here rather than requiring
+  # an external cloud secret-manager account — dev mode auto-unseals and
+  # auto-mounts a real KV v2 engine at `secret/`, so this is a real
+  # secret-management backend, not a fake. The root token is a fixed local
+  # dev-only value (same non-secrecy convention as POSTGRES_PASSWORD above,
+  # never used outside this local docker-compose stack).
+  vault:
+    image: hashicorp/vault:1.19
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: devos-dev-root-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports:
+      - '8200:8200'
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:8200/v1/sys/health?standbyok=true']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # DEVOS-117: real Prometheus, self-hosted here rather than a managed cloud
+  # equivalent — same self-hosted-over-cloud-account precedent as DEVOS-106's
+  # Vault above. Scrapes the real DevOS worker's real `/metrics` endpoint
+  # (`prometheus.yml`); the worker itself runs on the host, not in this
+  # compose stack, the same as every other local-dev process this repo runs.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - devos-prometheus-data:/prometheus
+    ports:
+      - '9090:9090'
+    extra_hosts:
+      # Docker Desktop already resolves this on Windows/Mac; explicit here
+      # so the same compose file also works on Linux, where it doesn't.
+      - 'host.docker.internal:host-gateway'
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:9090/-/healthy']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # DEVOS-118: real Redis, self-hosted here rather than a managed cloud
+  # equivalent — same self-hosted-over-cloud-account precedent as DEVOS-106/117
+  # above. The real shared store `createRedisRateLimiter`
+  # (`apps/api/src/http/rate-limiter.ts`) uses whenever `REDIS_URL` is
+  # configured, so two real `apps/api` processes correctly enforce one
+  # combined rate limit.
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   devos-postgres-data:
+  devos-prometheus-data:

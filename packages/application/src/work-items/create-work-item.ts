@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ProjectId } from '@devos/contracts';
+import type { AuditId, ProjectId } from '@devos/contracts';
 import type { CreateWorkItemInput, WorkItem } from '@devos/domain';
 import { NotFoundError, ValidationError } from '../errors.js';
 import { resolveMembership } from '../projects/membership-access.js';
@@ -41,6 +41,21 @@ export async function createWorkItem(
   };
 
   await deps.workItems.create(workItem);
+
+  // DEVOS-115: extends DEVOS-086's audit coverage to work-item creation.
+  await deps.auditRecords.create({
+    id: randomUUID() as AuditId,
+    organisationId: project.organisationId,
+    projectId,
+    actorType: 'USER',
+    actorId: principalId,
+    action: 'work-item.created',
+    targetType: 'WorkItem',
+    targetId: workItem.id,
+    outcome: 'SUCCESS',
+    metadata: { title: workItem.title, type: workItem.type },
+    createdAt: now,
+  });
 
   return workItem;
 }

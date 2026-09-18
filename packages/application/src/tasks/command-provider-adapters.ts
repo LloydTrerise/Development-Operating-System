@@ -39,5 +39,8 @@ export function createCommandProviderAdapters(
   return {
     'build-run': { invoke },
     'test-run': { invoke },
+    // DEVOS-113: identical mechanics — a project-configured command run in
+    // the same workspace — so it reuses the exact same adapter.
+    'security-scan': { invoke },
   };
 }

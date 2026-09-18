@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --filter @devos/application test *)",
+      "Bash(pnpm --filter @devos/application typecheck *)",
+      "Bash(pnpm --filter @devos/application build *)",
+      "Bash(pnpm --filter @devos/database build *)",
+      "Bash(pnpm --filter @devos/api typecheck *)",
+      "Bash(pnpm --filter @devos/database typecheck *)",
+      "Bash(pnpm --filter @devos/api test *)",
+      "Bash(pnpm --filter @devos/worker typecheck *)",
+      "Bash(pnpm --filter @devos/domain build *)",
+      "Bash(pnpm --filter @devos/worker test *)",
+      "Bash(pnpm --filter @devos/web typecheck *)",
+      "Bash(pnpm --filter @devos/database lint *)",
+      "Bash(pnpm --filter @devos/agents typecheck *)",
+      "Bash(pnpm --filter @devos/agents build *)",
+      "Bash(pnpm --filter @devos/domain typecheck *)",
+      "Bash(pnpm --filter @devos/tools test *)",
+      "Bash(pnpm --filter @devos/tools build *)",
+      "Bash(pnpm --filter @devos/application lint *)",
+      "Bash(pnpm --filter @devos/api lint *)",
+      "Bash(pnpm --filter @devos/worker build *)"
+    ]
+  }
+}

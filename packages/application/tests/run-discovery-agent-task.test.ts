@@ -11,9 +11,13 @@ import type {
   AgentVersion,
   AgentVersionRepository,
   Artifact,
+  ArtifactRepository,
   ArtifactVersion,
+  ArtifactVersionRepository,
   ContextManifest,
+  KnowledgeSourceRepository,
   ProjectId,
+  ProjectRepository,
   WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
@@ -167,11 +171,40 @@ function buildScenario() {
     contextManifests.push(manifest);
   };
 
+  // DEVOS-109: runAgentTask now calls buildContext(), which needs these —
+  // empty/absent by default, matching this scenario's own minimal scope.
+  const projects: ProjectRepository = {
+    getById: async () => null,
+    listForOrganisation: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const knowledgeSources: KnowledgeSourceRepository = {
+    getById: async () => null,
+    listForProject: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const artifacts: ArtifactRepository = {
+    getById: async () => null,
+    listForProject: async () => [],
+    create: async () => {},
+  };
+  const artifactVersions: ArtifactVersionRepository = {
+    getById: async () => null,
+    listForArtifact: async () => [],
+    create: async () => {},
+  };
+
   return {
     projectId,
     workItem,
     run,
     agent,
+    projects,
+    knowledgeSources,
+    artifacts,
+    artifactVersions,
     version,
     task,
     workflowRuns,
@@ -221,6 +254,10 @@ describe('runDiscoveryAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
       storage: createLocalFilesystemStorage(storageDir),
       publishArtifact: async (artifact, version) => {
         publishedArtifact = artifact;
@@ -271,6 +308,10 @@ describe('runDiscoveryAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
       storage: createLocalFilesystemStorage(storageDir),
       publishArtifact: async () => {
         published = true;
@@ -302,6 +343,10 @@ describe('runDiscoveryAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
       storage: createLocalFilesystemStorage(storageDir),
       publishArtifact: async () => {},
     };

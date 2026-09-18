@@ -18,6 +18,7 @@
     "@devos/domain": "workspace:*",
     "@devos/integrations": "workspace:*",
     "@devos/knowledge": "workspace:*",
+    "@devos/policy": "workspace:*",
     "@devos/storage": "workspace:*",
     "@devos/tools": "workspace:*"
   },

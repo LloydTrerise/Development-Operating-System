@@ -21,6 +21,7 @@
     "db:migrate": "pnpm --filter @devos/database run migrate",
     "db:seed": "pnpm --filter @devos/database run seed",
     "smoke": "node infrastructure/scripts/smoke-test.mjs",
+    "vault:seed-secret": "node infrastructure/scripts/vault-seed-secret.mjs",
     "bootstrap": "pnpm install && pnpm docker:up && pnpm db:migrate && pnpm db:seed"
   },
   "devDependencies": {

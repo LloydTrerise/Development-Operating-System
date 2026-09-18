@@ -25,6 +25,9 @@ export type ToolCapabilityId = Brand<string, 'ToolCapabilityId'>;
 export type IntegrationId = Brand<string, 'IntegrationId'>;
 export type EventId = Brand<string, 'EventId'>;
 export type AuditId = Brand<string, 'AuditId'>;
+export type ProjectTypeId = Brand<string, 'ProjectTypeId'>;
+export type ProjectTypeWorkflowId = Brand<string, 'ProjectTypeWorkflowId'>;
+export type ProjectTypeAgentId = Brand<string, 'ProjectTypeAgentId'>;
 
 export type UUID = string;
 

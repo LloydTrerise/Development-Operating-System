@@ -10,6 +10,7 @@ import {
   SEED_DEVELOPMENT_PATH_WORKFLOW_V2_VERSION_ID,
   SEED_PLANNING_PATH_WORKFLOW_VERSION_ID,
   SEED_PROJECT_ID,
+  SEED_RELEASE_PATH_WORKFLOW_V3_VERSION_ID,
 } from '@devos/database';
 import type { Integration } from '@devos/domain';
 import { runGit } from '@devos/integrations';
@@ -141,6 +142,9 @@ async function setUpGitIntegration(
   repositoryPath: string,
   buildCommand: string,
   testCommand: string,
+  // DEVOS-113: a real, always-passing command — this file's own scope
+  // (build/test/review, DEVOS-071) never exercises a genuinely failing scan.
+  securityScanCommand = 'node -e "console.log(\'scan ok\')"',
 ): Promise<void> {
   const { db, close } = createDatabaseClient({ connectionString: DATABASE_URL });
 
@@ -172,7 +176,7 @@ async function setUpGitIntegration(
     name: `DEVOS-071 e2e build/test/review repository (${Date.now()})`,
     status: 'ACTIVE',
     credentialReference: 'DEVOS071_E2E_TEST_CREDENTIAL',
-    configuration: { repositoryPath, buildCommand, testCommand },
+    configuration: { repositoryPath, buildCommand, testCommand, securityScanCommand },
     createdAt: now,
     updatedAt: now,
   };
@@ -210,6 +214,32 @@ async function runMigrateAndSeed(): Promise<void> {
   if (seed.status !== 0) {
     throw new Error(`Seed failed:\n${seed.stdout}\n${seed.stderr}`);
   }
+}
+
+/**
+ * DEVOS-113: `evaluateReleaseReadiness` now also requires real
+ * `SECURITY_SCAN_EVIDENCE`, which only the release-path v3 graph's
+ * `security-scan` node produces. This file's own release-readiness
+ * assertions (below) predate that stage, so each now runs a real v3 run
+ * first — genuinely executing `runSecurityScanTask` against the same real
+ * repository/Git integration this file already sets up — before checking
+ * the project-scoped `/release-readiness` endpoint.
+ */
+async function runSecurityScan(
+  api: ReturnType<typeof createApiClient>,
+  workItemId: string,
+  idempotencyKey: string,
+): Promise<void> {
+  const run = await api<{ id: string }>(
+    'POST',
+    `/api/v1/workflow-versions/${SEED_RELEASE_PATH_WORKFLOW_V3_VERSION_ID}/runs`,
+    { workItemId, idempotencyKey },
+  );
+  expect(run.status).toBe(200);
+  const runId = run.body.data!.id;
+
+  const result = await pollRunStatus(api, runId, ['AWAITING_APPROVAL', 'FAILED'], 60_000);
+  expect(result?.status).toBe('AWAITING_APPROVAL');
 }
 
 async function approvePlanningRun(
@@ -378,6 +408,8 @@ describe('Sprint 5 build/test/review end-to-end (DEVOS-071) — pass path', () =
     );
     expect(reviewEvidenceVersion.body.data!.metadata.decision).toBe('PASS');
 
+    await runSecurityScan(api, developmentWorkItemId, `${unique}-security-scan`);
+
     const readiness = await api<{ ready: boolean; reasons: string[] }>(
       'GET',
       `/api/v1/projects/${SEED_PROJECT_ID}/release-readiness`,
@@ -525,6 +557,8 @@ describe('Sprint 5 build/test/review end-to-end (DEVOS-071) — rework path', ()
       `/api/v1/artifacts/${reworkReview.id}/versions/1`,
     );
     expect(reworkReviewVersion.body.data!.metadata.decision).toBe('PASS');
+
+    await runSecurityScan(api, developmentWorkItemId, `${unique}-security-scan`);
 
     // The evaluator is project-scoped and picks the *latest* evidence —
     // by now that's the reworked (passing) cycle's, not the first

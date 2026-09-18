@@ -1,4 +1,4 @@
-import type { OrganisationId, ProjectId } from '@devos/contracts';
+import type { OrganisationId, ProjectId, ProjectTypeId } from '@devos/contracts';
 import type { Project, ProjectRepository } from '@devos/domain';
 import type { ProjectsTable } from '../database.js';
 import type { QueryExecutor } from './base.js';
@@ -7,6 +7,7 @@ function toDomain(row: ProjectsTable): Project {
   return {
     id: row.id as ProjectId,
     organisationId: row.organisation_id as OrganisationId,
+    projectTypeId: row.project_type_id as ProjectTypeId,
     name: row.name,
     slug: row.slug,
     ...(row.description !== null ? { description: row.description } : {}),
@@ -43,6 +44,7 @@ export function createProjectRepository(db: QueryExecutor): ProjectRepository {
         .values({
           id: project.id,
           organisation_id: project.organisationId,
+          project_type_id: project.projectTypeId,
           name: project.name,
           slug: project.slug,
           description: project.description ?? null,

@@ -8,7 +8,7 @@ import {
   publishWorkflowVersion,
   updateDraftWorkflow,
   validateDraftWorkflow,
-  type WorkflowUseCaseDeps,
+  type CreateWorkflowDefinitionDeps,
 } from '@devos/application';
 import {
   parseCreateWorkflowBody,
@@ -19,7 +19,7 @@ import {
 } from '../dto/workflow.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
-export function createWorkflowRoutes(prefix: string, deps: WorkflowUseCaseDeps): Route[] {
+export function createWorkflowRoutes(prefix: string, deps: CreateWorkflowDefinitionDeps): Route[] {
   return [
     {
       method: 'GET',

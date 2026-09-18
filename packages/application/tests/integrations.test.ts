@@ -1,24 +1,29 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  AuditRecord,
-  AuditRecordRepository,
-  Integration,
-  IntegrationRepository,
-  Membership,
-  MembershipRepository,
-  OrganisationId,
-  Project,
-  ProjectRepository,
+import {
+  SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+  type AuditRecord,
+  type AuditRecordRepository,
+  type Integration,
+  type IntegrationRepository,
+  type Membership,
+  type MembershipRepository,
+  type OrganisationId,
+  type Project,
+  type ProjectRepository,
+  type ProjectType,
+  type ProjectTypeAgentRepository,
+  type ProjectTypeRepository,
+  type ProjectTypeWorkflowRepository,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../src/projects/create-project.js';
+import type { CreateProjectWithClones } from '../src/projects/deps.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
 import { createIntegration } from '../src/integrations/create-integration.js';
-import type { IntegrationUseCaseDeps } from '../src/integrations/deps.js';
 import { getIntegrationForPrincipal } from '../src/integrations/get-integration.js';
 import { listIntegrationsForProject } from '../src/integrations/list-integrations.js';
 
-function createInMemoryDeps(): IntegrationUseCaseDeps {
+function createInMemoryDeps() {
   const projects = new Map<string, Project>();
   const memberships = new Map<string, Membership>();
   const integrationsStore = new Map<string, Integration>();
@@ -77,11 +82,61 @@ function createInMemoryDeps(): IntegrationUseCaseDeps {
     listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
   };
 
+  const now = new Date().toISOString();
+  const projectTypesStore = new Map<string, ProjectType>([
+    [
+      SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+      {
+        id: SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+        key: 'software-development',
+        name: 'Software Development',
+        status: 'ACTIVE',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  ]);
+  const projectTypes: ProjectTypeRepository = {
+    getById: async (id) => projectTypesStore.get(id) ?? null,
+    getByKey: async (key) => [...projectTypesStore.values()].find((p) => p.key === key) ?? null,
+    list: async () => [...projectTypesStore.values()],
+    create: async (projectType) => {
+      projectTypesStore.set(projectType.id, projectType);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = projectTypesStore.get(id);
+      if (!existing) return;
+      projectTypesStore.set(id, { ...existing, ...changes, updatedAt });
+    },
+  };
+  const projectTypeWorkflows: ProjectTypeWorkflowRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const projectTypeAgents: ProjectTypeAgentRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const createProjectWithClones: CreateProjectWithClones = async (project, membership) => {
+    await projectRepository.create(project);
+    await membershipRepository.create(membership);
+  };
+
   return {
     projects: projectRepository,
     memberships: membershipRepository,
     integrations,
     auditRecords,
+    projectTypes,
+    projectTypeWorkflows,
+    projectTypeAgents,
+    createProjectWithClones,
   };
 }
 
@@ -94,7 +149,7 @@ const VALID_INPUT = {
 };
 
 describe('integration use cases', () => {
-  let deps: IntegrationUseCaseDeps;
+  let deps: ReturnType<typeof createInMemoryDeps>;
   let projectId: Project['id'];
   const organisationId = randomUUID() as OrganisationId;
 

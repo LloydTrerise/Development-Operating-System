@@ -5,6 +5,7 @@ import { healthCheckCapability } from '../capabilities/health-check.js';
 import { pullRequestCreateCapability } from '../capabilities/pull-request-create.js';
 import { repoReadCapability } from '../capabilities/repo-read.js';
 import { repoWriteCapability } from '../capabilities/repo-write.js';
+import { securityScanCapability } from '../capabilities/security-scan.js';
 import { testRunCapability } from '../capabilities/test-run.js';
 import type { ToolCapabilityDefinition } from './types.js';
 
@@ -25,6 +26,7 @@ export const capabilityDefinitions: readonly ToolCapabilityDefinition[] = [
   pullRequestCreateCapability,
   buildRunCapability,
   testRunCapability,
+  securityScanCapability,
   deployCapability,
   healthCheckCapability,
 ];

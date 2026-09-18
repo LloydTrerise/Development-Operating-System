@@ -1,4 +1,5 @@
-import type { ProjectId } from '@devos/contracts';
+import { randomUUID } from 'node:crypto';
+import type { AuditId, ProjectId } from '@devos/contracts';
 import { canUpdateProject, type Project, type UpdateProjectInput } from '@devos/domain';
 import { ForbiddenError, NotFoundError } from '../errors.js';
 import type { ProjectUseCaseDeps } from './deps.js';
@@ -19,6 +20,21 @@ export async function updateProject(
 
   const updatedAt = new Date().toISOString();
   await deps.projects.update(projectId, changes, updatedAt);
+
+  // DEVOS-115: extends DEVOS-086's audit coverage to project update.
+  await deps.auditRecords.create({
+    id: randomUUID() as AuditId,
+    organisationId: project.organisationId,
+    projectId,
+    actorType: 'USER',
+    actorId: principalId,
+    action: 'project.updated',
+    targetType: 'Project',
+    targetId: projectId,
+    outcome: 'SUCCESS',
+    metadata: { changes },
+    createdAt: updatedAt,
+  });
 
   return { ...project, ...changes, updatedAt };
 }

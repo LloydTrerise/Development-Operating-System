@@ -19,6 +19,7 @@ import type {
   ContextManifest,
   Integration,
   IntegrationRepository,
+  KnowledgeSourceRepository,
   Membership,
   MembershipRepository,
   OrganisationId,
@@ -36,9 +37,10 @@ import type {
   WorkItem,
   WorkItemRepository,
 } from '@devos/domain';
+import type { CredentialResolver } from '@devos/integrations';
 import { createLocalPullRequestProvider, runGit } from '@devos/integrations';
 import { createLocalFilesystemStorage } from '@devos/storage';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevelopmentAgentTaskHandlerDeps } from '../src/tasks/deps.js';
 import { runDevelopmentAgentTask } from '../src/tasks/run-development-agent-task.js';
 
@@ -71,7 +73,11 @@ const schemas: SchemaRepository = {
   }),
 };
 
-async function buildScenario(repositoryPath: string, configuration = CONFIGURATION) {
+async function buildScenario(
+  repositoryPath: string,
+  configuration = CONFIGURATION,
+  gitIntegrationConfigurationOverrides: Record<string, unknown> = {},
+) {
   const organisationId = randomUUID() as OrganisationId;
   const now = new Date(0).toISOString();
 
@@ -178,7 +184,7 @@ async function buildScenario(repositoryPath: string, configuration = CONFIGURATI
     name: 'Test repository',
     status: 'ACTIVE',
     credentialReference: 'DEVOS057_TEST_CREDENTIAL',
-    configuration: { repositoryPath },
+    configuration: { repositoryPath, ...gitIntegrationConfigurationOverrides },
     createdAt: now,
     updatedAt: now,
   };
@@ -261,6 +267,13 @@ async function buildScenario(repositoryPath: string, configuration = CONFIGURATI
   const projects: ProjectRepository = {
     getById: async (id) => (id === project.id ? project : null),
     listForOrganisation: async () => [project],
+    create: async () => {},
+    update: async () => {},
+  };
+  // DEVOS-109: runAgentTask now calls buildContext(), which needs this too.
+  const knowledgeSources: KnowledgeSourceRepository = {
+    getById: async () => null,
+    listForProject: async () => [],
     create: async () => {},
     update: async () => {},
   };
@@ -411,6 +424,7 @@ async function buildScenario(repositoryPath: string, configuration = CONFIGURATI
     artifacts,
     artifactVersions,
     projects,
+    knowledgeSources,
     memberships,
     policies,
     toolCapabilities,
@@ -477,6 +491,7 @@ describe('runDevelopmentAgentTask (real local git repository)', () => {
       artifacts: scenario.artifacts,
       artifactVersions: scenario.artifactVersions,
       projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
       memberships: scenario.memberships,
       policies: scenario.policies,
       toolCapabilities: scenario.toolCapabilities,
@@ -612,6 +627,7 @@ describe('runDevelopmentAgentTask (real local git repository)', () => {
       artifacts: artifactsWithReview,
       artifactVersions: artifactVersionsWithReview,
       projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
       memberships: scenario.memberships,
       policies: scenario.policies,
       toolCapabilities: scenario.toolCapabilities,
@@ -657,6 +673,7 @@ describe('runDevelopmentAgentTask (real local git repository)', () => {
       artifacts: scenario.artifacts,
       artifactVersions: scenario.artifactVersions,
       projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
       memberships: scenario.memberships,
       policies: scenario.policies,
       toolCapabilities: scenario.toolCapabilities,
@@ -705,6 +722,7 @@ describe('runDevelopmentAgentTask (real local git repository)', () => {
       artifacts: scenario.artifacts,
       artifactVersions: scenario.artifactVersions,
       projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
       memberships: scenario.memberships,
       policies: scenario.policies,
       toolCapabilities: scenario.toolCapabilities,
@@ -722,4 +740,157 @@ describe('runDevelopmentAgentTask (real local git repository)', () => {
     const { stdout: branches } = await runGit(['branch', '--list'], repositoryPath);
     expect(branches).not.toContain('devos/add-status-field');
   }, 30_000);
+
+  describe('DEVOS-104: real GitHub target selection', () => {
+    const modelAdapter: AgentModelAdapter = {
+      invoke: async () => ({
+        status: 'SUCCEEDED',
+        result: {
+          summary: 'Add a STATUS.md file documenting the new status field.',
+          branchName: 'devos/add-status-field',
+          commitMessage: 'Add status field documentation',
+          files: [{ path: 'STATUS.md', content: 'status: planned\n' }],
+        },
+      }),
+    };
+
+    it('throws when a real GitHub target is configured but no credentialResolver is available', async () => {
+      const scenario = await buildScenario(repositoryPath, CONFIGURATION, {
+        github: { owner: 'devos-org', repo: 'devos-pilot' },
+      });
+
+      const deps: DevelopmentAgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions: scenario.agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        storage: createLocalFilesystemStorage(storageDir),
+        publishArtifact: async () => {},
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        knowledgeSources: scenario.knowledgeSources,
+        memberships: scenario.memberships,
+        policies: scenario.policies,
+        toolCapabilities: scenario.toolCapabilities,
+        toolInvocations: scenario.toolInvocationRepository,
+        auditRecords: scenario.auditRecordRepository,
+        pullRequestProvider: createLocalPullRequestProvider(),
+        integrations: scenario.integrations,
+        // credentialResolver intentionally omitted.
+      };
+
+      await expect(runDevelopmentAgentTask(deps, scenario.task)).rejects.toThrow(
+        'no credentialResolver is available',
+      );
+    }, 30_000);
+
+    it('throws when the configured credential reference cannot be resolved', async () => {
+      const scenario = await buildScenario(repositoryPath, CONFIGURATION, {
+        github: { owner: 'devos-org', repo: 'devos-pilot' },
+      });
+      const credentialResolver: CredentialResolver = { resolve: async () => null };
+
+      const deps: DevelopmentAgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions: scenario.agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        storage: createLocalFilesystemStorage(storageDir),
+        publishArtifact: async () => {},
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        knowledgeSources: scenario.knowledgeSources,
+        memberships: scenario.memberships,
+        policies: scenario.policies,
+        toolCapabilities: scenario.toolCapabilities,
+        toolInvocations: scenario.toolInvocationRepository,
+        auditRecords: scenario.auditRecordRepository,
+        pullRequestProvider: createLocalPullRequestProvider(),
+        integrations: scenario.integrations,
+        credentialResolver,
+      };
+
+      await expect(runDevelopmentAgentTask(deps, scenario.task)).rejects.toThrow(
+        'Could not resolve a credential for reference "DEVOS057_TEST_CREDENTIAL"',
+      );
+    }, 30_000);
+
+    it('opens the pull request through the real GitHub API when a real target and credential are both configured', async () => {
+      const scenario = await buildScenario(repositoryPath, CONFIGURATION, {
+        github: { owner: 'devos-org', repo: 'devos-pilot' },
+      });
+      const credentialResolver: CredentialResolver = { resolve: async () => 'ghp_test_token' };
+
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 })) // open-PR check
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              number: 99,
+              title: 'Add a STATUS.md file documenting the new status field.',
+              body: 'Add status field documentation',
+              html_url: 'https://github.com/devos-org/devos-pilot/pull/99',
+              head: { ref: 'devos/add-status-field' },
+              base: { ref: 'main' },
+            }),
+            { status: 201 },
+          ),
+        );
+      vi.stubGlobal('fetch', fetchImpl);
+
+      const deps: DevelopmentAgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions: scenario.agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        storage: createLocalFilesystemStorage(storageDir),
+        publishArtifact: async () => {},
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        knowledgeSources: scenario.knowledgeSources,
+        memberships: scenario.memberships,
+        policies: scenario.policies,
+        toolCapabilities: scenario.toolCapabilities,
+        toolInvocations: scenario.toolInvocationRepository,
+        auditRecords: scenario.auditRecordRepository,
+        pullRequestProvider: createLocalPullRequestProvider(),
+        integrations: scenario.integrations,
+        credentialResolver,
+      };
+
+      try {
+        const output = await runDevelopmentAgentTask(deps, scenario.task);
+
+        expect((output as { pullRequestReference?: string }).pullRequestReference).toBe('99');
+        const createCall = fetchImpl.mock.calls.find(
+          ([, init]: [string, RequestInit]) => init?.method === 'POST',
+        ) as [string, RequestInit];
+        expect(createCall[0]).toBe('https://api.github.com/repos/devos-org/devos-pilot/pulls');
+        expect((createCall[1].headers as Record<string, string>).authorization).toBe(
+          'Bearer ghp_test_token',
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }, 30_000);
+  });
 });

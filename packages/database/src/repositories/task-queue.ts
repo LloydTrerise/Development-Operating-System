@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { MAX_TASK_ATTEMPTS, type TaskFailure, type TaskQueue } from '@devos/domain';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import type { Database } from '../database.js';
 import { PLANNING_APPROVAL_POLICY_KEY, RELEASE_APPROVAL_POLICY_KEY } from '../seed-constants.js';
 import { writeAuditRecord } from './audit-helper.js';
@@ -302,21 +302,66 @@ async function resolveTaskFailure(
   }
 
   await failRun(trx, workflowRunId, failure.message);
+
+  // DEVOS-108-followup: once a run has permanently failed, any sibling task
+  // still `PENDING` can now only ever be a real downstream dependent
+  // (`claimNext()`'s own `dependsOn` barrier — see run-creation.ts/
+  // task-queue.ts's `claimNext()`) that will never become claimable, since
+  // its upstream dependency just failed instead of reaching `SUCCEEDED`.
+  // Before that barrier existed, such a task would eventually get claimed
+  // anyway, immediately fail on its own missing-upstream-artifact check, and
+  // reach `FAILED` through its own retry-then-fail cycle — wasteful, but it
+  // did leave every task in a failed run with a terminal status. Marking
+  // them `FAILED` directly here preserves that same "a failed run's tasks
+  // are all terminal" invariant without the wasted claim/attempt cycles.
+  await trx
+    .updateTable('workflow_tasks')
+    .set({
+      status: 'FAILED',
+      error_code: 'DEVOS_UPSTREAM_TASK_FAILED',
+      error_message: 'Not attempted: a task this run depended on failed.',
+      completed_at: now,
+      updated_at: now,
+    })
+    .where('workflow_run_id', '=', workflowRunId)
+    .where('status', '=', 'PENDING')
+    .execute();
 }
 
 export function createPostgresTaskQueue(db: Kysely<Database>): TaskQueue {
   return {
     async claimNext() {
       return withTransaction(db, async (trx) => {
-        const candidate = await trx
-          .selectFrom('workflow_tasks')
-          .select('id')
-          .where('status', '=', 'PENDING')
-          .orderBy('created_at', 'asc')
-          .limit(1)
-          .forUpdate()
-          .skipLocked()
-          .executeTakeFirst();
+        // DEVOS-108-followup: a task whose `input.dependsOn` (set at
+        // creation, run-creation.ts) names another task in the same run
+        // that hasn't yet reached `SUCCEEDED` is not a real candidate,
+        // however old its `created_at` — the `NOT EXISTS` over
+        // `jsonb_array_elements_text` checks every declared dependency is
+        // satisfied before this row is even eligible to be
+        // `FOR UPDATE SKIP LOCKED`-claimed, so this is a real barrier
+        // (any number of concurrent claimers, not just an ordering hint for
+        // a single sequential one) enforced atomically in the same query
+        // that does the claiming, not a separate check with its own race
+        // window.
+        const result = await sql<{ id: string }>`
+          SELECT wt.id
+          FROM workflow_tasks wt
+          WHERE wt.status = 'PENDING'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements_text(COALESCE(wt.input->'dependsOn', '[]'::jsonb)) AS dep(task_key)
+              WHERE NOT EXISTS (
+                SELECT 1 FROM workflow_tasks up
+                WHERE up.workflow_run_id = wt.workflow_run_id
+                  AND up.task_key = dep.task_key
+                  AND up.status = 'SUCCEEDED'
+              )
+            )
+          ORDER BY wt.created_at ASC
+          LIMIT 1
+          FOR UPDATE OF wt SKIP LOCKED
+        `.execute(trx);
+        const candidate = result.rows[0];
 
         if (!candidate) return null;
 

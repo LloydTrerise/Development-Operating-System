@@ -19,10 +19,11 @@ import {
 } from '../src/workflows/evaluate-release-readiness.js';
 
 describe('evaluateReleaseReadiness (pure function)', () => {
-  it('is ready when test evidence passed and review decision is PASS with no BLOCKER findings', () => {
+  it('is ready when test evidence passed, review decision is PASS with no BLOCKER findings, and the security scan passed', () => {
     const result = evaluateReleaseReadiness({
       testEvidence: { artifactId: 'a', passed: true },
       reviewEvidence: { artifactId: 'b', decision: 'PASS', findings: [] },
+      securityScanEvidence: { artifactId: 'c', passed: true },
     });
     expect(result).toEqual({
       ready: true,
@@ -30,6 +31,7 @@ describe('evaluateReleaseReadiness (pure function)', () => {
       evidence: {
         testEvidence: { artifactId: 'a', passed: true },
         reviewEvidence: { artifactId: 'b', decision: 'PASS', findings: [] },
+        securityScanEvidence: { artifactId: 'c', passed: true },
       },
     });
   });
@@ -42,6 +44,7 @@ describe('evaluateReleaseReadiness (pure function)', () => {
         decision: 'PASS',
         findings: [{ severity: 'MINOR', description: 'Consider renaming this variable.' }],
       },
+      securityScanEvidence: { artifactId: 'c', passed: true },
     });
     expect(result.ready).toBe(true);
   });
@@ -50,6 +53,7 @@ describe('evaluateReleaseReadiness (pure function)', () => {
     const result = evaluateReleaseReadiness({
       testEvidence: { artifactId: 'a', passed: false },
       reviewEvidence: { artifactId: 'b', decision: 'PASS', findings: [] },
+      securityScanEvidence: { artifactId: 'c', passed: true },
     });
     expect(result.ready).toBe(false);
     expect(result.reasons).toContain('Test evidence shows a failing build or test.');
@@ -59,6 +63,7 @@ describe('evaluateReleaseReadiness (pure function)', () => {
     const result = evaluateReleaseReadiness({
       testEvidence: { artifactId: 'a', passed: true },
       reviewEvidence: { artifactId: 'b', decision: 'CHANGES_REQUIRED', findings: [] },
+      securityScanEvidence: { artifactId: 'c', passed: true },
     });
     expect(result.ready).toBe(false);
     expect(result.reasons).toContain('Review decision is "CHANGES_REQUIRED", not "PASS".');
@@ -72,21 +77,37 @@ describe('evaluateReleaseReadiness (pure function)', () => {
         decision: 'PASS',
         findings: [{ severity: 'BLOCKER', description: 'Should not have been marked PASS.' }],
       },
+      securityScanEvidence: { artifactId: 'c', passed: true },
     });
     expect(result.ready).toBe(false);
     expect(result.reasons).toContain('1 unresolved BLOCKER finding(s) remain.');
   });
 
-  it('is not ready when either evidence is missing entirely', () => {
+  it('is not ready when the security scan failed', () => {
+    const result = evaluateReleaseReadiness({
+      testEvidence: { artifactId: 'a', passed: true },
+      reviewEvidence: { artifactId: 'b', decision: 'PASS', findings: [] },
+      securityScanEvidence: { artifactId: 'c', passed: false },
+    });
+    expect(result.ready).toBe(false);
+    expect(result.reasons).toContain('Security scan evidence shows a failing scan.');
+  });
+
+  it('is not ready when all evidence is missing entirely', () => {
     const result = evaluateReleaseReadiness({});
     expect(result.ready).toBe(false);
-    expect(result.reasons).toEqual(['No test evidence found.', 'No review evidence found.']);
+    expect(result.reasons).toEqual([
+      'No test evidence found.',
+      'No review evidence found.',
+      'No security scan evidence found.',
+    ]);
   });
 
   it('the same evidence always yields the same verdict (deterministic)', () => {
     const evidence = {
       testEvidence: { artifactId: 'a', passed: true },
       reviewEvidence: { artifactId: 'b', decision: 'PASS', findings: [] },
+      securityScanEvidence: { artifactId: 'c', passed: true },
     };
     const first = evaluateReleaseReadiness(evidence);
     const second = evaluateReleaseReadiness(evidence);
@@ -153,11 +174,20 @@ describe('getReleaseReadinessForProject (real project-scoped artifact lookup)', 
       decision: 'PASS',
       findings: [],
     });
+    const securityScanEvidenceArtifact = makeArtifact('SECURITY_SCAN_EVIDENCE', 3);
+    const securityScanEvidenceVersion = makeVersion(securityScanEvidenceArtifact, {
+      passed: true,
+    });
 
-    const projectArtifacts = [testEvidenceArtifact, reviewEvidenceArtifact];
+    const projectArtifacts = [
+      testEvidenceArtifact,
+      reviewEvidenceArtifact,
+      securityScanEvidenceArtifact,
+    ];
     const artifactVersionsByArtifactId = new Map([
       [testEvidenceArtifact.id, [testEvidenceVersion]],
       [reviewEvidenceArtifact.id, [reviewEvidenceVersion]],
+      [securityScanEvidenceArtifact.id, [securityScanEvidenceVersion]],
     ]);
 
     const projects: ProjectRepository = {
@@ -203,6 +233,7 @@ describe('getReleaseReadinessForProject (real project-scoped artifact lookup)', 
     expect(result.ready).toBe(true);
     expect(result.evidence.testEvidence?.passed).toBe(true);
     expect(result.evidence.reviewEvidence?.decision).toBe('PASS');
+    expect(result.evidence.securityScanEvidence?.passed).toBe(true);
   });
 
   it('throws NotFoundError for a non-member principal', async () => {

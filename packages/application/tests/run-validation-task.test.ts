@@ -28,6 +28,7 @@ import type {
   WorkItem,
   WorkItemRepository,
 } from '@devos/domain';
+import type { CredentialResolver } from '@devos/integrations';
 import { runGit } from '@devos/integrations';
 import { createLocalFilesystemStorage } from '@devos/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -39,7 +40,7 @@ const SYSTEM_ACTOR_ID = 'devos-agent-runtime';
 async function buildScenario(
   repositoryPath: string,
   branchName: string,
-  overrides: { buildCommand: string; testCommand: string },
+  overrides: Record<string, unknown>,
 ) {
   const organisationId = randomUUID() as OrganisationId;
   const now = new Date(0).toISOString();
@@ -418,5 +419,86 @@ describe('runValidationTask (real local git repository, real shell commands)', (
     await expect(runValidationTask(deps, scenario.task)).rejects.toThrow(
       'no configured "buildCommand"',
     );
+  });
+
+  describe('DEVOS-108: real GitHub target credential resolution', () => {
+    // DEVOS-108 finding: this task previously called `createWorkspace(task.id,
+    // repositoryPath)` with the plain, unauthenticated repositoryPath even
+    // when the Git integration configured a real GitHub target — a real
+    // private GitHub remote (like the pilot's own `devos-pilot-test`,
+    // confirmed private) would fail to clone at all. Mirrors
+    // run-development-agent-task.test.ts's own "DEVOS-104: real GitHub
+    // target selection" coverage for the identical guard.
+    it('throws when a real GitHub target is configured but no credentialResolver is available', async () => {
+      const scenario = await buildScenario(repositoryPath, branchName, {
+        buildCommand: 'node -e "console.log(\'build ok\')"',
+        testCommand: 'node -e "console.log(\'tests ok\')"',
+        github: { owner: 'devos-org', repo: 'devos-pilot' },
+      });
+      const storage = createLocalFilesystemStorage(storageDir);
+      const deps: ToolTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        storage,
+        publishArtifact: async () => {},
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        memberships: scenario.memberships,
+        policies: scenario.policies,
+        toolCapabilities: scenario.toolCapabilities,
+        toolInvocations: scenario.toolInvocationRepository,
+        auditRecords: scenario.auditRecordRepository,
+        integrations: scenario.integrations,
+        // credentialResolver intentionally omitted.
+      };
+
+      await expect(runValidationTask(deps, scenario.task)).rejects.toThrow(
+        'no credentialResolver is available',
+      );
+    }, 30_000);
+
+    it('resolves the real credential (not the plain unauthenticated repositoryPath) when a real GitHub target is configured', async () => {
+      const scenario = await buildScenario(repositoryPath, branchName, {
+        buildCommand: 'node -e "console.log(\'build ok\')"',
+        testCommand: 'node -e "console.log(\'tests ok\')"',
+        github: { owner: 'devos-org', repo: 'devos-pilot' },
+      });
+      const storage = createLocalFilesystemStorage(storageDir);
+      const resolvedReferences: string[] = [];
+      const credentialResolver: CredentialResolver = {
+        resolve: async (reference) => {
+          resolvedReferences.push(reference);
+          return 'ghp_test_token';
+        },
+      };
+
+      const deps: ToolTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        storage,
+        publishArtifact: async () => {},
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        memberships: scenario.memberships,
+        policies: scenario.policies,
+        toolCapabilities: scenario.toolCapabilities,
+        toolInvocations: scenario.toolInvocationRepository,
+        auditRecords: scenario.auditRecordRepository,
+        integrations: scenario.integrations,
+        credentialResolver,
+      };
+
+      const output = await runValidationTask(deps, scenario.task);
+
+      expect(output.status).toBe('SUCCEEDED');
+      // The real credential was actually resolved (not silently skipped) —
+      // this is the plumbing that would embed it into an authenticated
+      // clone URL for a real https:// GitHub remote; repositoryPath here is
+      // a local test path, so the resolved token has nothing to rewrite,
+      // but resolution itself must still happen.
+      expect(resolvedReferences).toEqual([scenario.gitIntegration.credentialReference]);
+    }, 30_000);
   });
 });

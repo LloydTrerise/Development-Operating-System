@@ -7,10 +7,19 @@ import type {
   Membership,
   MembershipRepository,
   OrganisationId,
+  Policy,
+  PolicyRepository,
   Project,
   ProjectRepository,
+  WorkflowDefinition,
+  WorkflowDefinitionRepository,
   WorkflowRun,
   WorkflowRunRepository,
+  WorkflowTaskRepository,
+  WorkflowVersion,
+  WorkflowVersionRepository,
+  WorkItem,
+  WorkItemRepository,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { approveApproval, rejectApproval } from '../src/approval/decide-approval.js';
@@ -160,6 +169,22 @@ function createDeps(): {
     },
   };
 
+  // DEVOS-110: an empty published-policy set — evaluatePolicies() falls
+  // through to its own global ALLOW default, matching every existing test
+  // here's own pre-DEVOS-110 expectations unchanged. Policy-driven denial
+  // gets its own dedicated test below.
+  const policiesStore: Policy[] = [];
+  const policyRepository: PolicyRepository = {
+    getById: async (id) => policiesStore.find((p) => p.id === id) ?? null,
+    getByProjectAndKeyAndVersion: async () => null,
+    getLatestForProjectAndKey: async () => null,
+    listForProject: async (projectId) => policiesStore.filter((p) => p.projectId === projectId),
+    create: async (policy) => {
+      policiesStore.push(policy);
+    },
+    publish: async () => {},
+  };
+
   const addMember = (principalId: string, role: 'OWNER' | 'MEMBER'): void => {
     const id = randomUUID() as Membership['id'];
     memberships.set(id, {
@@ -188,12 +213,30 @@ function createDeps(): {
       workflowRuns,
       artifactVersions,
       approvals,
-      transitionAfterApprovalDecision: async (
+      policies: policyRepository,
+      // DEVOS-111: the real composed function both decides the approval
+      // (what the old `approvals.decide` fake call used to do on its own,
+      // before decide-approval.ts called it directly) and transitions the
+      // run, atomically — this fake replicates both effects so existing
+      // assertions (including "rejects deciding an already-decided
+      // approval", which depends on the persisted status) keep meaning the
+      // same real thing.
+      decideApprovalAndTransition: async (
         approvalId,
         workflowRunId,
         approvalType,
         decision,
+        decidedBy,
+        decisionReason,
+        decidedAt,
       ) => {
+        await approvals.decide(
+          approvalId as Approval['id'],
+          decision,
+          decidedBy,
+          decisionReason,
+          decidedAt,
+        );
         transitionCalls.push({ approvalId, workflowRunId, approvalType, decision });
       },
     },
@@ -294,6 +337,39 @@ describe('approval use cases', () => {
     ]);
   });
 
+  it('DEVOS-110: a published policy denying this approvalType rejects the decision with a policy-attributed error', async () => {
+    const { deps, run, artifactVersionId } = ctx;
+    const requested = await requestApproval(deps, 'alice', run.projectId, {
+      workflowRunId: run.id,
+      approvalType: 'PLANNING',
+      artifactVersionIds: [artifactVersionId],
+    });
+
+    await deps.policies.create({
+      id: randomUUID() as Policy['id'],
+      organisationId: (await deps.projects.getById(run.projectId))!.organisationId,
+      projectId: run.projectId,
+      key: 'devos-110-deny-planning-approvals',
+      version: 1,
+      status: 'PUBLISHED',
+      definition: { rules: [{ action: 'PLANNING', effect: 'DENY' }] },
+      createdBy: 'alice',
+      publishedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+
+    await expect(
+      approveApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      }),
+    ).rejects.toThrow(ForbiddenError);
+    await expect(
+      approveApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      }),
+    ).rejects.toThrow(/PLANNING/);
+  });
+
   it('rejects a decision with a mismatched scope hash — the client cannot self-grant authority', async () => {
     const { deps, run, artifactVersionId } = ctx;
     const requested = await requestApproval(deps, 'alice', run.projectId, {
@@ -384,5 +460,300 @@ describe('approval use cases', () => {
     await expect(
       approveApproval(deps, 'alice', requested.id, { scopeHash: fabricatedHash }),
     ).rejects.toThrow(ValidationError);
+  });
+});
+
+describe('DEVOS-112: the planning re-planning loop', () => {
+  function buildReplanningScenario() {
+    const organisationId = randomUUID() as OrganisationId;
+    const now = new Date().toISOString();
+
+    const project: Project = {
+      id: randomUUID() as Project['id'],
+      organisationId,
+      name: 'Replanning Test Project',
+      slug: 'replanning-test-project',
+      status: 'ACTIVE',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const projectsStore = new Map<string, Project>([[project.id, project]]);
+    const projects: ProjectRepository = {
+      getById: async (id) => projectsStore.get(id) ?? null,
+      listForOrganisation: async () => [project],
+      create: async () => {},
+      update: async () => {},
+    };
+
+    const membershipsStore = new Map<string, Membership>();
+    const ownerMembershipId = randomUUID() as Membership['id'];
+    membershipsStore.set(ownerMembershipId, {
+      id: ownerMembershipId,
+      organisationId,
+      projectId: project.id,
+      principalId: 'alice',
+      role: 'OWNER',
+      status: 'ACTIVE',
+      createdAt: now,
+      updatedAt: now,
+    });
+    const memberships: MembershipRepository = {
+      getById: async (id) => membershipsStore.get(id) ?? null,
+      getForPrincipalAndProject: async (principalId, projectId) =>
+        [...membershipsStore.values()].find(
+          (m) => m.principalId === principalId && m.projectId === projectId,
+        ) ?? null,
+      listForPrincipal: async (principalId) =>
+        [...membershipsStore.values()].filter((m) => m.principalId === principalId),
+      listForProject: async (projectId) =>
+        [...membershipsStore.values()].filter((m) => m.projectId === projectId),
+      create: async (m) => {
+        membershipsStore.set(m.id, m);
+      },
+      updateRole: async () => {},
+      remove: async () => {},
+    };
+
+    let workItem: WorkItem = {
+      id: randomUUID() as WorkItem['id'],
+      projectId: project.id,
+      title: 'Replanning test work item',
+      type: 'GENERAL',
+      status: 'OPEN',
+      priority: 'MEDIUM',
+      metadata: {},
+      createdBy: 'alice',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const workItems: WorkItemRepository = {
+      getById: async (id) => (id === workItem.id ? workItem : null),
+      listForProject: async () => [workItem],
+      create: async () => {},
+      update: async (id, changes, updatedAt) => {
+        if (id !== workItem.id) return;
+        workItem = { ...workItem, ...changes, updatedAt };
+      },
+    };
+
+    const definitionId = randomUUID() as WorkflowDefinition['id'];
+    const definition: WorkflowDefinition = {
+      id: definitionId,
+      projectId: project.id,
+      key: 'planning-path',
+      name: 'Planning Path',
+      createdAt: now,
+      updatedAt: now,
+    };
+    const workflowDefinitions: WorkflowDefinitionRepository = {
+      getById: async (id) => (id === definition.id ? definition : null),
+      getByProjectAndKey: async () => null,
+      listForProject: async () => [definition],
+      create: async () => {},
+    };
+
+    const version: WorkflowVersion = {
+      id: randomUUID() as WorkflowVersion['id'],
+      workflowDefinitionId: definitionId,
+      version: 1,
+      status: 'PUBLISHED',
+      definition: {
+        name: 'Planning Path',
+        trigger: { type: 'WORK_ITEM_MANUAL' },
+        inputs: [],
+        nodes: [{ id: 'discovery', type: 'TASK' }],
+        edges: [],
+        policies: [],
+        outputs: [],
+      },
+      publishedAt: now,
+      createdBy: 'alice',
+      createdAt: now,
+    };
+    const workflowVersions: WorkflowVersionRepository = {
+      getById: async (id) => (id === version.id ? version : null),
+      getByDefinitionAndVersion: async () => null,
+      getLatestForDefinition: async () => version,
+      listForDefinition: async () => [version],
+      create: async () => {},
+      updateDefinition: async () => {},
+      publish: async () => {},
+    };
+
+    const runsStore = new Map<string, WorkflowRun>();
+    const run: WorkflowRun = {
+      id: randomUUID() as WorkflowRun['id'],
+      projectId: project.id,
+      workflowVersionId: version.id,
+      workItemId: workItem.id,
+      status: 'AWAITING_APPROVAL',
+      input: { foo: 'bar' },
+      createdAt: now,
+      updatedAt: now,
+    };
+    runsStore.set(run.id, run);
+    const workflowRuns: WorkflowRunRepository = {
+      getById: async (id) => runsStore.get(id) ?? null,
+      getByVersionAndIdempotencyKey: async () => null,
+      create: async (r) => {
+        runsStore.set(r.id, r);
+      },
+    };
+
+    const workflowTasks: WorkflowTaskRepository = {
+      getById: async () => null,
+      listForRun: async () => [],
+      create: async () => {},
+    };
+
+    const artifactVersionId = randomUUID();
+    const artifactVersion: ArtifactVersion = {
+      id: artifactVersionId as ArtifactVersion['id'],
+      artifactId: randomUUID() as ArtifactVersion['artifactId'],
+      version: 1,
+      contentType: 'application/json',
+      contentUri: 'mem://x',
+      contentHash: 'hash',
+      createdBy: 'alice',
+      createdAt: now,
+    };
+    const artifactVersions: ArtifactVersionRepository = {
+      getById: async (id) => (id === artifactVersion.id ? artifactVersion : null),
+      listForArtifact: async () => [artifactVersion],
+      create: async () => {},
+    };
+
+    const approvalsStore = new Map<string, Approval>();
+    const approvals: ApprovalRepository = {
+      getById: async (id) => approvalsStore.get(id) ?? null,
+      listForProject: async (projectId) =>
+        [...approvalsStore.values()].filter((a) => a.projectId === projectId),
+      listForRun: async (workflowRunId) =>
+        [...approvalsStore.values()].filter((a) => a.workflowRunId === workflowRunId),
+      getPendingForRunAndType: async (workflowRunId, approvalType) =>
+        [...approvalsStore.values()].find(
+          (a) =>
+            a.workflowRunId === workflowRunId &&
+            a.approvalType === approvalType &&
+            a.status === 'PENDING',
+        ) ?? null,
+      create: async (a) => {
+        approvalsStore.set(a.id, a);
+      },
+      decide: async (id, status, decidedBy, decisionReason, decidedAt) => {
+        const existing = approvalsStore.get(id);
+        if (!existing) return;
+        approvalsStore.set(id, {
+          ...existing,
+          status,
+          decidedBy,
+          ...(decisionReason !== undefined ? { decisionReason } : {}),
+          decidedAt,
+        });
+      },
+    };
+
+    const policies: PolicyRepository = {
+      getById: async () => null,
+      getByProjectAndKeyAndVersion: async () => null,
+      getLatestForProjectAndKey: async () => null,
+      listForProject: async () => [],
+      create: async () => {},
+      publish: async () => {},
+    };
+
+    const startedRuns: Array<{ workItemId: string; idempotencyKey: string }> = [];
+    const deps: ApprovalUseCaseDeps = {
+      projects,
+      memberships,
+      workflowRuns,
+      artifactVersions,
+      approvals,
+      policies,
+      decideApprovalAndTransition: async (
+        approvalId,
+        _workflowRunId,
+        _t,
+        decision,
+        decidedBy,
+        decisionReason,
+        decidedAt,
+      ) => {
+        await approvals.decide(
+          approvalId as Approval['id'],
+          decision,
+          decidedBy,
+          decisionReason,
+          decidedAt,
+        );
+      },
+      workItems,
+      workflowDefinitions,
+      workflowVersions,
+      workflowTasks,
+      createDraft: async () => {},
+      startRun: async (r) => {
+        runsStore.set(r.id, r);
+        startedRuns.push({ workItemId: r.workItemId, idempotencyKey: r.idempotencyKey });
+      },
+    };
+
+    return { deps, project, run, workItem: () => workItem, artifactVersionId, startedRuns };
+  }
+
+  it('a rejected PLANNING approval starts a genuinely new planning-path run for the same work item', async () => {
+    const { deps, run, artifactVersionId, startedRuns, workItem } = buildReplanningScenario();
+    const requested = await requestApproval(deps, 'alice', run.projectId, {
+      workflowRunId: run.id,
+      approvalType: 'PLANNING',
+      artifactVersionIds: [artifactVersionId],
+    });
+
+    await rejectApproval(deps, 'alice', requested.id, {
+      scopeHash: requested.evidenceReference.scopeHash,
+      comment: 'Not quite right, please revise.',
+    });
+
+    expect(startedRuns).toHaveLength(1);
+    expect(startedRuns[0]?.workItemId).toBe(run.workItemId);
+    expect(workItem().metadata.planningReworkCount).toBe(1);
+  });
+
+  it('bounds the loop: after MAX_AUTOMATIC_REPLANNING_CYCLES rejections, no further run starts and the work item is marked REWORK_LIMIT_REACHED', async () => {
+    const { deps, run, artifactVersionId, startedRuns, workItem } = buildReplanningScenario();
+
+    // Two automatic re-plans are allowed; simulate rejecting each new
+    // planning run's own approval in turn until the bound is hit.
+    let currentRunId = run.id;
+    for (let cycle = 1; cycle <= 3; cycle++) {
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: currentRunId,
+        approvalType: 'PLANNING',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await rejectApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+      if (startedRuns.length > 0) {
+        // The next cycle rejects the freshly-started replanning run's own
+        // (fake) approval, driven against a new run id each time.
+        currentRunId = randomUUID();
+        (deps.workflowRuns as { create: (r: WorkflowRun) => Promise<void> }).create({
+          id: currentRunId as WorkflowRun['id'],
+          projectId: run.projectId,
+          workflowVersionId: run.workflowVersionId,
+          workItemId: run.workItemId,
+          status: 'AWAITING_APPROVAL',
+          input: {},
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    // 2 automatic replans (cycles 1-2), then the 3rd rejection hits the
+    // bound instead of starting a 3rd automatic run.
+    expect(startedRuns).toHaveLength(2);
+    expect(workItem().status).toBe('REWORK_LIMIT_REACHED');
   });
 });

@@ -22,7 +22,7 @@ import type {
   WorkItemRepository,
 } from '@devos/domain';
 import type { AgentModelAdapter, PromptRepository, SchemaRepository } from '@devos/agents';
-import type { PullRequestProvider } from '@devos/integrations';
+import type { CredentialResolver, PullRequestProvider } from '@devos/integrations';
 import type { ArtifactStorage } from '@devos/storage';
 import type { CreateWorkflowDraft, StartWorkflowRun } from '../workflows/deps.js';
 
@@ -47,13 +47,31 @@ export interface AgentTaskHandlerDeps {
   schemas: SchemaRepository;
   recordContextManifest: RecordContextManifest;
   /**
+   * DEVOS-109: `runAgentTask` now assembles its context manifest's sources
+   * via `buildContext()` (`@devos/knowledge`) instead of the inline
+   * WORK_ITEM/AGENT_VERSION/PROMPT-only list it used to build by hand —
+   * `buildContext()`'s own `RetrievalDeps` shape is exactly these three
+   * repositories plus `projects` (below), so every caller of `runAgentTask`
+   * (every planning-path agent handler) now needs them, not just the ones
+   * that already consumed a specific prior artifact themselves.
+   */
+  knowledgeSources: KnowledgeSourceRepository;
+  artifacts: ArtifactRepository;
+  artifactVersions: ArtifactVersionRepository;
+  /**
+   * Required by `buildContext()` (DEVOS-109, `retrieveProjectContext`) and
+   * still separately used, optionally, by DEVOS-098's cost-budget check
+   * below — no longer optional itself now that every caller needs it for
+   * context assembly regardless of whether budget-checking applies.
+   */
+  projects: ProjectRepository;
+  /**
    * DEVOS-098: cost-budget checking is optional cross-cutting behavior, the
    * same optional-and-additive pattern DEVOS-087's `metrics?: MetricsRegistry`
    * already established — every existing test fake for this interface stays
    * valid unchanged; only the real worker composition (`apps/worker/src/main.ts`)
-   * supplies both, since it already has both repositories available.
+   * supplies it, since it already has the repository available.
    */
-  projects?: ProjectRepository;
   auditRecords?: AuditRecordRepository;
 }
 
@@ -99,9 +117,21 @@ export interface DevelopmentAgentTaskHandlerDeps extends AgentArtifactConsumerTa
   auditRecords: AuditRecordRepository;
   integrations: IntegrationRepository;
   /** DEVOS-061: closes the last capability this stage's own spec lists
-   * ("create a pull request where authorised") — always the fake/local
-   * provider in this sprint, per the user-authorized scoping decision. */
+   * ("create a pull request where authorised") — the fallback provider used
+   * when the project's Git integration has no real GitHub target configured
+   * (DEVOS-104's `resolveGitHubRepositoryTarget`); always the fake/local
+   * provider through Sprint 8, per that period's own scoping decision. */
   pullRequestProvider: PullRequestProvider;
+  /**
+   * DEVOS-104/106: resolves the live credential a real `PullRequestProvider`
+   * (e.g. `createGitHubPullRequestProvider`) authenticates with, from the
+   * Git integration's own `credentialReference` — optional and additive,
+   * mirroring `AgentTaskHandlerDeps.projects?`/`auditRecords?` (DEVOS-098):
+   * only required when the resolved Git integration actually configures a
+   * real GitHub target, so every existing test fake for this interface
+   * stays valid unchanged.
+   */
+  credentialResolver?: CredentialResolver;
 }
 
 /**
@@ -124,6 +154,15 @@ export interface ToolTaskHandlerDeps extends TaskHandlerDeps {
   toolInvocations: ToolInvocationRepository;
   auditRecords: AuditRecordRepository;
   integrations: IntegrationRepository;
+  /**
+   * DEVOS-105/106: resolves the live credential a real `DeploymentProvider`
+   * (e.g. `createRenderDeploymentProvider`) authenticates with, from the
+   * project's Deployment integration's own `credentialReference` — optional
+   * and additive, mirroring `DevelopmentAgentTaskHandlerDeps.credentialResolver`
+   * (DEVOS-104): only required when the project actually has a real
+   * Deployment integration configured.
+   */
+  credentialResolver?: CredentialResolver;
 }
 
 /**

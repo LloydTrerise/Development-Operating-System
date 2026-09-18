@@ -10,6 +10,7 @@
   },
   "devDependencies": {
     "@devos/api": "workspace:*",
+    "@devos/application": "workspace:*",
     "@devos/database": "workspace:*",
     "@devos/domain": "workspace:*",
     "@devos/integrations": "workspace:*",

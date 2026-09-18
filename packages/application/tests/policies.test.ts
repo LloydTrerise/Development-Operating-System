@@ -1,25 +1,30 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  AuditRecord,
-  AuditRecordRepository,
-  Membership,
-  MembershipRepository,
-  OrganisationId,
-  Policy,
-  PolicyRepository,
-  Project,
-  ProjectRepository,
+import {
+  SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+  type AuditRecord,
+  type AuditRecordRepository,
+  type Membership,
+  type MembershipRepository,
+  type OrganisationId,
+  type Policy,
+  type PolicyRepository,
+  type Project,
+  type ProjectRepository,
+  type ProjectType,
+  type ProjectTypeAgentRepository,
+  type ProjectTypeRepository,
+  type ProjectTypeWorkflowRepository,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../src/projects/create-project.js';
+import type { CreateProjectWithClones } from '../src/projects/deps.js';
 import { createPolicy } from '../src/policy/create-policy.js';
-import type { PolicyUseCaseDeps } from '../src/policy/deps.js';
 import { getPolicyForPrincipal } from '../src/policy/get-policy.js';
 import { listPoliciesForProject } from '../src/policy/list-policies.js';
 import { publishPolicy } from '../src/policy/publish-policy.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
 
-function createInMemoryDeps(): PolicyUseCaseDeps {
+function createInMemoryDeps() {
   const projects = new Map<string, Project>();
   const memberships = new Map<string, Membership>();
   const policiesStore = new Map<string, Policy>();
@@ -91,13 +96,68 @@ function createInMemoryDeps(): PolicyUseCaseDeps {
     listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
   };
 
-  return { projects: projectRepository, memberships: membershipRepository, policies, auditRecords };
+  const now = new Date().toISOString();
+  const projectTypesStore = new Map<string, ProjectType>([
+    [
+      SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+      {
+        id: SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
+        key: 'software-development',
+        name: 'Software Development',
+        status: 'ACTIVE',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  ]);
+  const projectTypes: ProjectTypeRepository = {
+    getById: async (id) => projectTypesStore.get(id) ?? null,
+    getByKey: async (key) => [...projectTypesStore.values()].find((p) => p.key === key) ?? null,
+    list: async () => [...projectTypesStore.values()],
+    create: async (projectType) => {
+      projectTypesStore.set(projectType.id, projectType);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = projectTypesStore.get(id);
+      if (!existing) return;
+      projectTypesStore.set(id, { ...existing, ...changes, updatedAt });
+    },
+  };
+  const projectTypeWorkflows: ProjectTypeWorkflowRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const projectTypeAgents: ProjectTypeAgentRepository = {
+    getById: async () => null,
+    getByProjectTypeAndKey: async () => null,
+    listForProjectType: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const createProjectWithClones: CreateProjectWithClones = async (project, membership) => {
+    await projectRepository.create(project);
+    await membershipRepository.create(membership);
+  };
+
+  return {
+    projects: projectRepository,
+    memberships: membershipRepository,
+    policies,
+    auditRecords,
+    projectTypes,
+    projectTypeWorkflows,
+    projectTypeAgents,
+    createProjectWithClones,
+  };
 }
 
 const VALID_DEFINITION = { rule: 'require-approval', scope: 'production-release' };
 
 describe('policy use cases', () => {
-  let deps: PolicyUseCaseDeps;
+  let deps: ReturnType<typeof createInMemoryDeps>;
   let projectId: Project['id'];
   const organisationId = randomUUID() as OrganisationId;
 

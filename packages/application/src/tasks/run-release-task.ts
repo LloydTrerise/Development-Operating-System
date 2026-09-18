@@ -2,10 +2,15 @@ import { randomUUID } from 'node:crypto';
 import type { ProjectId } from '@devos/contracts';
 import type { Artifact, ArtifactVersion, ToolInvocation, WorkflowTask } from '@devos/domain';
 import { NonRetryableTaskError } from '@devos/domain';
-import { createLocalStagingDeploymentProvider } from '@devos/integrations';
+import {
+  createLocalStagingDeploymentProvider,
+  createRenderDeploymentProvider,
+  type DeploymentProvider,
+} from '@devos/integrations';
 import { invokeTool } from '@devos/tools';
 import { createDeploymentProviderAdapters } from './deployment-provider-adapters.js';
 import { createHealthCheckProviderAdapter } from './health-check-provider-adapter.js';
+import { createHttpHealthCheckProviderAdapter } from './http-health-check-provider-adapter.js';
 import type { ToolTaskHandlerDeps } from './deps.js';
 
 const CONTENT_TYPE = 'application/json';
@@ -14,7 +19,8 @@ const CONTENT_TYPE = 'application/json';
 // acting without a human principal.
 const SYSTEM_ACTOR_ID = 'devos-agent-runtime';
 
-interface ReleaseTargetConfig {
+interface LocalReleaseTarget {
+  kind: 'local';
   repositoryPath: string;
   environment: string;
   stagingRoot: string;
@@ -22,18 +28,60 @@ interface ReleaseTargetConfig {
 }
 
 /**
- * Reads `deploy`'s target/staging configuration from the project's active
- * Git integration — the same `Integration.configuration` `build-run`/
- * `test-run` already read `buildCommand`/`testCommand` from (DEVOS-064),
- * not a new Integration type. Shared by both a fresh release and an
- * authorised rollback, since both deploy to the same environment through
- * the same staging mechanism.
+ * DEVOS-105: a real Render target, resolved from a separate `Deployment`
+ * -type `Integration` (not the `Git` integration's own `configuration`,
+ * unlike the local staging config below) — a project's real deployment
+ * credentials/target are their own concern, distinct from its Git
+ * credentials, and this keeps the local-only path (no `Deployment`
+ * integration registered) byte-identical to every prior sprint's behaviour.
  */
-async function resolveReleaseTargetConfig(
+interface RenderReleaseTarget {
+  kind: 'render';
+  environment: string;
+  serviceId: string;
+  credentialReference: string;
+}
+
+type ReleaseTarget = LocalReleaseTarget | RenderReleaseTarget;
+
+/**
+ * Reads `deploy`'s target configuration for the project — a real `Deployment`
+ * integration (DEVOS-105) when one is registered, else the pre-existing
+ * local staging configuration read from the project's active Git
+ * integration (DEVOS-074, unchanged). Shared by both a fresh release and an
+ * authorised rollback, since both deploy to the same environment through
+ * the same mechanism.
+ */
+async function resolveReleaseTarget(
   deps: ToolTaskHandlerDeps,
   projectId: ProjectId,
-): Promise<ReleaseTargetConfig> {
+): Promise<ReleaseTarget> {
   const integrations = await deps.integrations.listForProject(projectId);
+
+  const deploymentIntegration = integrations.find(
+    (integration) => integration.type === 'Deployment' && integration.status === 'ACTIVE',
+  );
+  if (deploymentIntegration) {
+    const serviceId = deploymentIntegration.configuration.serviceId;
+    if (typeof serviceId !== 'string' || serviceId.trim().length === 0) {
+      throw new Error(
+        `Deployment integration ${deploymentIntegration.id} has no configured "serviceId".`,
+      );
+    }
+    const environment = deploymentIntegration.configuration.environment;
+    if (typeof environment !== 'string' || environment.trim().length === 0) {
+      throw new Error(
+        `Deployment integration ${deploymentIntegration.id} has no configured "environment".`,
+      );
+    }
+    return {
+      kind: 'render',
+      environment,
+      serviceId,
+      credentialReference: deploymentIntegration.credentialReference,
+    };
+  }
+
   const gitIntegration = integrations.find(
     (integration) => integration.type === 'Git' && integration.status === 'ACTIVE',
   );
@@ -58,7 +106,30 @@ async function resolveReleaseTargetConfig(
     throw new Error(`Git integration ${gitIntegration.id} has no configured "healthCheckCommand".`);
   }
 
-  return { repositoryPath, environment, stagingRoot, healthCheckCommand };
+  return { kind: 'local', repositoryPath, environment, stagingRoot, healthCheckCommand };
+}
+
+/**
+ * Resolves the real Render API key through `CredentialResolver` (DEVOS-106)
+ * — mirrors `run-development-agent-task.ts`'s identical
+ * `resolvePullRequestProvider` credential-resolution pattern (DEVOS-104).
+ */
+async function resolveRenderApiKey(
+  deps: ToolTaskHandlerDeps,
+  target: RenderReleaseTarget,
+): Promise<string> {
+  if (!deps.credentialResolver) {
+    throw new Error(
+      'Project configures a real Render deployment target but no credentialResolver is available to resolve its API key.',
+    );
+  }
+  const apiKey = await deps.credentialResolver.resolve(target.credentialReference);
+  if (apiKey === null) {
+    throw new Error(
+      `Could not resolve a credential for reference "${target.credentialReference}".`,
+    );
+  }
+  return apiKey;
 }
 
 /**
@@ -112,24 +183,54 @@ async function performRelease(
   const correlationId =
     typeof task.input.correlationId === 'string' ? task.input.correlationId : undefined;
 
-  const { repositoryPath, environment, stagingRoot, healthCheckCommand } =
-    await resolveReleaseTargetConfig(deps, run.projectId);
+  const releaseTarget = await resolveReleaseTarget(deps, run.projectId);
+  const environment = releaseTarget.environment;
 
-  const deploymentProvider = createLocalStagingDeploymentProvider(stagingRoot);
+  // DEVOS-105: which real provider/health-check mechanism this release uses
+  // depends entirely on which kind of target was resolved — a real Render
+  // target has no local `repositoryPath`/`deployedPath` and is health-
+  // checked over real HTTP instead of a local shell command.
+  let deploymentProvider: DeploymentProvider;
+  let deployTarget: Record<string, unknown>;
+  if (releaseTarget.kind === 'render') {
+    const apiKey = await resolveRenderApiKey(deps, releaseTarget);
+    deploymentProvider = createRenderDeploymentProvider({
+      apiKey,
+      serviceId: releaseTarget.serviceId,
+    });
+    deployTarget = { environment };
+  } else {
+    deploymentProvider = createLocalStagingDeploymentProvider(releaseTarget.stagingRoot);
+    deployTarget = { repositoryPath: releaseTarget.repositoryPath, environment };
+  }
   const deployDeps = { ...deps, adapters: createDeploymentProviderAdapters(deploymentProvider) };
 
   const startedAt = new Date().toISOString();
   const deployInvocation = await invokeTool(deployDeps, SYSTEM_ACTOR_ID, run.projectId, task.id, {
     capabilityKey: 'deploy',
-    target: { repositoryPath, environment },
+    target: deployTarget,
     parameters: { revision: input.revision },
     idempotencyKey: `${task.id}:${input.action}`,
     ...(correlationId !== undefined ? { correlationId } : {}),
   });
   requireSucceeded(deployInvocation, 'Deploy', task.id);
 
-  const deployedPath = String(deployInvocation.outputMetadata?.deployedPath);
-  const healthCheckDeps = { ...deps, adapters: createHealthCheckProviderAdapter(deployedPath) };
+  const deployedPath = deployInvocation.outputMetadata?.deployedPath;
+  const deployedUrl = deployInvocation.outputMetadata?.url;
+  const healthCheckCommand =
+    releaseTarget.kind === 'local' ? releaseTarget.healthCheckCommand : undefined;
+
+  const healthCheckDeps =
+    deployedUrl !== undefined
+      ? { ...deps, adapters: createHttpHealthCheckProviderAdapter(String(deployedUrl)) }
+      : { ...deps, adapters: createHealthCheckProviderAdapter(String(deployedPath)) };
+  // DEVOS-105: `health-check`'s seeded inputSchema requires a non-empty
+  // `command` string regardless of which adapter is behind it — for the
+  // real HTTP adapter (which needs no shell command, the URL is already
+  // closed over at construction) this is the checked URL itself, recorded
+  // as a real, meaningful part of the tool invocation's own audit trail
+  // rather than an arbitrary placeholder.
+  const healthCheckCommandParameter = healthCheckCommand ?? String(deployedUrl);
 
   const healthCheckInvocation = await invokeTool(
     healthCheckDeps,
@@ -139,7 +240,7 @@ async function performRelease(
     {
       capabilityKey: 'health-check',
       target: {},
-      parameters: { command: healthCheckCommand },
+      parameters: { command: healthCheckCommandParameter },
       idempotencyKey: `${task.id}:${input.action}-health-check`,
       ...(correlationId !== undefined ? { correlationId } : {}),
     },
@@ -161,16 +262,17 @@ async function performRelease(
       ? { derivedFromArtifactVersionId: input.derivedFromArtifactVersionId }
       : {}),
     action: input.action,
-    target: { repositoryPath, environment },
+    target: deployTarget,
     revision: input.revision,
     passed,
     deployment: {
       deploymentId: deployInvocation.outputMetadata?.deploymentId,
-      deployedPath: deployInvocation.outputMetadata?.deployedPath,
+      ...(deployedPath !== undefined ? { deployedPath } : {}),
+      ...(deployedUrl !== undefined ? { url: deployedUrl } : {}),
       toolInvocationId: deployInvocation.id,
     },
     healthCheck: {
-      command: healthCheckCommand,
+      command: healthCheckCommandParameter,
       exitCode: healthCheckExitCode,
       stdout: healthCheckInvocation.outputMetadata?.stdout,
       stderr: healthCheckInvocation.outputMetadata?.stderr,
@@ -219,7 +321,8 @@ async function performRelease(
     passed,
     action: input.action,
     revision: input.revision,
-    deployedPath,
+    ...(deployedPath !== undefined ? { deployedPath } : {}),
+    ...(deployedUrl !== undefined ? { url: deployedUrl } : {}),
   };
 }
 

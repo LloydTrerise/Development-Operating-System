@@ -113,6 +113,13 @@ export async function invokeTool(
     parameters: input.parameters,
     idempotencyKey: input.idempotencyKey,
     ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+    // DEVOS-116: `agentVersionId` was only ever used transiently, to decide
+    // ALLOW/DENY against DEVOS-085's own capability-permission check below
+    // — the persisted `ToolInvocation` (and its own audit record) never
+    // actually recorded which agent version, if any, the invocation was
+    // carrying out. Recorded here the same way `correlationId` already is,
+    // so a real attribution trail survives past the gate check itself.
+    ...(input.agentVersionId !== undefined ? { agentVersionId: input.agentVersionId } : {}),
   };
   const capabilityId = capability.id;
 
@@ -127,7 +134,13 @@ export async function invokeTool(
       targetType: 'ToolInvocation',
       targetId: invocation.id,
       outcome: outcomeFor(invocation.status),
-      metadata: { capability: capability.key, errorCode: invocation.errorCode ?? null },
+      metadata: {
+        capability: capability.key,
+        errorCode: invocation.errorCode ?? null,
+        // DEVOS-116: the audit record's own durable attribution, mirroring
+        // `inputMetadata` above.
+        ...(input.agentVersionId !== undefined ? { agentVersionId: input.agentVersionId } : {}),
+      },
       ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
       createdAt: new Date().toISOString(),
     });

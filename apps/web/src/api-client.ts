@@ -12,17 +12,115 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000
  */
 export const DEV_PRINCIPAL_ID = import.meta.env.VITE_DEV_PRINCIPAL_ID ?? 'seed-user';
 
+/**
+ * DEVOS-107: `session.tsx`'s `SessionProvider` registers a real getter here
+ * (backed by Auth0's `getAccessTokenSilently`) once a real user is
+ * authenticated through a real Auth0 tenant — every `request()` call below
+ * then attaches that real access token instead of the dev principal. `null`
+ * (the default, and what every existing test exercises) preserves the
+ * original dev-identity-as-bearer-token behaviour exactly.
+ */
+let accessTokenGetter: (() => Promise<string>) | null = null;
+
+export function setAccessTokenGetter(getter: (() => Promise<string>) | null): void {
+  accessTokenGetter = getter;
+}
+
+async function resolveAuthorizationHeader(): Promise<string> {
+  if (accessTokenGetter) return `Bearer ${await accessTokenGetter()}`;
+  return `Bearer ${DEV_PRINCIPAL_ID}`;
+}
+
 export interface HealthStatus {
   status: 'ok';
+}
+
+export interface Organisation {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Project {
   id: string;
   organisationId: string;
+  projectTypeId: string;
   name: string;
   slug: string;
   description?: string;
   status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectType {
+  id: string;
+  key: string;
+  name: string;
+  description?: string;
+  status: 'ACTIVE' | 'DISABLED';
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Mirrors @devos/contracts WorkflowNode — kept as a local shape so the web
+ * app doesn't take a workspace-internal dependency just for these few
+ * fields. */
+export interface WorkflowNode {
+  id: string;
+  type: string;
+  name?: string;
+  agentRef?: string;
+}
+
+export interface WorkflowEdge {
+  from: string;
+  to: string;
+}
+
+/** Mirrors @devos/contracts WorkflowDefinition (the graph shape, not the
+ * persisted entity of the same name) — what a ProjectTypeWorkflow's
+ * `definition` and a real WorkflowVersion's `definition` both carry. */
+export interface WorkflowGraph {
+  name: string;
+  description?: string;
+  trigger: Record<string, unknown>;
+  inputs: { name: string; type: string; required: boolean }[];
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  policies: string[];
+  outputs: unknown[];
+}
+
+export interface ProjectTypeWorkflow {
+  id: string;
+  projectTypeId: string;
+  key: string;
+  name: string;
+  definition: WorkflowGraph;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentConfiguration {
+  role: string;
+  provider: string;
+  modelRef: string;
+  inputSchemaRef?: string;
+  outputSchemaRef?: string;
+  allowedCapabilities: string[];
+}
+
+export interface ProjectTypeAgent {
+  id: string;
+  projectTypeId: string;
+  key: string;
+  name: string;
+  configuration: AgentConfiguration;
+  promptReference?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -139,6 +237,9 @@ export interface ReleaseReadiness {
       decision: string;
       findings: { severity: string; description?: string }[];
     };
+    // DEVOS-113: real security/static-analysis scan evidence, checked the
+    // same way testEvidence already is.
+    securityScanEvidence?: { artifactId: string; passed: boolean };
   };
 }
 
@@ -158,7 +259,7 @@ async function request<T>(
       method,
       headers: {
         ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-        ...(authenticated ? { authorization: `Bearer ${DEV_PRINCIPAL_ID}` } : {}),
+        ...(authenticated ? { authorization: await resolveAuthorizationHeader() } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
@@ -189,8 +290,111 @@ export function createProject(input: {
   name: string;
   slug: string;
   description?: string;
+  organisationId?: string;
+  projectTypeId: string;
 }): Promise<ApiResult<Project>> {
   return request<Project>('/api/v1/projects', { method: 'POST', body: input });
+}
+
+export function listProjectTypes(): Promise<ApiResult<ProjectType[]>> {
+  return request<ProjectType[]>('/api/v1/project-types');
+}
+
+export function createProjectType(input: {
+  key: string;
+  name: string;
+  description?: string;
+}): Promise<ApiResult<ProjectType>> {
+  return request<ProjectType>('/api/v1/project-types', { method: 'POST', body: input });
+}
+
+export function updateProjectType(
+  projectTypeId: string,
+  input: { name?: string; description?: string; status?: 'ACTIVE' | 'DISABLED' },
+): Promise<ApiResult<ProjectType>> {
+  return request<ProjectType>(`/api/v1/project-types/${projectTypeId}`, {
+    method: 'PATCH',
+    body: input,
+  });
+}
+
+export function listProjectTypeWorkflows(
+  projectTypeId: string,
+): Promise<ApiResult<ProjectTypeWorkflow[]>> {
+  return request<ProjectTypeWorkflow[]>(`/api/v1/project-types/${projectTypeId}/workflows`);
+}
+
+export function createProjectTypeWorkflow(
+  projectTypeId: string,
+  input: { key: string; name: string; definition: WorkflowGraph },
+): Promise<ApiResult<ProjectTypeWorkflow>> {
+  return request<ProjectTypeWorkflow>(`/api/v1/project-types/${projectTypeId}/workflows`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function updateProjectTypeWorkflow(
+  projectTypeId: string,
+  key: string,
+  input: { name?: string; definition?: WorkflowGraph },
+): Promise<ApiResult<ProjectTypeWorkflow>> {
+  return request<ProjectTypeWorkflow>(`/api/v1/project-types/${projectTypeId}/workflows/${key}`, {
+    method: 'PATCH',
+    body: input,
+  });
+}
+
+export function listProjectTypeAgents(
+  projectTypeId: string,
+): Promise<ApiResult<ProjectTypeAgent[]>> {
+  return request<ProjectTypeAgent[]>(`/api/v1/project-types/${projectTypeId}/agents`);
+}
+
+export function createProjectTypeAgent(
+  projectTypeId: string,
+  input: { key: string; name: string; configuration: AgentConfiguration; promptReference?: string },
+): Promise<ApiResult<ProjectTypeAgent>> {
+  return request<ProjectTypeAgent>(`/api/v1/project-types/${projectTypeId}/agents`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function updateProjectTypeAgent(
+  projectTypeId: string,
+  key: string,
+  input: { name?: string; configuration?: AgentConfiguration; promptReference?: string },
+): Promise<ApiResult<ProjectTypeAgent>> {
+  return request<ProjectTypeAgent>(`/api/v1/project-types/${projectTypeId}/agents/${key}`, {
+    method: 'PATCH',
+    body: input,
+  });
+}
+
+export function listOrganisations(): Promise<ApiResult<Organisation[]>> {
+  return request<Organisation[]>('/api/v1/organisations');
+}
+
+export function createOrganisation(input: {
+  name: string;
+  slug: string;
+}): Promise<ApiResult<Organisation>> {
+  return request<Organisation>('/api/v1/organisations', { method: 'POST', body: input });
+}
+
+export function getOrganisation(organisationId: string): Promise<ApiResult<Organisation>> {
+  return request<Organisation>(`/api/v1/organisations/${organisationId}`);
+}
+
+export function updateOrganisation(
+  organisationId: string,
+  input: { name?: string; slug?: string },
+): Promise<ApiResult<Organisation>> {
+  return request<Organisation>(`/api/v1/organisations/${organisationId}`, {
+    method: 'PATCH',
+    body: input,
+  });
 }
 
 export function listWorkItems(projectId: string): Promise<ApiResult<WorkItem[]>> {

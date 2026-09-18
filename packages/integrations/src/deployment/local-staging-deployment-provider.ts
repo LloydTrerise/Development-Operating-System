@@ -24,6 +24,9 @@ import type { DeployRequest, DeploymentProvider, DeploymentRecord } from './depl
 export function createLocalStagingDeploymentProvider(stagingRoot: string): DeploymentProvider {
   return {
     async deploy(request: DeployRequest): Promise<DeploymentRecord> {
+      if (!request.repositoryPath) {
+        throw new Error('createLocalStagingDeploymentProvider requires request.repositoryPath.');
+      }
       const deployedPath = join(stagingRoot, request.environment);
       await rm(deployedPath, { recursive: true, force: true });
       await mkdir(stagingRoot, { recursive: true });

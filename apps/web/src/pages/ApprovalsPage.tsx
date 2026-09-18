@@ -195,7 +195,9 @@ export function ApprovalsPage() {
             </CardContent>
           </Card>
         ))}
-        {pending.length === 0 && <Typography color="text.secondary">No pending approvals.</Typography>}
+        {pending.length === 0 && (
+          <Typography color="text.secondary">No pending approvals.</Typography>
+        )}
       </Stack>
 
       <Typography variant="h6" component="h3" gutterBottom>

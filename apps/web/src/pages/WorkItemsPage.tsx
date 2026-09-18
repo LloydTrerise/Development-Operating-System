@@ -136,7 +136,12 @@ export function WorkItemsPage() {
           required
           size="small"
         />
-        <Button type="submit" variant="contained" disabled={submitting} sx={{ alignSelf: 'flex-start' }}>
+        <Button
+          type="submit"
+          variant="contained"
+          disabled={submitting}
+          sx={{ alignSelf: 'flex-start' }}
+        >
           {submitting ? 'Creating…' : 'Create work item'}
         </Button>
         {submitError && <ErrorAlert message={submitError} />}

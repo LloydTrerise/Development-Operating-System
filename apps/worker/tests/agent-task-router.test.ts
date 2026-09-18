@@ -23,7 +23,10 @@ import type {
   ArtifactVersion,
   ArtifactVersionRepository,
   ContextManifest,
+  KnowledgeSourceRepository,
+  Project,
   ProjectId,
+  ProjectRepository,
   WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
@@ -73,12 +76,15 @@ function buildScenario() {
     updatedAt: now,
   };
 
-  const agentKeys = [
-    SEED_DISCOVERY_AGENT_KEY,
-    SEED_REQUIREMENTS_AGENT_KEY,
-    SEED_TECHNICAL_DESIGN_AGENT_KEY,
-    SEED_PLANNING_AGENT_KEY,
-  ];
+  const roleByAgentKey: Record<string, string> = {
+    [SEED_DISCOVERY_AGENT_KEY]: 'DISCOVERY',
+    [SEED_REQUIREMENTS_AGENT_KEY]: 'REQUIREMENTS',
+    [SEED_TECHNICAL_DESIGN_AGENT_KEY]: 'TECHNICAL_DESIGN',
+    [SEED_PLANNING_AGENT_KEY]: 'PLANNING',
+    [SEED_DEVELOPMENT_AGENT_KEY]: 'DEVELOPMENT',
+    [SEED_REVIEW_AGENT_KEY]: 'REVIEW',
+  };
+  const agentKeys = Object.keys(roleByAgentKey);
   const agents: Agent[] = agentKeys.map((key) => ({
     id: randomUUID() as Agent['id'],
     projectId,
@@ -94,7 +100,7 @@ function buildScenario() {
     version: 1,
     status: 'PUBLISHED',
     configuration: {
-      role: agent.key,
+      role: roleByAgentKey[agent.key]!,
       provider: 'fake',
       modelRef: 'fake-model',
       allowedCapabilities: [],
@@ -220,6 +226,30 @@ function buildScenario() {
     create: async () => {},
   };
 
+  // DEVOS-109: runAgentTask now assembles its context manifest via
+  // buildContext(), which needs `projects`/`knowledgeSources` too.
+  const project: Project = {
+    id: projectId,
+    organisationId: randomUUID() as Project['organisationId'],
+    name: 'Router test project',
+    slug: 'router-test-project',
+    status: 'ACTIVE',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const projects: ProjectRepository = {
+    getById: async (id) => (id === projectId ? project : null),
+    listForOrganisation: async () => [project],
+    create: async () => {},
+    update: async () => {},
+  };
+  const knowledgeSources: KnowledgeSourceRepository = {
+    getById: async () => null,
+    getByProjectAndKey: async () => null,
+    listForProject: async () => [],
+    create: async () => {},
+  };
+
   function buildTask(agentRef: string): WorkflowTask {
     return {
       id: randomUUID() as WorkflowTask['id'],
@@ -235,6 +265,9 @@ function buildScenario() {
   }
 
   return {
+    projectId,
+    agents,
+    versions,
     workflowRuns,
     workItems,
     agentRepository,
@@ -243,6 +276,8 @@ function buildScenario() {
     recordContextManifest,
     artifacts,
     artifactVersions,
+    projects,
+    knowledgeSources,
     buildTask,
   };
 }
@@ -291,6 +326,8 @@ describe('routeAgentTask', () => {
         },
         artifacts: scenario.artifacts,
         artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        knowledgeSources: scenario.knowledgeSources,
       };
 
       const output = await routeAgentTask(deps, scenario.buildTask(agentRef));
@@ -316,10 +353,63 @@ describe('routeAgentTask', () => {
       publishArtifact: async () => {},
       artifacts: scenario.artifacts,
       artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
     };
 
     await expect(routeAgentTask(deps, scenario.buildTask('not-a-real-agent'))).rejects.toThrow(
-      'No planning-path agent handler registered',
+      'No agent handler registered for agentRef "not-a-real-agent"',
+    );
+  });
+
+  it('throws clearly when the resolved agent has an unrecognized role', async () => {
+    const scenario = buildScenario();
+    const unknownRoleKey = 'mystery-agent';
+    const unknownRoleAgent: Agent = {
+      id: randomUUID() as Agent['id'],
+      projectId: scenario.projectId,
+      key: unknownRoleKey,
+      name: unknownRoleKey,
+      status: 'ACTIVE',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    scenario.agents.push(unknownRoleAgent);
+    scenario.versions.push({
+      id: randomUUID() as AgentVersion['id'],
+      agentId: unknownRoleAgent.id,
+      version: 1,
+      status: 'PUBLISHED',
+      configuration: {
+        role: 'MYSTERY_ROLE',
+        provider: 'fake',
+        modelRef: 'fake-model',
+        allowedCapabilities: [],
+      },
+      createdBy: 'alice',
+      createdAt: new Date(0).toISOString(),
+    });
+
+    const deps: AgentArtifactConsumerTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agentRepository,
+      agentVersions: scenario.agentVersionRepository,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async () => {},
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+    };
+
+    await expect(routeAgentTask(deps, scenario.buildTask(unknownRoleKey))).rejects.toThrow(
+      'unrecognized role "MYSTERY_ROLE"',
     );
   });
 

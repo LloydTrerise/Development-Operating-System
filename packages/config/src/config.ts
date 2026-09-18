@@ -35,6 +35,27 @@ export interface AgentsConfig {
   geminiApiKey?: string;
 }
 
+/**
+ * DEVOS-106: like `AgentsConfig.geminiApiKey`, optional here — only a
+ * process that actually resolves a live credential (apps/worker's real
+ * GitHub/Render provider adapters, DEVOS-104/105) requires Vault; enforced
+ * at that process's own startup, not globally in this shared schema.
+ */
+export interface SecretsConfig {
+  vaultAddress?: string;
+  vaultToken?: string;
+}
+
+/**
+ * DEVOS-118: like `SecretsConfig` above, optional — only apps/api's rate
+ * limiter requires a real shared store; unset stays the real in-process
+ * limiter (DEVOS-091), enforced at that process's own startup, not
+ * globally in this shared schema.
+ */
+export interface RateLimitConfig {
+  redisUrl?: string;
+}
+
 export interface DevosConfig {
   environment: NodeEnvironment;
   port: number;
@@ -44,6 +65,8 @@ export interface DevosConfig {
   auth: AuthConfig;
   logging: LoggingConfig;
   agents: AgentsConfig;
+  secrets: SecretsConfig;
+  rateLimit: RateLimitConfig;
 }
 
 function parseEnvironment(value: string | undefined): NodeEnvironment {
@@ -77,6 +100,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DevosConfig {
   const authIssuerUrl = optional(raw.AUTH_ISSUER_URL);
   const authAudience = optional(raw.AUTH_AUDIENCE);
   const geminiApiKey = optional(raw.GEMINI_API_KEY);
+  const vaultAddress = optional(raw.VAULT_ADDR);
+  const vaultToken = optional(raw.VAULT_TOKEN);
+  const redisUrl = optional(raw.REDIS_URL);
 
   return {
     environment: parseEnvironment(raw.NODE_ENV),
@@ -103,6 +129,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DevosConfig {
     },
     agents: {
       ...(geminiApiKey === undefined ? {} : { geminiApiKey }),
+    },
+    secrets: {
+      ...(vaultAddress === undefined ? {} : { vaultAddress }),
+      ...(vaultToken === undefined ? {} : { vaultToken }),
+    },
+    rateLimit: {
+      ...(redisUrl === undefined ? {} : { redisUrl }),
     },
   };
 }

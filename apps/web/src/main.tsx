@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App.js';
+import { OrganisationProvider } from './organisation-context.js';
 import { ProjectProvider } from './project-context.js';
 import { SessionProvider } from './session.js';
 import { ThemeModeProvider } from './theme-mode-context.js';
@@ -14,9 +15,11 @@ createRoot(rootElement).render(
     <ThemeModeProvider>
       <SessionProvider>
         <BrowserRouter>
-          <ProjectProvider>
-            <App />
-          </ProjectProvider>
+          <OrganisationProvider>
+            <ProjectProvider>
+              <App />
+            </ProjectProvider>
+          </OrganisationProvider>
         </BrowserRouter>
       </SessionProvider>
     </ThemeModeProvider>

@@ -73,7 +73,9 @@ export function GovernancePage() {
         <Typography variant="h4" component="h2" gutterBottom>
           Governance
         </Typography>
-        <Typography color="text.secondary">Select a project to view its governance information.</Typography>
+        <Typography color="text.secondary">
+          Select a project to view its governance information.
+        </Typography>
       </section>
     );
   }

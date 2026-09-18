@@ -5,7 +5,7 @@ import {
   type PromptRepository,
   type SchemaRepository,
 } from '@devos/agents';
-import type { OrganisationId } from '@devos/contracts';
+import type { OrganisationId, ProjectTypeId } from '@devos/contracts';
 import type {
   Agent,
   AgentExecution,
@@ -13,9 +13,12 @@ import type {
   AgentRepository,
   AgentVersion,
   AgentVersionRepository,
+  ArtifactRepository,
+  ArtifactVersionRepository,
   AuditRecord,
   AuditRecordRepository,
   ContextManifest,
+  KnowledgeSourceRepository,
   Project,
   ProjectId,
   ProjectRepository,
@@ -174,11 +177,40 @@ function buildScenario() {
   const project: Project = {
     id: projectId,
     organisationId: randomUUID() as OrganisationId,
+    projectTypeId: randomUUID() as ProjectTypeId,
     name: 'Test Project',
     slug: 'test-project',
     status: 'ACTIVE',
     createdAt: now,
     updatedAt: now,
+  };
+
+  const projects: ProjectRepository = {
+    getById: async (id) => (id === project.id ? project : null),
+    listForOrganisation: async () => [project],
+    create: async () => {},
+    update: async () => {},
+  };
+  // DEVOS-109: runAgentTask now calls buildContext(), which needs these
+  // three RetrievalDeps repositories too — empty by default (no knowledge
+  // sources/artifacts exist yet for these unit-level scenarios), matching
+  // this codebase's own precedent (a real, present-but-empty repository,
+  // not a mock unrelated to the property under test).
+  const knowledgeSources: KnowledgeSourceRepository = {
+    getById: async () => null,
+    listForProject: async () => [],
+    create: async () => {},
+    update: async () => {},
+  };
+  const artifacts: ArtifactRepository = {
+    getById: async () => null,
+    listForProject: async () => [],
+    create: async () => {},
+  };
+  const artifactVersions: ArtifactVersionRepository = {
+    getById: async () => null,
+    listForArtifact: async () => [],
+    create: async () => {},
   };
 
   return {
@@ -197,6 +229,10 @@ function buildScenario() {
     executions,
     contextManifests,
     recordContextManifest,
+    projects,
+    knowledgeSources,
+    artifacts,
+    artifactVersions,
   };
 }
 
@@ -226,6 +262,10 @@ describe('runAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
     };
 
     await runAgentTask(deps, scenario.task);
@@ -234,7 +274,7 @@ describe('runAgentTask', () => {
     expect(receivedRequest?.systemInstructions).toBe('Resolved prompt text for "requirements/v1".');
   });
 
-  it('records a context manifest with the work item, agent version, and prompt sources before invoking the model', async () => {
+  it('records a context manifest with the work item, agent version, prompt, and real buildContext() sources before invoking the model', async () => {
     const scenario = buildScenario();
     const versionWithPrompt = { ...scenario.version, promptReference: 'requirements/v1' };
     const agentVersions = {
@@ -255,6 +295,10 @@ describe('runAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
     };
 
     await runAgentTask(deps, scenario.task);
@@ -280,6 +324,15 @@ describe('runAgentTask', () => {
         ref: 'prompt:requirements/v1',
         retrievedAt: expect.any(String),
       }),
+      // DEVOS-109: buildContext() now also retrieves real project context —
+      // widening what the manifest records, not dropping anything it did
+      // before.
+      expect.objectContaining({
+        type: 'PROJECT_CONTEXT',
+        ref: `project:${scenario.projectId}`,
+        retrievedAt: expect.any(String),
+        authorityLevel: 2,
+      }),
     ]);
   });
 
@@ -303,6 +356,10 @@ describe('runAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
     };
 
     await runAgentTask(deps, scenario.task, {
@@ -341,6 +398,10 @@ describe('runAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
     };
 
     const output = await runAgentTask(deps, scenario.task);
@@ -375,6 +436,10 @@ describe('runAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
     };
 
     await runAgentTask(deps, scenario.task);
@@ -403,6 +468,10 @@ describe('runAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
     };
 
     await expect(runAgentTask(deps, scenario.task)).rejects.toThrow('The model timed out.');
@@ -429,6 +498,10 @@ describe('runAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
     };
 
     await expect(runAgentTask(deps, taskWithoutRef)).rejects.toThrow('no agentRef configured');
@@ -454,6 +527,10 @@ describe('runAgentTask', () => {
       prompts,
       schemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
     };
 
     await expect(runAgentTask(deps, scenario.task)).rejects.toThrow('no published version');
@@ -486,6 +563,10 @@ describe('runAgentTask', () => {
       prompts,
       schemas: conformingSchemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
     };
 
     const output = await runAgentTask(deps, scenario.task);
@@ -522,6 +603,10 @@ describe('runAgentTask', () => {
       prompts,
       schemas: strictSchemas,
       recordContextManifest: scenario.recordContextManifest,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
     };
 
     await expect(runAgentTask(deps, scenario.task)).rejects.toThrow('schema "prd-v1" validation');
@@ -586,6 +671,9 @@ describe('runAgentTask', () => {
         prompts,
         schemas,
         recordContextManifest: scenario.recordContextManifest,
+        knowledgeSources: scenario.knowledgeSources,
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
         projects,
         auditRecords: auditRecordRepository,
       };
@@ -626,6 +714,9 @@ describe('runAgentTask', () => {
         prompts,
         schemas,
         recordContextManifest: scenario.recordContextManifest,
+        knowledgeSources: scenario.knowledgeSources,
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
         projects,
         auditRecords: auditRecordRepository,
       };
@@ -658,6 +749,9 @@ describe('runAgentTask', () => {
         prompts,
         schemas,
         recordContextManifest: scenario.recordContextManifest,
+        knowledgeSources: scenario.knowledgeSources,
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
         projects,
         auditRecords: auditRecordRepository,
       };
@@ -691,6 +785,9 @@ describe('runAgentTask', () => {
         prompts,
         schemas,
         recordContextManifest: scenario.recordContextManifest,
+        knowledgeSources: scenario.knowledgeSources,
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
         projects: projectsWithoutBudget,
         auditRecords: auditRecordRepository,
       };

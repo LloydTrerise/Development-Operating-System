@@ -4,4 +4,7 @@ packages:
   - tests/*
 
 allowBuilds:
+  # Verified harmless — its postinstall script only console.logs a
+  # thank-you message, no actual build step (scripts/postinstall.js).
+  browser-tabs-lock: true
   esbuild: true

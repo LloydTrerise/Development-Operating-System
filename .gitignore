@@ -47,6 +47,3 @@ data/
 **/src/*.js.map
 **/src/*.d.ts
 **/src/*.d.ts.map
-
-# Historical analysis source docs (not build inputs)
-Analysis/

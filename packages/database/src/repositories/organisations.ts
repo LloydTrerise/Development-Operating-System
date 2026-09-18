@@ -24,5 +24,36 @@ export function createOrganisationRepository(db: QueryExecutor): OrganisationRep
         .executeTakeFirst();
       return row ? toDomain(row) : null;
     },
+
+    async list() {
+      const rows = await db.selectFrom('organisations').selectAll().execute();
+      return rows.map(toDomain);
+    },
+
+    async create(organisation) {
+      await db
+        .insertInto('organisations')
+        .values({
+          id: organisation.id,
+          name: organisation.name,
+          slug: organisation.slug,
+          status: organisation.status,
+          created_at: organisation.createdAt,
+          updated_at: organisation.updatedAt,
+        })
+        .execute();
+    },
+
+    async update(id, changes, updatedAt) {
+      await db
+        .updateTable('organisations')
+        .set({
+          ...(changes.name !== undefined ? { name: changes.name } : {}),
+          ...(changes.status !== undefined ? { status: changes.status } : {}),
+          updated_at: updatedAt,
+        })
+        .where('id', '=', id)
+        .execute();
+    },
   };
 }
