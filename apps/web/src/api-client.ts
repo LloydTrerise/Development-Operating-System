@@ -73,7 +73,17 @@ export interface WorkflowNode {
   id: string;
   type: string;
   name?: string;
-  agentRef?: string;
+  /** `| undefined` (not just `?`) so the inspector's mode toggle (DEVOS-160)
+   * can explicitly clear this field when switching to role/capability
+   * targeting, distinguished from "omitted" under exactOptionalPropertyTypes. */
+  agentRef?: string | undefined;
+  /** Mirrors @devos/contracts' WorkflowNode.requiredRole/requiredCapabilities
+   * (DEVOS-158) — an alternative to agentRef for AGENT_TASK nodes, resolved
+   * by a real capability-based selection algorithm (DEVOS-159) instead of a
+   * single literal agent key. Also `| undefined` for the same reason as
+   * agentRef above. */
+  requiredRole?: string | undefined;
+  requiredCapabilities?: string[] | undefined;
   /** Mirrors @devos/contracts' WorkflowNode.config — the generic per-node
    * extension point CONDITION/JOIN/WAIT/APPROVAL's real config lives in
    * (DEVOS-130), and where the canvas stores a node's own on-screen

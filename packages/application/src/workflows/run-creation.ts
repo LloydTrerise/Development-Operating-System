@@ -122,6 +122,15 @@ export async function startRunForVersion(
       input: {
         ...input.inputs,
         ...(node.agentRef !== undefined ? { agentRef: node.agentRef } : {}),
+        // DEVOS-158/159: an alternative to agentRef for AGENT_TASK nodes —
+        // the same reserved-key extensibility point, folded through
+        // unchanged when the node declares a role/capability requirement
+        // instead of a literal agent key. routeAgentTask only reads these
+        // when agentRef is absent.
+        ...(node.requiredRole !== undefined ? { requiredRole: node.requiredRole } : {}),
+        ...(node.requiredCapabilities !== undefined
+          ? { requiredCapabilities: node.requiredCapabilities }
+          : {}),
         ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
         ...(dependsOn.length > 0 ? { dependsOn } : {}),
         ...(dependsOnTerminalOnly ? { dependsOnTerminalOnly: true } : {}),

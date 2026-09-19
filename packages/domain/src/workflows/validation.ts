@@ -52,14 +52,19 @@ export function validateWorkflowGraph(graph: unknown): WorkflowValidationIssue[]
           message: `node type must be one of: ${workflowNodeTypes.join(', ')}.`,
         });
       }
-      if (
-        n.type === 'AGENT_TASK' &&
-        (typeof n.agentRef !== 'string' || n.agentRef.trim().length === 0)
-      ) {
-        issues.push({
-          field: `nodes[${index}].agentRef`,
-          message: 'AGENT_TASK nodes require a non-empty agentRef.',
-        });
+      if (n.type === 'AGENT_TASK') {
+        const hasAgentRef = typeof n.agentRef === 'string' && n.agentRef.trim().length > 0;
+        // DEVOS-158: a node may target a role/capability requirement instead
+        // of a literal agentRef — only when neither path is present is the
+        // node unresolvable, mirroring the pre-DEVOS-158 agentRef-only check.
+        const hasRequiredRole =
+          typeof n.requiredRole === 'string' && n.requiredRole.trim().length > 0;
+        if (!hasAgentRef && !hasRequiredRole) {
+          issues.push({
+            field: `nodes[${index}].agentRef`,
+            message: 'AGENT_TASK nodes require a non-empty agentRef or requiredRole.',
+          });
+        }
       }
       // DEVOS-119: a CONDITION node with no rule would previously pass
       // validation and only fail at run time, once claimed, with no

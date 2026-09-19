@@ -87,6 +87,45 @@ describe('validateWorkflowGraph', () => {
     expect(issues).toEqual([]);
   });
 
+  it('DEVOS-158: accepts an AGENT_TASK node with only requiredRole (no agentRef)', () => {
+    const issues = validateWorkflowGraph({
+      name: 'Role-targeted node',
+      nodes: [{ id: 'discovery', type: 'AGENT_TASK', requiredRole: 'DISCOVERY' }],
+    });
+    expect(issues.some((issue) => issue.field === 'nodes[0].agentRef')).toBe(false);
+  });
+
+  it('DEVOS-158: accepts an AGENT_TASK node with requiredRole and requiredCapabilities', () => {
+    const issues = validateWorkflowGraph({
+      name: 'Role+capability-targeted node',
+      nodes: [
+        {
+          id: 'discovery',
+          type: 'AGENT_TASK',
+          requiredRole: 'DISCOVERY',
+          requiredCapabilities: ['repo-read'],
+        },
+      ],
+    });
+    expect(issues.some((issue) => issue.field === 'nodes[0].agentRef')).toBe(false);
+  });
+
+  it('DEVOS-158: still rejects an AGENT_TASK node with neither agentRef nor requiredRole', () => {
+    const issues = validateWorkflowGraph({
+      name: 'Unresolvable node',
+      nodes: [{ id: 'discovery', type: 'AGENT_TASK' }],
+    });
+    expect(issues.some((issue) => issue.field === 'nodes[0].agentRef')).toBe(true);
+  });
+
+  it('DEVOS-158: still rejects an AGENT_TASK node with a blank requiredRole and no agentRef', () => {
+    const issues = validateWorkflowGraph({
+      name: 'Blank requiredRole',
+      nodes: [{ id: 'discovery', type: 'AGENT_TASK', requiredRole: '   ' }],
+    });
+    expect(issues.some((issue) => issue.field === 'nodes[0].agentRef')).toBe(true);
+  });
+
   it('DEVOS-119: rejects a CONDITION node with no config.rule', () => {
     const issues = validateWorkflowGraph({
       name: 'Missing rule',

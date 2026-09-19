@@ -30,6 +30,16 @@ export interface WorkflowNode {
   retryPolicy?: Record<string, unknown>;
   timeoutSeconds?: number;
   agentRef?: string;
+  /**
+   * DEVOS-158: an alternative to `agentRef` for `AGENT_TASK` nodes — targets
+   * any project agent whose latest published version's role/capabilities
+   * match, instead of one literal key. `requiredCapabilities` is optional
+   * even when `requiredRole` is set (an absent/empty list means role match
+   * only). Resolved by `selectAgentForTask` (DEVOS-159) only when `agentRef`
+   * is absent — `agentRef`, when present, always wins unchanged.
+   */
+  requiredRole?: string;
+  requiredCapabilities?: string[];
   approvalType?: string;
 }
 

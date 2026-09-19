@@ -264,6 +264,25 @@ function buildScenario() {
     };
   }
 
+  // DEVOS-159: a task targeting a role/capability requirement instead of a
+  // literal agentRef.
+  function buildRoleTargetedTask(
+    requiredRole: string,
+    requiredCapabilities: string[] = [],
+  ): WorkflowTask {
+    return {
+      id: randomUUID() as WorkflowTask['id'],
+      workflowRunId: run.id,
+      taskKey: requiredRole,
+      taskType: 'AGENT_TASK',
+      status: 'RUNNING',
+      attempt: 1,
+      input: { requiredRole, requiredCapabilities },
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
   return {
     projectId,
     agents,
@@ -279,6 +298,7 @@ function buildScenario() {
     projects,
     knowledgeSources,
     buildTask,
+    buildRoleTargetedTask,
   };
 }
 
@@ -491,5 +511,147 @@ describe('routeAgentTask', () => {
     await expect(routeAgentTask(deps, scenario.buildTask(SEED_REVIEW_AGENT_KEY))).rejects.toThrow(
       'No CODE_CHANGE artifact found',
     );
+  });
+
+  it('DEVOS-159: routes a requiredRole-only task (no agentRef) to the matching handler', async () => {
+    const scenario = buildScenario();
+    let publishedArtifactType: string | undefined;
+
+    const deps: AgentArtifactConsumerTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agentRepository,
+      agentVersions: scenario.agentVersionRepository,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async (artifact) => {
+        publishedArtifactType = artifact.artifactType;
+      },
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+    };
+
+    const output = await routeAgentTask(deps, scenario.buildRoleTargetedTask('DISCOVERY'));
+
+    expect(publishedArtifactType).toBe('DISCOVERY_REPORT');
+    expect(output).toMatchObject({ status: 'SUCCEEDED', artifactType: 'DISCOVERY_REPORT' });
+  });
+
+  it('DEVOS-159: picks the lowest agent.key among multiple matching candidates', async () => {
+    const scenario = buildScenario();
+    // A second real DISCOVERY-role candidate with a key that sorts before
+    // the seeded one — proves selection, not "the only match wins by
+    // accident".
+    const secondAgent: Agent = {
+      id: randomUUID() as Agent['id'],
+      projectId: scenario.projectId,
+      key: `aaa-${SEED_DISCOVERY_AGENT_KEY}`,
+      name: 'Second discovery agent',
+      status: 'ACTIVE',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    scenario.agents.push(secondAgent);
+    scenario.versions.push({
+      id: randomUUID() as AgentVersion['id'],
+      agentId: secondAgent.id,
+      version: 1,
+      status: 'PUBLISHED',
+      configuration: {
+        role: 'DISCOVERY',
+        provider: 'fake',
+        modelRef: 'fake-model',
+        allowedCapabilities: [],
+      },
+      createdBy: 'alice',
+      createdAt: new Date(0).toISOString(),
+    });
+
+    let publishedArtifactType: string | undefined;
+    const deps: AgentArtifactConsumerTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agentRepository,
+      agentVersions: scenario.agentVersionRepository,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async (artifact) => {
+        publishedArtifactType = artifact.artifactType;
+      },
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+    };
+
+    // Both real candidates would resolve to the same DISCOVERY handler, so
+    // this proves selection ran (not a crash/ambiguity) rather than which
+    // literal agent won — DEVOS-159's own disclosed tie-break is unit-tested
+    // directly in packages/domain/tests/select-agent-for-task.test.ts.
+    await routeAgentTask(deps, scenario.buildRoleTargetedTask('DISCOVERY'));
+    expect(publishedArtifactType).toBe('DISCOVERY_REPORT');
+  });
+
+  it('DEVOS-159: throws clearly when no published agent matches the required role', async () => {
+    const scenario = buildScenario();
+    const deps: AgentArtifactConsumerTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agentRepository,
+      agentVersions: scenario.agentVersionRepository,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async () => {},
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+    };
+
+    await expect(
+      routeAgentTask(deps, scenario.buildRoleTargetedTask('NONEXISTENT_ROLE')),
+    ).rejects.toThrow('No agent handler registered for requiredRole "NONEXISTENT_ROLE"');
+  });
+
+  it('DEVOS-159: throws clearly when a candidate matches role but not every required capability', async () => {
+    const scenario = buildScenario();
+    const deps: AgentArtifactConsumerTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agentRepository,
+      agentVersions: scenario.agentVersionRepository,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async () => {},
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+    };
+
+    // The seeded DISCOVERY agent's allowedCapabilities is [] (buildScenario
+    // above), so requiring any real capability makes it an intentional
+    // non-match — proving the capability filter, not just the role filter.
+    await expect(
+      routeAgentTask(deps, scenario.buildRoleTargetedTask('DISCOVERY', ['repo-read'])),
+    ).rejects.toThrow('No agent handler registered for requiredRole "DISCOVERY"');
   });
 });

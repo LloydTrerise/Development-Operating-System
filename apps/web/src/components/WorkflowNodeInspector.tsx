@@ -101,24 +101,7 @@ export function WorkflowNodeInspector({
         />
 
         {node.type === 'AGENT_TASK' && (
-          <FormControl size="small">
-            <InputLabel id="inspector-agent-ref">Agent</InputLabel>
-            <Select
-              labelId="inspector-agent-ref"
-              label="Agent"
-              value={node.agentRef ?? ''}
-              onChange={(event) => onChange({ agentRef: event.target.value })}
-            >
-              <MenuItem value="">
-                <em>None</em>
-              </MenuItem>
-              {agentKeys.map((key) => (
-                <MenuItem key={key} value={key}>
-                  {key}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <AgentTaskTargetFields node={node} agentKeys={agentKeys} onChange={onChange} />
         )}
 
         {node.type === 'TOOL_TASK' && (
@@ -292,6 +275,107 @@ export function WorkflowNodeInspector({
         )}
       </Stack>
     </Paper>
+  );
+}
+
+type AgentTargetMode = 'specific' | 'role';
+
+interface AgentTaskTargetFieldsProps {
+  node: WorkflowNode;
+  agentKeys: string[];
+  onChange: (changes: Partial<WorkflowNode>) => void;
+}
+
+/**
+ * DEVOS-160: an AGENT_TASK node targets an agent one of two mutually
+ * exclusive ways (DEVOS-158) — a literal agentRef ("Specific agent") or a
+ * requiredRole/requiredCapabilities pair resolved at run time by DEVOS-159's
+ * real selection algorithm ("By role/capability"). Mode is inferred from
+ * which fields the node already has set (requiredRole present ⇒ role mode),
+ * defaulting to the existing "specific agent" behavior for every node
+ * authored before this task. Switching modes clears the other mode's
+ * fields, matching validateWorkflowGraph's own mutual-exclusivity rule
+ * (packages/domain/src/workflows/validation.ts).
+ */
+function AgentTaskTargetFields({ node, agentKeys, onChange }: AgentTaskTargetFieldsProps) {
+  const mode: AgentTargetMode =
+    node.requiredRole !== undefined && node.requiredRole.trim().length > 0 ? 'role' : 'specific';
+
+  function setMode(next: AgentTargetMode) {
+    if (next === 'specific') {
+      onChange({
+        agentRef: node.agentRef ?? '',
+        requiredRole: undefined,
+        requiredCapabilities: undefined,
+      });
+    } else {
+      onChange({ agentRef: undefined, requiredRole: node.requiredRole ?? '' });
+    }
+  }
+
+  return (
+    <Stack spacing={2}>
+      <FormControl size="small">
+        <InputLabel id="inspector-agent-target-mode">Target by</InputLabel>
+        <Select
+          labelId="inspector-agent-target-mode"
+          label="Target by"
+          value={mode}
+          onChange={(event) => setMode(event.target.value as AgentTargetMode)}
+        >
+          <MenuItem value="specific">Specific agent</MenuItem>
+          <MenuItem value="role">Role &amp; capabilities</MenuItem>
+        </Select>
+      </FormControl>
+
+      {mode === 'specific' && (
+        <FormControl size="small">
+          <InputLabel id="inspector-agent-ref">Agent</InputLabel>
+          <Select
+            labelId="inspector-agent-ref"
+            label="Agent"
+            value={node.agentRef ?? ''}
+            onChange={(event) => onChange({ agentRef: event.target.value })}
+          >
+            <MenuItem value="">
+              <em>None</em>
+            </MenuItem>
+            {agentKeys.map((key) => (
+              <MenuItem key={key} value={key}>
+                {key}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      )}
+
+      {mode === 'role' && (
+        <>
+          <TextField
+            label="Required role"
+            size="small"
+            placeholder="e.g. DEVELOPMENT"
+            value={node.requiredRole ?? ''}
+            onChange={(event) => onChange({ requiredRole: event.target.value })}
+          />
+          <TextField
+            label="Required capabilities (comma-separated, optional)"
+            size="small"
+            placeholder="e.g. repo-read, repo-write"
+            value={(node.requiredCapabilities ?? []).join(', ')}
+            onChange={(event) => {
+              const capabilities = event.target.value
+                .split(',')
+                .map((capability) => capability.trim())
+                .filter((capability) => capability.length > 0);
+              onChange({
+                requiredCapabilities: capabilities.length > 0 ? capabilities : undefined,
+              });
+            }}
+          />
+        </>
+      )}
+    </Stack>
   );
 }
 

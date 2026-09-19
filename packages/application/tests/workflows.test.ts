@@ -518,6 +518,54 @@ describe('workflow use cases', () => {
     expect(tasks[0]?.input).toMatchObject({ agentRef: 'discovery-agent' });
   });
 
+  it('DEVOS-159: folds requiredRole/requiredCapabilities into task input for a role-targeted node', async () => {
+    const ROLE_TARGETED_GRAPH = {
+      name: 'Role-targeted graph',
+      nodes: [
+        {
+          id: 'discovery',
+          type: 'AGENT_TASK',
+          requiredRole: 'DISCOVERY',
+          requiredCapabilities: ['repo-read'],
+        },
+      ],
+      edges: [],
+    };
+    const { definition } = await createWorkflowDefinition(deps, 'alice', projectId, {
+      key: 'role-targeted',
+      name: 'Role targeted',
+      definition: ROLE_TARGETED_GRAPH,
+    });
+    await publishWorkflowVersion(deps, 'alice', definition.id);
+
+    const workItem: WorkItem = {
+      id: randomUUID() as WorkItem['id'],
+      projectId,
+      title: 'Test item',
+      type: 'GENERAL',
+      status: 'OPEN',
+      priority: 'MEDIUM',
+      metadata: {},
+      createdBy: 'alice',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    await deps.workItems.create(workItem);
+
+    const run = await startWorkflowRunFromActiveVersion(deps, 'alice', definition.id, {
+      workItemId: workItem.id,
+      inputs: {},
+      idempotencyKey: 'key-role-targeted',
+    });
+
+    const tasks = await deps.workflowTasks.listForRun(run.id);
+    expect(tasks[0]?.input).toMatchObject({
+      requiredRole: 'DISCOVERY',
+      requiredCapabilities: ['repo-read'],
+    });
+    expect(tasks[0]?.input.agentRef).toBeUndefined();
+  });
+
   it("DEVOS-108-followup: folds each node's real upstream dependencies (from its own declared edges) into its task input, and omits the field for a node with none", async () => {
     const CHAIN_GRAPH = {
       name: 'Chained',
