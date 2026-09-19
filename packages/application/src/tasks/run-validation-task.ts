@@ -5,6 +5,7 @@ import { invokeTool } from '@devos/tools';
 import { createCommandProviderAdapters } from './command-provider-adapters.js';
 import type { ToolTaskHandlerDeps } from './deps.js';
 import { resolveAuthenticatedCloneUrl } from './github-context.js';
+import { pendingApprovalWaitUntil } from './tool-invocation-outcome.js';
 
 const CONTENT_TYPE = 'application/json';
 
@@ -131,8 +132,11 @@ export async function runValidationTask(
       target: { repositoryPath: workspace.path },
       parameters: { command: buildCommand },
       idempotencyKey: `${task.id}:build-run`,
+      workflowVersionId: run.workflowVersionId,
       ...(correlationId !== undefined ? { correlationId } : {}),
     });
+    const buildWaitUntil = pendingApprovalWaitUntil(buildInvocation);
+    if (buildWaitUntil) return { waitUntil: buildWaitUntil };
     if (buildInvocation.status !== 'SUCCEEDED') {
       throw new Error(
         `Build invocation failed for task ${task.id}: ${buildInvocation.errorCode ?? 'unknown error'}`,
@@ -144,8 +148,11 @@ export async function runValidationTask(
       target: { repositoryPath: workspace.path },
       parameters: { command: testCommand },
       idempotencyKey: `${task.id}:test-run`,
+      workflowVersionId: run.workflowVersionId,
       ...(correlationId !== undefined ? { correlationId } : {}),
     });
+    const testWaitUntil = pendingApprovalWaitUntil(testInvocation);
+    if (testWaitUntil) return { waitUntil: testWaitUntil };
     if (testInvocation.status !== 'SUCCEEDED') {
       throw new Error(
         `Test invocation failed for task ${task.id}: ${testInvocation.errorCode ?? 'unknown error'}`,

@@ -20,6 +20,7 @@ import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import { getHealth } from './api-client.js';
 import { ApprovalsPage } from './pages/ApprovalsPage.js';
+import { CostPage } from './pages/CostPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { GovernancePage } from './pages/GovernancePage.js';
 import { OrganisationsPage } from './pages/OrganisationsPage.js';
@@ -49,6 +50,7 @@ const NAV_ITEMS = [
   { to: '/runs', label: 'Runs' },
   { to: '/approvals', label: 'Approvals' },
   { to: '/governance', label: 'Governance' },
+  { to: '/cost', label: 'Cost' },
 ] as const;
 
 function OrganisationSelector() {
@@ -299,6 +301,7 @@ export function App() {
           <Route path="/runs" element={<RunsPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/governance" element={<GovernancePage />} />
+          <Route path="/cost" element={<CostPage />} />
         </Routes>
       </Box>
     </Box>

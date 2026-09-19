@@ -57,5 +57,16 @@ export function createAuditRecordRepository(db: QueryExecutor): AuditRecordRepos
         .execute();
       return rows.map(toDomain);
     },
+
+    async listForOrganisation(organisationId, limit = 100) {
+      const rows = await db
+        .selectFrom('audit_records')
+        .selectAll()
+        .where('organisation_id', '=', organisationId)
+        .orderBy('created_at', 'desc')
+        .limit(limit)
+        .execute();
+      return rows.map(toDomain);
+    },
   };
 }

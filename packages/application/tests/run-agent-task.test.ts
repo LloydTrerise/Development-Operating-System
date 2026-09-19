@@ -19,6 +19,8 @@ import type {
   AuditRecordRepository,
   ContextManifest,
   KnowledgeSourceRepository,
+  Organisation,
+  OrganisationRepository,
   Project,
   ProjectId,
   ProjectRepository,
@@ -641,6 +643,7 @@ describe('runAgentTask', () => {
           auditRecords.push(record);
         },
         listForProject: async () => auditRecords,
+        listForOrganisation: async () => auditRecords,
       };
       return { modelAdapter, projects, auditRecordRepository, auditRecords };
     }
@@ -680,17 +683,158 @@ describe('runAgentTask', () => {
 
       await runAgentTask(deps, scenario.task);
 
-      expect(auditRecords).toHaveLength(1);
-      expect(auditRecords[0]).toMatchObject({
+      // DEVOS-154: crossing straight from 1x to 2x in one completion also
+      // crosses the new 80%-of-budget warning tier (1.2x) along the way —
+      // both real tiers fire, not just the pre-existing hard 100% one.
+      expect(auditRecords).toHaveLength(2);
+      const byAction = Object.fromEntries(auditRecords.map((record) => [record.action, record]));
+      expect(byAction['project.budget_warning']).toMatchObject({
         organisationId: scenario.project.organisationId,
         projectId: scenario.projectId,
         actorType: 'SYSTEM',
-        action: 'project.budget_exceeded',
         targetType: 'Project',
         targetId: scenario.projectId,
         outcome: 'FAILURE',
-        metadata: { budgetUsd, accumulatedCostUsd: totalCostUsd },
+        metadata: { thresholdUsd: budgetUsd * 0.8, accumulatedCostUsd: totalCostUsd },
       });
+      expect(byAction['project.budget_exceeded']).toMatchObject({
+        organisationId: scenario.project.organisationId,
+        projectId: scenario.projectId,
+        actorType: 'SYSTEM',
+        targetType: 'Project',
+        targetId: scenario.projectId,
+        outcome: 'FAILURE',
+        metadata: { thresholdUsd: budgetUsd, accumulatedCostUsd: totalCostUsd },
+      });
+    });
+
+    it('DEVOS-154: fires only the warning tier when accumulated cost crosses 80% but stays under 100% of budget', async () => {
+      const scenario = buildScenario();
+      const budgetUsd = PER_EXECUTION_COST_USD * 10;
+      // Pre-completion 7x, post-completion 9x: crosses the 8x warning tier,
+      // stays under the 10x hard tier.
+      const totalCostUsd = PER_EXECUTION_COST_USD * 9;
+      const { modelAdapter, projects, auditRecordRepository, auditRecords } = withUsage(
+        scenario,
+        budgetUsd,
+      );
+      const agentExecutions: AgentExecutionRepository = {
+        ...scenario.agentExecutions,
+        sumEstimatedCostUsdForProject: async () => totalCostUsd,
+      };
+
+      const deps: AgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        knowledgeSources: scenario.knowledgeSources,
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects,
+        auditRecords: auditRecordRepository,
+      };
+
+      await runAgentTask(deps, scenario.task);
+
+      expect(auditRecords).toHaveLength(1);
+      expect(auditRecords[0]).toMatchObject({
+        action: 'project.budget_warning',
+        metadata: { thresholdUsd: budgetUsd * 0.8, accumulatedCostUsd: totalCostUsd },
+      });
+    });
+
+    it('DEVOS-155: fires a real organisation-level alert independent of the project having no configured budget', async () => {
+      const scenario = buildScenario();
+      const { modelAdapter } = withUsage(scenario, PER_EXECUTION_COST_USD * 1000);
+      const projectsWithoutBudget: ProjectRepository = {
+        getById: async (id) => (id === scenario.projectId ? scenario.project : null),
+        listForOrganisation: async () => [],
+        create: async () => {},
+        update: async () => {},
+      };
+      const organisationBudgetUsd = PER_EXECUTION_COST_USD * 1.5;
+      const organisation: Organisation = {
+        id: scenario.project.organisationId,
+        name: 'Test Organisation',
+        slug: 'test-organisation',
+        status: 'ACTIVE',
+        budgetUsd: organisationBudgetUsd,
+        createdAt: scenario.project.createdAt,
+        updatedAt: scenario.project.createdAt,
+      };
+      const organisations: OrganisationRepository = {
+        getById: async (id) => (id === organisation.id ? organisation : null),
+        list: async () => [organisation],
+        create: async () => {},
+        update: async () => {},
+      };
+      const auditRecords: AuditRecord[] = [];
+      const auditRecordRepository: AuditRecordRepository = {
+        create: async (record) => {
+          auditRecords.push(record);
+        },
+        listForProject: async () => auditRecords,
+        listForOrganisation: async () => auditRecords,
+      };
+      const totalOrganisationCostUsd = PER_EXECUTION_COST_USD * 2;
+      const agentExecutions: AgentExecutionRepository = {
+        ...scenario.agentExecutions,
+        // No project-level budget configured; the organisation-level
+        // total crosses its own, separate threshold.
+        sumEstimatedCostUsdForOrganisation: async () => totalOrganisationCostUsd,
+      };
+
+      const deps: AgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        knowledgeSources: scenario.knowledgeSources,
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects: projectsWithoutBudget,
+        organisations,
+        auditRecords: auditRecordRepository,
+      };
+
+      await runAgentTask(deps, scenario.task);
+
+      expect(auditRecords).toHaveLength(2);
+      const byAction = Object.fromEntries(auditRecords.map((record) => [record.action, record]));
+      expect(byAction['organisation.budget_warning']).toMatchObject({
+        organisationId: organisation.id,
+        actorType: 'SYSTEM',
+        targetType: 'Organisation',
+        targetId: organisation.id,
+        outcome: 'FAILURE',
+        metadata: {
+          thresholdUsd: organisationBudgetUsd * 0.8,
+          accumulatedCostUsd: totalOrganisationCostUsd,
+        },
+      });
+      expect(byAction['organisation.budget_exceeded']).toMatchObject({
+        organisationId: organisation.id,
+        actorType: 'SYSTEM',
+        targetType: 'Organisation',
+        targetId: organisation.id,
+        outcome: 'FAILURE',
+        metadata: {
+          thresholdUsd: organisationBudgetUsd,
+          accumulatedCostUsd: totalOrganisationCostUsd,
+        },
+      });
+      expect(byAction['organisation.budget_warning'].projectId).toBeUndefined();
     });
 
     it('does not alert while accumulated cost stays under the configured budget', async () => {

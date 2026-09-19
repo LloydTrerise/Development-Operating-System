@@ -1,9 +1,12 @@
-import type { PolicyId, ProjectId } from '@devos/contracts';
+import type { OrganisationId, PolicyId, ProjectId } from '@devos/contracts';
 import {
+  createOrganisationPolicy,
   createPolicy,
   getPolicyForPrincipal,
+  listPoliciesForOrganisation,
   listPoliciesForProject,
   publishPolicy,
+  simulatePolicy,
   type PolicyUseCaseDeps,
 } from '@devos/application';
 import { parseCreatePolicyBody, toPolicyDto } from '../dto/policy.js';
@@ -32,6 +35,37 @@ export function createPolicyRoutes(prefix: string, deps: PolicyUseCaseDeps): Rou
         return toPolicyDto(policy);
       },
     },
+    // DEVOS-139: the organisation-scoped mirror of the two routes above.
+    {
+      method: 'GET',
+      pattern: `${prefix}/organisations/:organisationId/policies`,
+      protected: true,
+      handler: async ({ principal, params }) => {
+        const user = requirePrincipal(principal);
+        const policies = await listPoliciesForOrganisation(
+          deps,
+          user.id,
+          params.organisationId as OrganisationId,
+        );
+        return policies.map(toPolicyDto);
+      },
+    },
+    {
+      method: 'POST',
+      pattern: `${prefix}/organisations/:organisationId/policies`,
+      protected: true,
+      handler: async ({ principal, params, body }) => {
+        const user = requirePrincipal(principal);
+        const input = parseCreatePolicyBody(body);
+        const policy = await createOrganisationPolicy(
+          deps,
+          user.id,
+          params.organisationId as OrganisationId,
+          input,
+        );
+        return toPolicyDto(policy);
+      },
+    },
     {
       method: 'GET',
       pattern: `${prefix}/policies/:policyId`,
@@ -50,6 +84,16 @@ export function createPolicyRoutes(prefix: string, deps: PolicyUseCaseDeps): Rou
         const user = requirePrincipal(principal);
         const policy = await publishPolicy(deps, user.id, params.policyId as PolicyId);
         return toPolicyDto(policy);
+      },
+    },
+    // DEVOS-141: policy simulation against real historical requests.
+    {
+      method: 'GET',
+      pattern: `${prefix}/policies/:policyId/simulate`,
+      protected: true,
+      handler: async ({ principal, params }) => {
+        const user = requirePrincipal(principal);
+        return simulatePolicy(deps, user.id, params.policyId as PolicyId);
       },
     },
   ];

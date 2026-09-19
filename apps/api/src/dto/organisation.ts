@@ -7,6 +7,7 @@ export function toOrganisationDto(organisation: Organisation) {
     name: organisation.name,
     slug: organisation.slug,
     status: organisation.status,
+    budgetUsd: organisation.budgetUsd,
     createdAt: organisation.createdAt,
     updatedAt: organisation.updatedAt,
   };
@@ -40,10 +41,11 @@ export function parseCreateOrganisationBody(body: unknown): CreateOrganisationBo
 export interface UpdateOrganisationBody {
   name?: string;
   status?: string;
+  budgetUsd?: number;
 }
 
 export function parseUpdateOrganisationBody(body: unknown): UpdateOrganisationBody {
-  const { name, status } = asRecord(body);
+  const { name, status, budgetUsd } = asRecord(body);
 
   if (name !== undefined && typeof name !== 'string') {
     throw new BadRequestError('name must be a string.');
@@ -51,9 +53,13 @@ export function parseUpdateOrganisationBody(body: unknown): UpdateOrganisationBo
   if (status !== undefined && typeof status !== 'string') {
     throw new BadRequestError('status must be a string.');
   }
+  if (budgetUsd !== undefined && (typeof budgetUsd !== 'number' || budgetUsd < 0)) {
+    throw new BadRequestError('budgetUsd must be a non-negative number.');
+  }
 
   return {
     ...(name !== undefined ? { name } : {}),
     ...(status !== undefined ? { status } : {}),
+    ...(budgetUsd !== undefined ? { budgetUsd } : {}),
   };
 }

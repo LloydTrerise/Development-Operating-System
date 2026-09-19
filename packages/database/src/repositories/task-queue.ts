@@ -105,6 +105,15 @@ async function requestApproval(
       }),
       requested_at: now,
       decided_at: null,
+      required_approvers: 1,
+      enforce_separation_of_duties: false,
+      expires_at: null,
+      required_rejections: 1,
+      risk_class: null,
+      agent_id: null,
+      agent_version: null,
+      workflow_id: null,
+      workflow_version: null,
     })
     .execute();
 

@@ -24,4 +24,27 @@ describe('estimateCostUsd', () => {
 
     expect(large).toBeCloseTo(small * 10, 10);
   });
+
+  it('uses the default rate when no modelReference is given (DEVOS-149)', () => {
+    const usage = { promptTokens: 1000, candidatesTokens: 1000, totalTokens: 2000 };
+    expect(estimateCostUsd(usage, undefined)).toBeCloseTo(estimateCostUsd(usage), 10);
+  });
+
+  it('uses the default rate for gemini-3.6-flash, unchanged from before DEVOS-149', () => {
+    const usage = { promptTokens: 1000, candidatesTokens: 1000, totalTokens: 2000 };
+    expect(estimateCostUsd(usage, 'gemini-3.6-flash')).toBeCloseTo(estimateCostUsd(usage), 10);
+  });
+
+  it('uses a distinct, higher rate for gemini-3.6-pro', () => {
+    const usage = { promptTokens: 1000, candidatesTokens: 1000, totalTokens: 2000 };
+    const flashCost = estimateCostUsd(usage, 'gemini-3.6-flash');
+    const proCost = estimateCostUsd(usage, 'gemini-3.6-pro');
+    expect(proCost).toBeGreaterThan(flashCost);
+    expect(proCost).toBeCloseTo(0.00125 + 0.005, 10);
+  });
+
+  it('falls back to the default rate for an unrecognised modelReference', () => {
+    const usage = { promptTokens: 1000, candidatesTokens: 1000, totalTokens: 2000 };
+    expect(estimateCostUsd(usage, 'some-unknown-model')).toBeCloseTo(estimateCostUsd(usage), 10);
+  });
 });

@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import type { OrganisationId } from '@devos/contracts';
 import type {
   Approval,
   ApprovalRepository,
   ArtifactVersion,
   ArtifactVersionRepository,
+  Policy,
+  PolicyRepository,
+  Project,
+  ProjectRepository,
   WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
@@ -55,6 +60,8 @@ function makeDeps(
     siblingTasks?: WorkflowTask[];
     artifactVersions?: ArtifactVersion[];
     approvals?: Approval[];
+    organisationId?: OrganisationId;
+    organisationPolicies?: Policy[];
   } = {},
 ): ApprovalTaskHandlerDeps & { createdApprovals: Approval[] } {
   const siblingTasks = options.siblingTasks ?? [];
@@ -128,7 +135,44 @@ function makeDeps(
       createdApprovals.push(approval);
     },
     decide: async () => {},
+    recordDecision: async () => {},
+    listDecisionsForApproval: async () => [],
+    expirePending: async () => 0,
   };
+
+  const projects: ProjectRepository | undefined = options.organisationId
+    ? {
+        getById: async (id) =>
+          id === run.projectId
+            ? ({
+                id: run.projectId,
+                organisationId: options.organisationId,
+                projectTypeId: randomUUID() as Project['projectTypeId'],
+                name: 'Test Project',
+                slug: 'test-project',
+                status: 'ACTIVE',
+                createdAt: now,
+                updatedAt: now,
+              } as Project)
+            : null,
+        listForOrganisation: async () => [],
+        create: async () => {},
+        update: async () => {},
+      }
+    : undefined;
+
+  const policies: PolicyRepository | undefined = options.organisationPolicies
+    ? {
+        getById: async () => null,
+        getByProjectAndKeyAndVersion: async () => null,
+        getLatestForProjectAndKey: async () => null,
+        listForProject: async () => [],
+        getLatestForOrganisationAndKey: async () => null,
+        listForOrganisation: async () => options.organisationPolicies ?? [],
+        create: async () => {},
+        publish: async () => {},
+      }
+    : undefined;
 
   return {
     workflowRuns,
@@ -136,11 +180,132 @@ function makeDeps(
     workflowTasks,
     artifactVersions: artifactVersionRepo,
     approvals: approvalRepo,
+    ...(projects ? { projects } : {}),
+    ...(policies ? { policies } : {}),
     createdApprovals,
   };
 }
 
 describe('runApprovalTask', () => {
+  describe('Gap revisit: a created approval carries real ABAC context', () => {
+    it('populates workflowId/workflowVersion from the run\'s own real workflow version on every created approval', async () => {
+      const run = makeRun();
+      const task = makeTask(run, 'gate');
+      const deps = makeDeps(run, undefined);
+
+      await runApprovalTask(deps, task);
+
+      const created = deps.createdApprovals[0];
+      expect(created?.workflowVersion).toBe(1);
+      expect(typeof created?.workflowId).toBe('string');
+      expect(created?.riskClass).toBeUndefined();
+    });
+
+    it('populates riskClass on the created approval when the node configures one', async () => {
+      const run = makeRun();
+      const task = makeTask(run, 'gate');
+      const deps = makeDeps(run, { riskClass: 'R2' });
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.createdApprovals[0]?.riskClass).toBe('R2');
+    });
+  });
+
+  describe('DEVOS-146: risk-tiered approval routing', () => {
+    it('uses a matching organisation policy rule to set requiredApprovers/enforceSeparationOfDuties', async () => {
+      const run = makeRun();
+      const organisationId = randomUUID() as OrganisationId;
+      const task = makeTask(run, 'gate');
+      const policy: Policy = {
+        id: randomUUID() as Policy['id'],
+        organisationId,
+        key: 'risk-tiered-approvals',
+        version: 1,
+        status: 'PUBLISHED',
+        definition: {
+          rules: [
+            {
+              action: 'remediation-approval:gate',
+              effect: 'REQUIRE_APPROVAL',
+              condition: { riskClass: 'R3' },
+              requiredApprovers: 2,
+              enforceSeparationOfDuties: true,
+            },
+          ],
+        },
+        createdBy: 'alice',
+        publishedAt: now,
+        createdAt: now,
+      };
+      const deps = makeDeps(
+        run,
+        { approvalType: 'remediation-approval', riskClass: 'R3' },
+        { organisationId, organisationPolicies: [policy] },
+      );
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.createdApprovals[0]).toMatchObject({
+        requiredApprovers: 2,
+        enforceSeparationOfDuties: true,
+      });
+    });
+
+    it('uses the default requiredApprovers=1/enforceSeparationOfDuties=false when no policy rule matches the riskClass', async () => {
+      const run = makeRun();
+      const organisationId = randomUUID() as OrganisationId;
+      const task = makeTask(run, 'gate');
+      const policy: Policy = {
+        id: randomUUID() as Policy['id'],
+        organisationId,
+        key: 'risk-tiered-approvals',
+        version: 1,
+        status: 'PUBLISHED',
+        definition: {
+          rules: [
+            {
+              action: 'remediation-approval:gate',
+              effect: 'REQUIRE_APPROVAL',
+              condition: { riskClass: 'R3' },
+              requiredApprovers: 2,
+              enforceSeparationOfDuties: true,
+            },
+          ],
+        },
+        createdBy: 'alice',
+        publishedAt: now,
+        createdAt: now,
+      };
+      const deps = makeDeps(
+        run,
+        { approvalType: 'remediation-approval', riskClass: 'R1' },
+        { organisationId, organisationPolicies: [policy] },
+      );
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.createdApprovals[0]).toMatchObject({
+        requiredApprovers: 1,
+        enforceSeparationOfDuties: false,
+      });
+    });
+
+    it('uses the defaults when the node has no riskClass configured at all', async () => {
+      const run = makeRun();
+      const organisationId = randomUUID() as OrganisationId;
+      const task = makeTask(run, 'gate');
+      const deps = makeDeps(run, { approvalType: 'remediation-approval' }, { organisationId });
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.createdApprovals[0]).toMatchObject({
+        requiredApprovers: 1,
+        enforceSeparationOfDuties: false,
+      });
+    });
+  });
+
   it('creates a pending approval and reports waitUntil on its first call', async () => {
     const run = makeRun();
     const task = makeTask(run, 'gate');
@@ -213,6 +378,8 @@ describe('runApprovalTask', () => {
       requestedBy: 'devos-worker',
       evidenceReference: { artifactVersionIds: [], scopeHash: 'hash' },
       requestedAt: now,
+      requiredApprovers: 1,
+      enforceSeparationOfDuties: false,
     };
     const task = makeTask(run, 'gate');
     const deps = makeDeps(run, undefined, { approvals: [pending] });
@@ -238,6 +405,8 @@ describe('runApprovalTask', () => {
       evidenceReference: { artifactVersionIds: [], scopeHash: 'hash' },
       requestedAt: now,
       decidedAt: now,
+      requiredApprovers: 1,
+      enforceSeparationOfDuties: false,
     };
     const task = makeTask(run, 'gate');
     const deps = makeDeps(run, undefined, { approvals: [approved] });
@@ -266,6 +435,8 @@ describe('runApprovalTask', () => {
       evidenceReference: { artifactVersionIds: [], scopeHash: 'hash' },
       requestedAt: now,
       decidedAt: now,
+      requiredApprovers: 1,
+      enforceSeparationOfDuties: false,
     };
     const task = makeTask(run, 'gate');
     const deps = makeDeps(run, undefined, { approvals: [rejected] });

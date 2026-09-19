@@ -129,6 +129,8 @@ function createInMemoryDeps() {
       auditRecordsStore.push(record);
     },
     listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
+    listForOrganisation: async (organisationId) =>
+      auditRecordsStore.filter((r) => r.organisationId === organisationId),
   };
 
   return {

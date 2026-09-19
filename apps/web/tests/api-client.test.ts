@@ -2,16 +2,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEV_PRINCIPAL_ID,
   createOrganisation,
+  createOrganisationPolicy,
+  createPolicy,
   createProjectTypeAgent,
   createProjectTypeWorkflow,
   getArtifactVersionById,
   getHealth,
   getOrganisation,
+  getOrganisationCostReport,
+  getProjectCostSummary,
   listAuditRecordsForProject,
+  listAuditRecordsForOrganisation,
   listOrganisations,
+  listPoliciesForOrganisation,
   listPoliciesForProject,
   listProjectTypes,
   listProjects,
+  publishPolicy,
+  simulatePolicy,
   startRun,
   updateOrganisation,
   updateProjectType,
@@ -128,6 +136,163 @@ describe('api client', () => {
     expect(result.ok).toBe(true);
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/projects/project-1/policies');
+  });
+
+  it('DEVOS-140: creates a project-scoped policy by posting to the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(201, {
+        data: { id: 'policy-2', key: 'my-policy', version: 1, status: 'DRAFT' },
+        meta: { requestId: 'req-5a' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createPolicy('project-1', {
+      key: 'my-policy',
+      definition: { rules: [{ action: 'deploy', effect: 'DENY' }] },
+    });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/policies');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      key: 'my-policy',
+      definition: { rules: [{ action: 'deploy', effect: 'DENY' }] },
+    });
+  });
+
+  it('DEVOS-139/140: lists and creates organisation-scoped policies at the real routes', async () => {
+    const listFetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'org-policy-1', key: 'org-lockdown', version: 1, status: 'PUBLISHED' }],
+        meta: { requestId: 'req-5b' },
+      }),
+    );
+    vi.stubGlobal('fetch', listFetchMock);
+
+    const listResult = await listPoliciesForOrganisation('org-1');
+    expect(listResult.ok).toBe(true);
+    const [listUrl] = listFetchMock.mock.calls[0] as [string, RequestInit];
+    expect(listUrl).toContain('/api/v1/organisations/org-1/policies');
+
+    const createFetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(201, {
+        data: { id: 'org-policy-2', key: 'org-policy', version: 1, status: 'DRAFT' },
+        meta: { requestId: 'req-5c' },
+      }),
+    );
+    vi.stubGlobal('fetch', createFetchMock);
+
+    const createResult = await createOrganisationPolicy('org-1', {
+      key: 'org-policy',
+      definition: { rules: [] },
+    });
+    expect(createResult.ok).toBe(true);
+    const [createUrl, createInit] = createFetchMock.mock.calls[0] as [string, RequestInit];
+    expect(createUrl).toContain('/api/v1/organisations/org-1/policies');
+    expect(createInit.method).toBe('POST');
+  });
+
+  it('DEVOS-140: publishes a policy by posting to the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { id: 'policy-2', key: 'my-policy', version: 1, status: 'PUBLISHED' },
+        meta: { requestId: 'req-5d' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await publishPolicy('policy-2');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/policies/policy-2/publish');
+    expect(init.method).toBe('POST');
+  });
+
+  it('DEVOS-141: simulates a policy against real historical requests at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [
+          {
+            auditRecordId: 'audit-1',
+            action: 'deploy',
+            actualOutcome: 'SUCCESS',
+            decision: { decision: 'DENY', reason: 'Matched rule for action "deploy".' },
+          },
+        ],
+        meta: { requestId: 'req-5e' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await simulatePolicy('policy-2');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/policies/policy-2/simulate');
+  });
+
+  it('DEVOS-147: lists audit records for an organisation at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'audit-1', action: 'policy.published', outcome: 'SUCCESS' }],
+        meta: { requestId: 'req-5f' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listAuditRecordsForOrganisation('org-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/audit');
+  });
+
+  it('DEVOS-151: gets a project cost summary at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          projectId: 'project-1',
+          totalUsd: 1.5,
+          breakdownByRole: [{ key: 'DEVELOPER', totalUsd: 1.5 }],
+          breakdownByWorkflow: [],
+          breakdownByWorkItem: [],
+        },
+        meta: { requestId: 'req-cost-1' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getProjectCostSummary('project-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/cost');
+  });
+
+  it('DEVOS-151: gets an organisation cost report at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          organisationId: 'org-1',
+          totalUsd: 4.0,
+          projectCount: 2,
+          breakdownByRole: [{ key: 'DEVELOPER', totalUsd: 4.0 }],
+          breakdownByWorkflow: [],
+          breakdownByWorkItem: [],
+        },
+        meta: { requestId: 'req-cost-2' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getOrganisationCostReport('org-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/cost-report');
   });
 
   it('DEVOS-090: lists audit records for a project at the real route', async () => {

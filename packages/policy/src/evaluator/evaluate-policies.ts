@@ -35,6 +35,27 @@ function matchesCondition(rule: PolicyRule, request: PolicyEvaluationRequest): b
   ) {
     return false;
   }
+  if (rule.condition.agentId !== undefined && rule.condition.agentId !== request.agentId) {
+    return false;
+  }
+  if (
+    rule.condition.agentVersion !== undefined &&
+    rule.condition.agentVersion !== request.agentVersion
+  ) {
+    return false;
+  }
+  if (rule.condition.workflowId !== undefined && rule.condition.workflowId !== request.workflowId) {
+    return false;
+  }
+  if (
+    rule.condition.workflowVersion !== undefined &&
+    rule.condition.workflowVersion !== request.workflowVersion
+  ) {
+    return false;
+  }
+  if (rule.condition.riskClass !== undefined && rule.condition.riskClass !== request.riskClass) {
+    return false;
+  }
   return true;
 }
 

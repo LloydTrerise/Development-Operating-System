@@ -92,6 +92,8 @@ function createInMemoryAuditRecordRepository(): AuditRecordRepository {
       store.push(record);
     },
     listForProject: async (projectId) => store.filter((r) => r.projectId === projectId),
+    listForOrganisation: async (organisationId) =>
+      store.filter((r) => r.organisationId === organisationId),
   };
 }
 
@@ -614,7 +616,10 @@ function createInMemoryReleaseReadinessDeps(
 // tenant-isolation coverage at the API layer at all (confirmed by grep
 // before this task) — these four helpers plus their tests below close that
 // gap, following the exact in-memory-fake pattern every helper above uses.
-function createInMemoryPolicyDeps(projectDeps: ProjectUseCaseDeps): PolicyUseCaseDeps {
+function createInMemoryPolicyDeps(
+  projectDeps: ProjectUseCaseDeps,
+  organisations: OrganisationRepository = createInMemoryOrganisationDeps(projectDeps).organisations,
+): PolicyUseCaseDeps {
   const policiesStore = new Map<string, Policy>();
 
   const policies: PolicyRepository = {
@@ -629,6 +634,16 @@ function createInMemoryPolicyDeps(projectDeps: ProjectUseCaseDeps): PolicyUseCas
         .sort((a, b) => b.version - a.version)[0] ?? null,
     listForProject: async (projectId) =>
       [...policiesStore.values()].filter((p) => p.projectId === projectId),
+    getLatestForOrganisationAndKey: async (organisationId, key) =>
+      [...policiesStore.values()]
+        .filter(
+          (p) => p.organisationId === organisationId && p.projectId === undefined && p.key === key,
+        )
+        .sort((a, b) => b.version - a.version)[0] ?? null,
+    listForOrganisation: async (organisationId) =>
+      [...policiesStore.values()].filter(
+        (p) => p.organisationId === organisationId && p.projectId === undefined,
+      ),
     create: async (policy) => {
       policiesStore.set(policy.id, policy);
     },
@@ -641,6 +656,7 @@ function createInMemoryPolicyDeps(projectDeps: ProjectUseCaseDeps): PolicyUseCas
 
   return {
     projects: projectDeps.projects,
+    organisations,
     memberships: projectDeps.memberships,
     policies,
     auditRecords: projectDeps.auditRecords,
@@ -669,18 +685,20 @@ function createInMemoryKnowledgeDeps(projectDeps: ProjectUseCaseDeps): Knowledge
   };
 }
 
-function createInMemoryAuditDeps(projectDeps: ProjectUseCaseDeps): AuditUseCaseDeps {
-  const recordsStore = new Map<string, AuditRecord>();
-
-  const auditRecords: AuditRecordRepository = {
-    create: async (record) => {
-      recordsStore.set(record.id, record);
-    },
-    listForProject: async (projectId, limit) =>
-      [...recordsStore.values()].filter((r) => r.projectId === projectId).slice(0, limit),
+function createInMemoryAuditDeps(
+  projectDeps: ProjectUseCaseDeps,
+  organisations: OrganisationRepository = createInMemoryOrganisationDeps(projectDeps).organisations,
+): AuditUseCaseDeps {
+  // DEVOS-147: reuses `projectDeps.auditRecords` (the same repository every
+  // other real write path — e.g. `publishPolicy` — already writes into),
+  // rather than a second, disconnected store no real write would ever
+  // reach.
+  return {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    auditRecords: projectDeps.auditRecords,
+    organisations,
   };
-
-  return { projects: projectDeps.projects, memberships: projectDeps.memberships, auditRecords };
 }
 
 function createInMemoryApprovalDeps(
@@ -717,6 +735,9 @@ function createInMemoryApprovalDeps(
         decidedAt,
       });
     },
+    recordDecision: async () => {},
+    listDecisionsForApproval: async () => [],
+    expirePending: async () => 0,
   };
 
   return {
@@ -1132,7 +1153,12 @@ describe('workflow routes', () => {
     const projectDeps = createInMemoryProjectDeps();
     const workItemDeps = createInMemoryWorkItemDeps(projectDeps);
     const workflowDeps = createInMemoryWorkflowDeps(projectDeps, workItemDeps);
-    const started = await startServer({ projectDeps, workItemDeps, workflowDeps, listRunsForDefinition: workflowDeps.listRunsForDefinition });
+    const started = await startServer({
+      projectDeps,
+      workItemDeps,
+      workflowDeps,
+      listRunsForDefinition: workflowDeps.listRunsForDefinition,
+    });
     server = started.server;
     baseUrl = started.baseUrl;
 
@@ -1277,7 +1303,11 @@ describe('workflow routes', () => {
     const createResponse = await authed(`/api/v1/projects/${projectId}/workflows`, 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ key: 'library-listed', name: 'Library Listed', definition: validGraph }),
+      body: JSON.stringify({
+        key: 'library-listed',
+        name: 'Library Listed',
+        definition: validGraph,
+      }),
     });
     const workflowId = (await createResponse.json()).data.id;
 
@@ -1449,7 +1479,12 @@ describe('workflow run routes', () => {
     const projectDeps = createInMemoryProjectDeps();
     const workItemDeps = createInMemoryWorkItemDeps(projectDeps);
     const workflowDeps = createInMemoryWorkflowDeps(projectDeps, workItemDeps);
-    const started = await startServer({ projectDeps, workItemDeps, workflowDeps, listRunsForDefinition: workflowDeps.listRunsForDefinition });
+    const started = await startServer({
+      projectDeps,
+      workItemDeps,
+      workflowDeps,
+      listRunsForDefinition: workflowDeps.listRunsForDefinition,
+    });
     server = started.server;
     baseUrl = started.baseUrl;
 
@@ -2525,6 +2560,108 @@ describe('organisation routes', () => {
   });
 });
 
+describe('DEVOS-139: organisation-scoped policy routes', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const organisationDeps = createInMemoryOrganisationDeps(projectDeps);
+    const policyDeps = createInMemoryPolicyDeps(projectDeps, organisationDeps.organisations);
+    const started = await startServer({ projectDeps, organisationDeps, policyDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('creates, lists, and publishes an organisation-scoped policy', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Policy Org', slug: 'policy-org' }),
+    });
+    const organisation = (await orgResponse.json()).data;
+
+    const createResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/policies`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: 'org-lockdown', definition: { rules: [] } }),
+      },
+    );
+    expect(createResponse.status).toBe(200);
+    const policy = (await createResponse.json()).data;
+    expect(policy.organisationId).toBe(organisation.id);
+    expect(policy.projectId).toBeUndefined();
+    expect(policy.status).toBe('DRAFT');
+
+    const listResponse = await authed(`/api/v1/organisations/${organisation.id}/policies`, 'alice');
+    const listed = (await listResponse.json()).data;
+    expect(listed).toHaveLength(1);
+    expect(listed[0].id).toBe(policy.id);
+
+    const publishResponse = await authed(`/api/v1/policies/${policy.id}/publish`, 'alice', {
+      method: 'POST',
+    });
+    expect(publishResponse.status).toBe(200);
+    expect((await publishResponse.json()).data.status).toBe('PUBLISHED');
+  });
+
+  it('denies a non-member from listing, creating, or publishing organisation policies', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Isolated Org', slug: 'isolated-org' }),
+    });
+    const organisation = (await orgResponse.json()).data;
+
+    const createResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/policies`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: 'isolated-policy', definition: { rules: [] } }),
+      },
+    );
+    const policyId = (await createResponse.json()).data.id;
+
+    const listResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/policies`,
+      'mallory',
+    );
+    expect(listResponse.status).toBe(404);
+
+    const createDeniedResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/policies`,
+      'mallory',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: 'mallory-policy', definition: { rules: [] } }),
+      },
+    );
+    expect(createDeniedResponse.status).toBe(404);
+
+    const publishResponse = await authed(`/api/v1/policies/${policyId}/publish`, 'mallory', {
+      method: 'POST',
+    });
+    expect(publishResponse.status).toBe(404);
+  });
+});
+
 describe('project type routes', () => {
   let server: Server;
   let baseUrl: string;
@@ -2692,5 +2829,101 @@ describe('project type routes', () => {
   it('rejects unauthenticated project type listing', async () => {
     const response = await fetch(`${baseUrl}/api/v1/project-types`);
     expect(response.status).toBe(401);
+  });
+});
+
+describe('DEVOS-147: cross-project compliance reporting', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const organisationDeps = createInMemoryOrganisationDeps(projectDeps);
+    const policyDeps = createInMemoryPolicyDeps(projectDeps, organisationDeps.organisations);
+    const auditDeps = createInMemoryAuditDeps(projectDeps, organisationDeps.organisations);
+    const started = await startServer({ projectDeps, organisationDeps, policyDeps, auditDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('aggregates real audit records across two different projects in the same organisation', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Compliance Org', slug: 'compliance-org' }),
+    });
+    const organisation = (await orgResponse.json()).data;
+
+    const projectAResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Compliance Project A',
+        slug: 'compliance-project-a',
+        organisationId: organisation.id,
+      }),
+    });
+    const projectA = (await projectAResponse.json()).data;
+
+    const projectBResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Compliance Project B',
+        slug: 'compliance-project-b',
+        organisationId: organisation.id,
+      }),
+    });
+    const projectB = (await projectBResponse.json()).data;
+
+    async function createAndPublishPolicy(projectId: string, key: string) {
+      const createResponse = await authed(`/api/v1/projects/${projectId}/policies`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key, definition: { rules: [] } }),
+      });
+      const policy = (await createResponse.json()).data;
+      await authed(`/api/v1/policies/${policy.id}/publish`, 'alice', { method: 'POST' });
+    }
+
+    await createAndPublishPolicy(projectA.id, 'compliance-policy-a');
+    await createAndPublishPolicy(projectB.id, 'compliance-policy-b');
+
+    const reportResponse = await authed(`/api/v1/organisations/${organisation.id}/audit`, 'alice');
+    expect(reportResponse.status).toBe(200);
+    const records = (await reportResponse.json()).data;
+
+    const publishedRecords = records.filter(
+      (record: { action: string }) => record.action === 'policy.published',
+    );
+    expect(publishedRecords.some((r: { projectId: string }) => r.projectId === projectA.id)).toBe(
+      true,
+    );
+    expect(publishedRecords.some((r: { projectId: string }) => r.projectId === projectB.id)).toBe(
+      true,
+    );
+  });
+
+  it('denies a non-member from reading an organisation compliance report', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Isolated Compliance Org', slug: 'isolated-compliance-org' }),
+    });
+    const organisation = (await orgResponse.json()).data;
+
+    const response = await authed(`/api/v1/organisations/${organisation.id}/audit`, 'mallory');
+    expect(response.status).toBe(404);
   });
 });

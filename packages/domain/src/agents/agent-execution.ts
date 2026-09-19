@@ -3,9 +3,17 @@ import type {
   AgentExecutionStatus,
   AgentUncertainty,
   AgentVersionId,
+  OrganisationId,
   ProjectId,
   WorkflowTaskId,
 } from '@devos/contracts';
+
+/** A single grouping row from a cost-breakdown query (DEVOS-150). */
+export interface CostBreakdownRow {
+  /** The group key — an agent role, a workflow definition id, or a work item id, depending on the query. */
+  key: string;
+  totalUsd: number;
+}
 
 /** DEVOS-089: real token counts as the provider reported them for this execution. */
 export interface AgentExecutionUsage {
@@ -60,4 +68,32 @@ export interface AgentExecutionRepository {
    * capability most callers don't need to fake.
    */
   sumEstimatedCostUsdForProject?: (projectId: ProjectId) => Promise<number>;
+  /**
+   * DEVOS-150: the organisation-spanning equivalent of
+   * `sumEstimatedCostUsdForProject`, joined one step further to
+   * `projects.organisation_id` — a real join (mirroring
+   * `AuditRecordRepository.listForOrganisation`'s own established
+   * precedent), not a client-side loop over every project in the
+   * organisation. Optional for the same reason: only the real Postgres
+   * repository implements it.
+   */
+  sumEstimatedCostUsdForOrganisation?: (organisationId: OrganisationId) => Promise<number>;
+  /** DEVOS-150: real accumulated cost grouped by agent role, scoped to one project. */
+  costBreakdownByRoleForProject?: (projectId: ProjectId) => Promise<CostBreakdownRow[]>;
+  /** DEVOS-150: real accumulated cost grouped by agent role, across an organisation's projects. */
+  costBreakdownByRoleForOrganisation?: (
+    organisationId: OrganisationId,
+  ) => Promise<CostBreakdownRow[]>;
+  /** DEVOS-156: real accumulated cost grouped by workflow definition name, scoped to one project. */
+  costBreakdownByWorkflowForProject?: (projectId: ProjectId) => Promise<CostBreakdownRow[]>;
+  /** DEVOS-156: real accumulated cost grouped by workflow definition name, across an organisation's projects. */
+  costBreakdownByWorkflowForOrganisation?: (
+    organisationId: OrganisationId,
+  ) => Promise<CostBreakdownRow[]>;
+  /** DEVOS-156: real accumulated cost grouped by work-item title, scoped to one project. */
+  costBreakdownByWorkItemForProject?: (projectId: ProjectId) => Promise<CostBreakdownRow[]>;
+  /** DEVOS-156: real accumulated cost grouped by work-item title, across an organisation's projects. */
+  costBreakdownByWorkItemForOrganisation?: (
+    organisationId: OrganisationId,
+  ) => Promise<CostBreakdownRow[]>;
 }

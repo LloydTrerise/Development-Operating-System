@@ -652,11 +652,12 @@ export function rejectApproval(
   });
 }
 
-/** DEVOS-090: for the governance dashboard's "Policies" section. */
+/** DEVOS-090: for the governance dashboard's "Policies" section. DEVOS-139:
+ * `projectId` is now optional — absent for an organisation-scoped policy. */
 export interface Policy {
   id: string;
   organisationId: string;
-  projectId: string;
+  projectId?: string;
   key: string;
   version: number;
   status: string;
@@ -668,6 +669,58 @@ export interface Policy {
 
 export function listPoliciesForProject(projectId: string): Promise<ApiResult<Policy[]>> {
   return request<Policy[]>(`/api/v1/projects/${projectId}/policies`);
+}
+
+export interface CreatePolicyInput {
+  key: string;
+  definition: Record<string, unknown>;
+}
+
+export function createPolicy(
+  projectId: string,
+  input: CreatePolicyInput,
+): Promise<ApiResult<Policy>> {
+  return request<Policy>(`/api/v1/projects/${projectId}/policies`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+/** DEVOS-139: the organisation-scoped mirror of `listPoliciesForProject`/`createPolicy`. */
+export function listPoliciesForOrganisation(organisationId: string): Promise<ApiResult<Policy[]>> {
+  return request<Policy[]>(`/api/v1/organisations/${organisationId}/policies`);
+}
+
+export function createOrganisationPolicy(
+  organisationId: string,
+  input: CreatePolicyInput,
+): Promise<ApiResult<Policy>> {
+  return request<Policy>(`/api/v1/organisations/${organisationId}/policies`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function publishPolicy(policyId: string): Promise<ApiResult<Policy>> {
+  return request<Policy>(`/api/v1/policies/${policyId}/publish`, { method: 'POST' });
+}
+
+/** DEVOS-141: what a draft policy would have decided against real recent
+ * historical activity, before it is published. */
+export interface SimulatedPolicyDecision {
+  auditRecordId: string;
+  action: string;
+  actualOutcome: string;
+  decision: {
+    decision: string;
+    reason: string;
+    matchedPolicyId?: string;
+    matchedPolicyKey?: string;
+  };
+}
+
+export function simulatePolicy(policyId: string): Promise<ApiResult<SimulatedPolicyDecision[]>> {
+  return request<SimulatedPolicyDecision[]>(`/api/v1/policies/${policyId}/simulate`);
 }
 
 /** DEVOS-090: for the governance dashboard's "Risk activity" section — a
@@ -693,4 +746,56 @@ export interface AuditRecord {
 
 export function listAuditRecordsForProject(projectId: string): Promise<ApiResult<AuditRecord[]>> {
   return request<AuditRecord[]>(`/api/v1/projects/${projectId}/audit`);
+}
+
+/** DEVOS-147: the organisation-scoped mirror — a real cross-project
+ * aggregate, already correctly tenant-isolated server-side. */
+export function listAuditRecordsForOrganisation(
+  organisationId: string,
+): Promise<ApiResult<AuditRecord[]>> {
+  return request<AuditRecord[]>(`/api/v1/organisations/${organisationId}/audit`);
+}
+
+/** DEVOS-150/151: one grouping row from a cost-breakdown query — the group
+ * key is an agent role today; Sprint 18's DEVOS-156 adds workflow/work-item
+ * grouping dimensions to the same shape. */
+export interface CostBreakdownRow {
+  key: string;
+  totalUsd: number;
+}
+
+export interface ProjectCostSummary {
+  projectId: string;
+  totalUsd: number;
+  budgetUsd?: number;
+  breakdownByRole: CostBreakdownRow[];
+  /** DEVOS-156: attribution by which workflow definition caused the spend. */
+  breakdownByWorkflow: CostBreakdownRow[];
+  /** DEVOS-156: attribution by which work item caused the spend. */
+  breakdownByWorkItem: CostBreakdownRow[];
+}
+
+export interface OrganisationCostReport {
+  organisationId: string;
+  totalUsd: number;
+  budgetUsd?: number;
+  projectCount: number;
+  breakdownByRole: CostBreakdownRow[];
+  breakdownByWorkflow: CostBreakdownRow[];
+  breakdownByWorkItem: CostBreakdownRow[];
+}
+
+/** DEVOS-151: real cost data for one project — DEVOS-098's `budgetUsd` plus
+ * DEVOS-150's new per-role breakdown, both previously unreachable from any
+ * client. */
+export function getProjectCostSummary(projectId: string): Promise<ApiResult<ProjectCostSummary>> {
+  return request<ProjectCostSummary>(`/api/v1/projects/${projectId}/cost`);
+}
+
+/** DEVOS-151: the organisation-scoped mirror — a real cross-project cost
+ * rollup, already correctly tenant-isolated server-side. */
+export function getOrganisationCostReport(
+  organisationId: string,
+): Promise<ApiResult<OrganisationCostReport>> {
+  return request<OrganisationCostReport>(`/api/v1/organisations/${organisationId}/cost-report`);
 }

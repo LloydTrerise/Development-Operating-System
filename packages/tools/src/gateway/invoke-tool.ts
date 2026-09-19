@@ -1,12 +1,29 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { AuditId, ProjectId, WorkflowTaskId } from '@devos/contracts';
-import type { AuditOutcome, ToolInvocation } from '@devos/domain';
+import type { Approval, AuditOutcome, ToolInvocation } from '@devos/domain';
 import { NotFoundError, ValidationError } from '@devos/domain';
-import { evaluatePolicies } from '@devos/policy';
+import { evaluatePoliciesWithPrecedence } from '@devos/policy';
 import { validateToolInput } from '../validation/validate-tool-input.js';
 import type { ToolGatewayDeps } from './deps.js';
 import { resolveProjectScope } from './resolve-project-scope.js';
 import type { InvokeToolInput } from './types.js';
+
+/**
+ * A scope hash over the exact evidence being approved
+ * (specs/api/poc-api-contracts.md §29–§30) — a tool-invocation-triggered
+ * approval has no run-wide "artifacts produced so far" the way
+ * `run-approval-task.ts`'s own evidence collection does, so this is always
+ * the constant hash of an empty evidence list; a real, disclosed
+ * simplification, not a fabricated evidence trail. Duplicated locally
+ * rather than imported from `@devos/application`'s own identical
+ * `computeScopeHash` (`request-approval.ts`) for the same package-boundary
+ * reason this file's own doc comment already gives for `SYSTEM_ACTOR_IDS`:
+ * `packages/tools` depends on `@devos/domain`, not `@devos/application`.
+ */
+function computeScopeHash(artifactVersionIds: string[]): string {
+  const sorted = [...artifactVersionIds].sort();
+  return createHash('sha256').update(JSON.stringify(sorted)).digest('hex');
+}
 
 // Mirrors packages/database/src/repositories/publish-artifact.ts's
 // identical set — the agent runtime acting without a human principal.
@@ -165,21 +182,39 @@ export async function invokeTool(
       stableStringify(existingInput.target) === stableStringify(input.target) &&
       stableStringify(existingInput.parameters) === stableStringify(input.parameters);
 
-    if (matches) {
+    // Gap revisit (post-Sprint-16): a still-`PENDING` REQUIRE_APPROVAL
+    // rejection is not a terminal outcome the way every other recorded
+    // status is — replaying it forever (the pre-existing behaviour for
+    // every other `matches` case) would mean a retried invocation could
+    // never observe a decision made *after* the first attempt. Falls
+    // through to re-run the whole chain fresh instead, which re-resolves
+    // the same deterministic Approval by its own `approvalType` and acts on
+    // its current status. A real, disclosed, bounded simplification: this
+    // records a new `ToolInvocation` row on every poll while still pending
+    // (rather than updating the original in place — `ToolInvocationRepository`
+    // has no `update` method today), so `getByCapabilityAndIdempotencyKey`'s
+    // own "earliest match wins" semantics keep finding the *original*
+    // pending row on the *next* poll too — harmless, since this same check
+    // re-runs the chain fresh every time regardless of which pending row it
+    // finds.
+    if (matches && existing.errorCode !== 'DEVOS_TOOL_POLICY_REQUIRE_APPROVAL_PENDING') {
       await audit(existing);
       return existing;
     }
 
-    return recordAndAudit({
-      id: randomUUID() as ToolInvocation['id'],
-      workflowTaskId,
-      toolCapabilityId: capabilityId,
-      status: 'REJECTED',
-      inputMetadata,
-      idempotencyKey: input.idempotencyKey,
-      errorCode: 'DEVOS_TOOL_BRANCH_BINDING_VIOLATION',
-      createdAt: new Date().toISOString(),
-    });
+    if (!matches) {
+      return recordAndAudit({
+        id: randomUUID() as ToolInvocation['id'],
+        workflowTaskId,
+        toolCapabilityId: capabilityId,
+        status: 'REJECTED',
+        inputMetadata,
+        idempotencyKey: input.idempotencyKey,
+        errorCode: 'DEVOS_TOOL_BRANCH_BINDING_VIOLATION',
+        createdAt: new Date().toISOString(),
+      });
+    }
+    // else: matches but still REQUIRE_APPROVAL-pending — fall through.
   }
 
   const reject = (errorCode: string): Promise<ToolInvocation> =>
@@ -194,16 +229,110 @@ export async function invokeTool(
       createdAt: new Date().toISOString(),
     });
 
-  const policies = await deps.policies.listForProject(projectId);
+  // DEVOS-138: resolved once, ahead of policy evaluation, so both the
+  // ABAC-keyed decision below and DEVOS-085's own capability check further
+  // down reuse the same lookups instead of fetching twice.
+  const agentVersion =
+    input.agentVersionId !== undefined
+      ? ((await deps.agentVersions?.getById(input.agentVersionId)) ?? undefined)
+      : undefined;
+  const workflowVersion =
+    input.workflowVersionId !== undefined
+      ? ((await deps.workflowVersions?.getById(input.workflowVersionId)) ?? undefined)
+      : undefined;
+
+  // DEVOS-139: organisation-level policies (mandatory precedence) and this
+  // project's own policies are gathered and evaluated separately — see
+  // `evaluatePoliciesWithPrecedence`'s own doc comment for the precedence
+  // rule. With no organisation policies present, this is byte-for-byte
+  // identical to the old `evaluatePolicies(projectPolicies, request)` call.
+  const [organisationPolicies, projectPolicies] = await Promise.all([
+    deps.policies.listForOrganisation(project.organisationId),
+    deps.policies.listForProject(projectId),
+  ]);
   const targetEnvironment = input.target['environment'];
-  const decision = evaluatePolicies(policies, {
+  const decision = evaluatePoliciesWithPrecedence(organisationPolicies, projectPolicies, {
     action: capability.key,
     actorRole: membership.role,
     resourceType: 'TOOL_CAPABILITY',
+    riskClass: capability.riskClass,
     ...(typeof targetEnvironment === 'string' ? { environment: targetEnvironment } : {}),
+    ...(agentVersion !== undefined
+      ? { agentId: agentVersion.agentId, agentVersion: agentVersion.version }
+      : {}),
+    ...(workflowVersion !== undefined
+      ? {
+          workflowId: workflowVersion.workflowDefinitionId,
+          workflowVersion: workflowVersion.version,
+        }
+      : {}),
   });
-  if (decision.decision !== 'ALLOW') {
+  if (decision.decision === 'DENY' || decision.decision === 'CONFLICT') {
     return reject(`DEVOS_TOOL_POLICY_${decision.decision}`);
+  }
+
+  // Gap revisit (post-Sprint-16): a policy's own REQUIRE_APPROVAL decision
+  // used to be rejected identically to DENY, with no real Approval ever
+  // created anywhere — a real, disclosed pre-existing gap. When `approvals`/
+  // `workflowTasks` are both wired, this now creates (or resolves) a real,
+  // policy-gated `Approval` bound to the invoking task's own run, carrying
+  // the exact same DEVOS-138 ABAC context this decision was itself governed
+  // by — so `decide-approval.ts`'s own policy check can evaluate it too.
+  // With neither wired, this falls back to the exact pre-existing behaviour
+  // (a straight rejection), so no existing caller is forced to opt in.
+  if (decision.decision === 'REQUIRE_APPROVAL') {
+    if (!deps.approvals || !deps.workflowTasks) {
+      return reject('DEVOS_TOOL_POLICY_REQUIRE_APPROVAL');
+    }
+
+    const task = await deps.workflowTasks.getById(workflowTaskId);
+    if (!task) return reject('DEVOS_TOOL_POLICY_REQUIRE_APPROVAL');
+
+    // Deterministic per real (capability, idempotencyKey) pair — the same
+    // idempotent-replay unit `toolInvocations.getByCapabilityAndIdempotencyKey`
+    // already uses above — so retrying the same invocation while a decision
+    // is still pending resolves the *same* Approval, never creates a second.
+    const approvalType = `tool-invocation:${capability.key}:${input.idempotencyKey}`;
+    const runApprovals = await deps.approvals.listForRun(task.workflowRunId);
+    let approval = runApprovals.find((candidate) => candidate.approvalType === approvalType);
+
+    if (!approval) {
+      const now = new Date().toISOString();
+      approval = {
+        id: randomUUID() as Approval['id'],
+        projectId,
+        workflowRunId: task.workflowRunId,
+        approvalType,
+        status: 'PENDING',
+        requestedBy: principalId,
+        evidenceReference: { artifactVersionIds: [], scopeHash: computeScopeHash([]) },
+        requestedAt: now,
+        requiredApprovers: 1,
+        enforceSeparationOfDuties: false,
+        requiredRejections: 1,
+        riskClass: capability.riskClass,
+        ...(agentVersion !== undefined
+          ? { agentId: agentVersion.agentId, agentVersion: agentVersion.version }
+          : {}),
+        ...(workflowVersion !== undefined
+          ? {
+              workflowId: workflowVersion.workflowDefinitionId,
+              workflowVersion: workflowVersion.version,
+            }
+          : {}),
+      };
+      await deps.approvals.create(approval);
+    }
+
+    if (approval.status === 'APPROVED') {
+      // Falls through to the capability-status/schema checks below, exactly
+      // as an ALLOW decision already would.
+    } else if (approval.status === 'PENDING') {
+      return reject('DEVOS_TOOL_POLICY_REQUIRE_APPROVAL_PENDING');
+    } else {
+      // REJECTED or EXPIRED — a permanent, final denial.
+      return reject(`DEVOS_TOOL_POLICY_REQUIRE_APPROVAL_${approval.status}`);
+    }
   }
 
   if (capability.status !== 'ACTIVE') {
@@ -223,7 +352,6 @@ export async function invokeTool(
   // capability, independent of the project-level Policy/Capability
   // Permission steps above (which govern the project, not any one agent).
   if (input.agentVersionId !== undefined) {
-    const agentVersion = await deps.agentVersions?.getById(input.agentVersionId);
     if (!agentVersion || !agentVersion.configuration.allowedCapabilities.includes(capability.key)) {
       return reject('DEVOS_AGENT_CAPABILITY_DENIED');
     }

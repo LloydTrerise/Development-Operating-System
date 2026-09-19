@@ -1,4 +1,4 @@
-import type { AgentVersionId } from '@devos/contracts';
+import type { AgentVersionId, WorkflowVersionId } from '@devos/contracts';
 
 export interface ProviderAdapterResult {
   outputMetadata: Record<string, unknown>;
@@ -37,6 +37,18 @@ export interface InvokeToolInput {
    * task handlers, which never call `runAgentTask` at all).
    */
   agentVersionId?: AgentVersionId;
+  /**
+   * DEVOS-138: the workflow version whose run is carrying out this
+   * invocation, if any — mirrors `agentVersionId` exactly. When present
+   * (every real production call site already holds its own `WorkflowRun`
+   * in scope and supplies `run.workflowVersionId`), the gateway resolves
+   * the real `WorkflowVersion` and includes its `workflowDefinitionId`/
+   * `version` in the policy-evaluation request, so a policy can be scoped
+   * to a specific workflow definition/version. Omitted for any caller with
+   * no workflow run in scope (there are none today, but the field stays
+   * optional for the same reason `agentVersionId` is).
+   */
+  workflowVersionId?: WorkflowVersionId;
   /**
    * DEVOS-088: the correlation id of the API request that ultimately
    * caused this invocation, if one is known (threaded from the workflow

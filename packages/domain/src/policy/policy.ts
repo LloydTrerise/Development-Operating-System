@@ -37,6 +37,16 @@ export interface PolicyRepository {
   ) => Promise<Policy | null>;
   getLatestForProjectAndKey: (projectId: ProjectId, key: string) => Promise<Policy | null>;
   listForProject: (projectId: ProjectId) => Promise<Policy[]>;
+  /**
+   * DEVOS-139: the first real reader of an organisation-scoped policy
+   * (`project_id IS NULL`) — every prior policy was project-scoped, so
+   * nothing before this task ever needed to list by organisation alone.
+   */
+  getLatestForOrganisationAndKey: (
+    organisationId: OrganisationId,
+    key: string,
+  ) => Promise<Policy | null>;
+  listForOrganisation: (organisationId: OrganisationId) => Promise<Policy[]>;
   create: (policy: Policy) => Promise<void>;
   publish: (id: PolicyId, publishedAt: string) => Promise<void>;
 }

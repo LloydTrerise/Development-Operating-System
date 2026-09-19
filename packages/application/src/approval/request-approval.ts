@@ -78,6 +78,9 @@ export async function requestApproval(
       scopeHash: computeScopeHash(input.artifactVersionIds),
     },
     requestedAt: now,
+    requiredApprovers: 1,
+    enforceSeparationOfDuties: false,
+    requiredRejections: 1,
   };
 
   await deps.approvals.create(approval);

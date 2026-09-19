@@ -55,6 +55,7 @@ import type {
   ApprovalUseCaseDeps,
   ArtifactUseCaseDeps,
   AuditUseCaseDeps,
+  CostUseCaseDeps,
   KnowledgeUseCaseDeps,
   OrganisationUseCaseDeps,
   PolicyUseCaseDeps,
@@ -83,6 +84,7 @@ import { createAgentRoutes } from './routes/agents.js';
 import { createApprovalRoutes } from './routes/approvals.js';
 import { createArtifactRoutes } from './routes/artifacts.js';
 import { createAuditRoutes } from './routes/audit.js';
+import { createCostRoutes } from './routes/cost.js';
 import { createHealthRoutes } from './routes/health.js';
 import { createKnowledgeSourceRoutes } from './routes/knowledge-sources.js';
 import { createMeRoutes } from './routes/me.js';
@@ -196,6 +198,7 @@ export interface CreateAppOptions {
   workflowDeps?: WorkflowUseCaseDeps;
   artifactDeps?: ArtifactUseCaseDeps;
   auditDeps?: AuditUseCaseDeps;
+  costDeps?: CostUseCaseDeps;
   agentDeps?: AgentUseCaseDeps;
   agentExecutionSummaryDeps?: AgentExecutionSummaryUseCaseDeps;
   toolInvocationSummaryDeps?: ToolInvocationSummaryUseCaseDeps;
@@ -290,6 +293,10 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     projects: projectDeps.projects,
     memberships: projectDeps.memberships,
     auditRecords: auditRecordRepository,
+    // DEVOS-147: a separate instance from `organisationDeps.organisations`
+    // below (construction order) — both are stateless wrappers over the
+    // same real `database.db`, so this is safe.
+    organisations: createOrganisationRepository(database.db),
   };
   const agentDeps: AgentUseCaseDeps = options.agentDeps ?? {
     projects: projectDeps.projects,
@@ -298,6 +305,16 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     agentVersions: createAgentVersionRepository(database.db),
     createDraft: createAgentDraftCreator(database.db),
     auditRecords: auditRecordRepository,
+  };
+  const costDeps: CostUseCaseDeps = options.costDeps ?? {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    // DEVOS-151: a separate instance from `organisationDeps.organisations`
+    // below (construction order) — both are stateless wrappers over the
+    // same real `database.db`, mirroring `auditDeps.organisations`' own
+    // established precedent exactly.
+    organisations: createOrganisationRepository(database.db),
+    agentExecutions: createAgentExecutionRepository(database.db),
   };
   const agentExecutionSummaryDeps: AgentExecutionSummaryUseCaseDeps =
     options.agentExecutionSummaryDeps ?? {
@@ -341,6 +358,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   };
   const policyDeps: PolicyUseCaseDeps = options.policyDeps ?? {
     projects: projectDeps.projects,
+    organisations: organisationDeps.organisations,
     memberships: projectDeps.memberships,
     policies: createPolicyRepository(database.db),
     auditRecords: auditRecordRepository,
@@ -383,6 +401,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createWorkflowRunRoutes(API_PREFIX, workflowDeps),
     ...createArtifactRoutes(API_PREFIX, artifactDeps),
     ...createAuditRoutes(API_PREFIX, auditDeps),
+    ...createCostRoutes(API_PREFIX, costDeps),
     ...createAgentRoutes(API_PREFIX, agentDeps),
     ...createAgentExecutionSummaryRoutes(API_PREFIX, agentExecutionSummaryDeps),
     ...createToolInvocationSummaryRoutes(API_PREFIX, toolInvocationSummaryDeps),

@@ -63,6 +63,31 @@ export function createPolicyRepository(db: QueryExecutor): PolicyRepository {
       return rows.map(toDomain);
     },
 
+    async getLatestForOrganisationAndKey(organisationId, key) {
+      const row = await db
+        .selectFrom('policies')
+        .selectAll()
+        .where('organisation_id', '=', organisationId)
+        .where('project_id', 'is', null)
+        .where('key', '=', key)
+        .orderBy('version', 'desc')
+        .limit(1)
+        .executeTakeFirst();
+      return row ? toDomain(row) : null;
+    },
+
+    async listForOrganisation(organisationId) {
+      const rows = await db
+        .selectFrom('policies')
+        .selectAll()
+        .where('organisation_id', '=', organisationId)
+        .where('project_id', 'is', null)
+        .orderBy('key', 'asc')
+        .orderBy('version', 'asc')
+        .execute();
+      return rows.map(toDomain);
+    },
+
     async create(policy) {
       await db
         .insertInto('policies')

@@ -9,6 +9,7 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "devDependencies": {
+    "@devos/agents": "workspace:*",
     "@devos/api": "workspace:*",
     "@devos/application": "workspace:*",
     "@devos/database": "workspace:*",

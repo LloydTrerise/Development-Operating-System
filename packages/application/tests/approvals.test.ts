@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
   Approval,
+  ApprovalDecisionRecord,
   ApprovalRepository,
   ArtifactVersion,
   ArtifactVersionRepository,
@@ -45,6 +46,7 @@ function createDeps(): {
   const projects = new Map<string, Project>();
   const memberships = new Map<string, Membership>();
   const approvalsStore = new Map<string, Approval>();
+  const decisionsStore: ApprovalDecisionRecord[] = [];
   const organisationId = randomUUID() as OrganisationId;
 
   const projectRepository: ProjectRepository = {
@@ -167,6 +169,21 @@ function createDeps(): {
         decidedAt,
       });
     },
+    recordDecision: async (record) => {
+      decisionsStore.push(record);
+    },
+    listDecisionsForApproval: async (approvalId) =>
+      decisionsStore.filter((decision) => decision.approvalId === approvalId),
+    expirePending: async (now) => {
+      let count = 0;
+      for (const [id, approval] of approvalsStore) {
+        if (approval.status === 'PENDING' && approval.expiresAt && approval.expiresAt < now) {
+          approvalsStore.set(id, { ...approval, status: 'EXPIRED' });
+          count += 1;
+        }
+      }
+      return count;
+    },
   };
 
   // DEVOS-110: an empty published-policy set — evaluatePolicies() falls
@@ -179,6 +196,8 @@ function createDeps(): {
     getByProjectAndKeyAndVersion: async () => null,
     getLatestForProjectAndKey: async () => null,
     listForProject: async (projectId) => policiesStore.filter((p) => p.projectId === projectId),
+    getLatestForOrganisationAndKey: async () => null,
+    listForOrganisation: async () => [],
     create: async (policy) => {
       policiesStore.push(policy);
     },
@@ -461,6 +480,298 @@ describe('approval use cases', () => {
       approveApproval(deps, 'alice', requested.id, { scopeHash: fabricatedHash }),
     ).rejects.toThrow(ValidationError);
   });
+
+  describe('DEVOS-143: multi-approver (N-of-M) approval support', () => {
+    it('leaves a requiredApprovers=2 approval PENDING after the first APPROVED decision, without transitioning the run', async () => {
+      const { deps, run, artifactVersionId, addMember, transitionCalls } = ctx;
+      addMember('bob', 'OWNER');
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'PLANNING',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, requiredApprovers: 2 });
+
+      const afterFirst = await approveApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+
+      expect(afterFirst.status).toBe('PENDING');
+      expect(transitionCalls).toHaveLength(0);
+    });
+
+    it('finalizes a requiredApprovers=2 approval once a second, distinct principal approves', async () => {
+      const { deps, run, artifactVersionId, addMember, transitionCalls } = ctx;
+      addMember('bob', 'OWNER');
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'PLANNING',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, requiredApprovers: 2 });
+
+      await approveApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+      const afterSecond = await approveApproval(deps, 'bob', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+
+      expect(afterSecond.status).toBe('APPROVED');
+      expect(afterSecond.decidedBy).toBe('bob');
+      expect(transitionCalls).toEqual([
+        {
+          approvalId: requested.id,
+          workflowRunId: run.id,
+          approvalType: 'PLANNING',
+          decision: 'APPROVED',
+        },
+      ]);
+    });
+
+    it('rejects the same principal deciding a requiredApprovers=2 approval twice', async () => {
+      const { deps, run, artifactVersionId } = ctx;
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'PLANNING',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, requiredApprovers: 2 });
+
+      await approveApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+
+      await expect(
+        approveApproval(deps, 'alice', requested.id, {
+          scopeHash: requested.evidenceReference.scopeHash,
+        }),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('a REJECTED decision fails a requiredApprovers=2 approval immediately (fail-fast), even with zero APPROVED decisions yet', async () => {
+      const { deps, run, artifactVersionId, transitionCalls } = ctx;
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'RELEASE',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, requiredApprovers: 2 });
+
+      const decided = await rejectApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+
+      expect(decided.status).toBe('REJECTED');
+      expect(transitionCalls).toEqual([
+        {
+          approvalId: requested.id,
+          workflowRunId: run.id,
+          approvalType: 'RELEASE',
+          decision: 'REJECTED',
+        },
+      ]);
+    });
+  });
+
+  describe('Gap revisit: configurable requiredRejections (symmetric N-of-M rejection threshold)', () => {
+    it('leaves a requiredRejections=2 approval PENDING after the first REJECTED decision, without transitioning the run', async () => {
+      const { deps, run, artifactVersionId, addMember, transitionCalls } = ctx;
+      addMember('bob', 'OWNER');
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'RELEASE',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, requiredRejections: 2 });
+
+      const afterFirst = await rejectApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+
+      expect(afterFirst.status).toBe('PENDING');
+      expect(transitionCalls).toHaveLength(0);
+    });
+
+    it('finalizes a requiredRejections=2 approval once a second, distinct principal rejects', async () => {
+      const { deps, run, artifactVersionId, addMember, transitionCalls } = ctx;
+      addMember('bob', 'OWNER');
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'RELEASE',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, requiredRejections: 2 });
+
+      await rejectApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+      const afterSecond = await rejectApproval(deps, 'bob', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+
+      expect(afterSecond.status).toBe('REJECTED');
+      expect(afterSecond.decidedBy).toBe('bob');
+      expect(transitionCalls).toEqual([
+        {
+          approvalId: requested.id,
+          workflowRunId: run.id,
+          approvalType: 'RELEASE',
+          decision: 'REJECTED',
+        },
+      ]);
+    });
+
+    it('an APPROVED decision still finalizes normally (at its own requiredApprovers) alongside a non-default requiredRejections', async () => {
+      const { deps, run, artifactVersionId, transitionCalls } = ctx;
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'RELEASE',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, requiredRejections: 3 });
+
+      const decided = await approveApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+
+      expect(decided.status).toBe('APPROVED');
+      expect(transitionCalls).toEqual([
+        {
+          approvalId: requested.id,
+          workflowRunId: run.id,
+          approvalType: 'RELEASE',
+          decision: 'APPROVED',
+        },
+      ]);
+    });
+  });
+
+  describe('Gap revisit: real ABAC context flows into an approval decision', () => {
+    it('a published policy DENYing this riskClass rejects the decision, even though the approvalType alone matches no rule', async () => {
+      const { deps, run, artifactVersionId } = ctx;
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'remediation-gate',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, riskClass: 'R4' });
+
+      await deps.policies.create({
+        id: randomUUID() as Policy['id'],
+        organisationId: (await deps.projects.getById(run.projectId))!.organisationId,
+        projectId: run.projectId,
+        key: 'high-risk-approval-lockdown',
+        version: 1,
+        status: 'PUBLISHED',
+        definition: {
+          rules: [
+            {
+              action: 'remediation-gate',
+              effect: 'DENY',
+              condition: { riskClass: 'R4' },
+            },
+          ],
+        },
+        createdBy: 'alice',
+        publishedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+
+      await expect(
+        approveApproval(deps, 'alice', requested.id, {
+          scopeHash: requested.evidenceReference.scopeHash,
+        }),
+      ).rejects.toThrow(ForbiddenError);
+    });
+
+    it('a policy rule scoped to a different riskClass does not affect this decision', async () => {
+      const { deps, run, artifactVersionId } = ctx;
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'remediation-gate',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, riskClass: 'R1' });
+
+      await deps.policies.create({
+        id: randomUUID() as Policy['id'],
+        organisationId: (await deps.projects.getById(run.projectId))!.organisationId,
+        projectId: run.projectId,
+        key: 'high-risk-approval-lockdown',
+        version: 1,
+        status: 'PUBLISHED',
+        definition: {
+          rules: [
+            {
+              action: 'remediation-gate',
+              effect: 'DENY',
+              condition: { riskClass: 'R4' },
+            },
+          ],
+        },
+        createdBy: 'alice',
+        publishedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      });
+
+      const decided = await approveApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+
+      expect(decided.status).toBe('APPROVED');
+    });
+  });
+
+  describe('DEVOS-144: separation-of-duties enforcement', () => {
+    it('rejects the requester deciding their own approval when enforceSeparationOfDuties is set', async () => {
+      const { deps, run, artifactVersionId } = ctx;
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'PLANNING',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, enforceSeparationOfDuties: true });
+
+      await expect(
+        approveApproval(deps, 'alice', requested.id, {
+          scopeHash: requested.evidenceReference.scopeHash,
+        }),
+      ).rejects.toThrow(ForbiddenError);
+    });
+
+    it('allows a different principal to decide when enforceSeparationOfDuties is set', async () => {
+      const { deps, run, artifactVersionId, addMember } = ctx;
+      addMember('bob', 'OWNER');
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'PLANNING',
+        artifactVersionIds: [artifactVersionId],
+      });
+      await deps.approvals.create({ ...requested, enforceSeparationOfDuties: true });
+
+      const decided = await approveApproval(deps, 'bob', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+
+      expect(decided.status).toBe('APPROVED');
+    });
+
+    it('allows the requester to decide their own approval when enforceSeparationOfDuties is not set (default)', async () => {
+      const { deps, run, artifactVersionId } = ctx;
+      const requested = await requestApproval(deps, 'alice', run.projectId, {
+        workflowRunId: run.id,
+        approvalType: 'PLANNING',
+        artifactVersionIds: [artifactVersionId],
+      });
+
+      const decided = await approveApproval(deps, 'alice', requested.id, {
+        scopeHash: requested.evidenceReference.scopeHash,
+      });
+
+      expect(decided.status).toBe('APPROVED');
+    });
+  });
 });
 
 describe('DEVOS-112: the planning re-planning loop', () => {
@@ -624,6 +935,7 @@ describe('DEVOS-112: the planning re-planning loop', () => {
     };
 
     const approvalsStore = new Map<string, Approval>();
+    const decisionsStore: ApprovalDecisionRecord[] = [];
     const approvals: ApprovalRepository = {
       getById: async (id) => approvalsStore.get(id) ?? null,
       listForProject: async (projectId) =>
@@ -651,6 +963,21 @@ describe('DEVOS-112: the planning re-planning loop', () => {
           decidedAt,
         });
       },
+      recordDecision: async (record) => {
+        decisionsStore.push(record);
+      },
+      listDecisionsForApproval: async (approvalId) =>
+        decisionsStore.filter((decision) => decision.approvalId === approvalId),
+      expirePending: async (now) => {
+        let count = 0;
+        for (const [id, approval] of approvalsStore) {
+          if (approval.status === 'PENDING' && approval.expiresAt && approval.expiresAt < now) {
+            approvalsStore.set(id, { ...approval, status: 'EXPIRED' });
+            count += 1;
+          }
+        }
+        return count;
+      },
     };
 
     const policies: PolicyRepository = {
@@ -658,6 +985,8 @@ describe('DEVOS-112: the planning re-planning loop', () => {
       getByProjectAndKeyAndVersion: async () => null,
       getLatestForProjectAndKey: async () => null,
       listForProject: async () => [],
+      getLatestForOrganisationAndKey: async () => null,
+      listForOrganisation: async () => [],
       create: async () => {},
       publish: async () => {},
     };

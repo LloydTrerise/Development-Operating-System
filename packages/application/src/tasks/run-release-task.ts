@@ -12,6 +12,7 @@ import { createDeploymentProviderAdapters } from './deployment-provider-adapters
 import { createHealthCheckProviderAdapter } from './health-check-provider-adapter.js';
 import { createHttpHealthCheckProviderAdapter } from './http-health-check-provider-adapter.js';
 import type { ToolTaskHandlerDeps } from './deps.js';
+import { pendingApprovalWaitUntil } from './tool-invocation-outcome.js';
 
 const CONTENT_TYPE = 'application/json';
 
@@ -211,8 +212,11 @@ async function performRelease(
     target: deployTarget,
     parameters: { revision: input.revision },
     idempotencyKey: `${task.id}:${input.action}`,
+    workflowVersionId: run.workflowVersionId,
     ...(correlationId !== undefined ? { correlationId } : {}),
   });
+  const deployWaitUntil = pendingApprovalWaitUntil(deployInvocation);
+  if (deployWaitUntil) return { waitUntil: deployWaitUntil };
   requireSucceeded(deployInvocation, 'Deploy', task.id);
 
   const deployedPath = deployInvocation.outputMetadata?.deployedPath;
@@ -242,9 +246,12 @@ async function performRelease(
       target: {},
       parameters: { command: healthCheckCommandParameter },
       idempotencyKey: `${task.id}:${input.action}-health-check`,
+      workflowVersionId: run.workflowVersionId,
       ...(correlationId !== undefined ? { correlationId } : {}),
     },
   );
+  const healthCheckWaitUntil = pendingApprovalWaitUntil(healthCheckInvocation);
+  if (healthCheckWaitUntil) return { waitUntil: healthCheckWaitUntil };
   requireSucceeded(healthCheckInvocation, 'Health-check', task.id);
 
   const healthCheckExitCode = healthCheckInvocation.outputMetadata?.exitCode;

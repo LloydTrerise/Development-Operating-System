@@ -109,7 +109,7 @@ export type PolicyStatus = (typeof policyStatuses)[number];
  * REJECTED with a `decisionReason` describing what changed, since the
  * schema defines no fourth status value for it.
  */
-export const approvalStatuses = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export const approvalStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'EXPIRED'] as const;
 export type ApprovalStatus = (typeof approvalStatuses)[number];
 
 /**

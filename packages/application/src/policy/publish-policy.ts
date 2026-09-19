@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { AuditId, PolicyId } from '@devos/contracts';
 import { canPublishPolicy, type Policy } from '@devos/domain';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.js';
-import { resolveMembership } from '../projects/membership-access.js';
 import type { PolicyUseCaseDeps } from './deps.js';
+import { resolveMembershipForPolicy } from './resolve-policy-membership.js';
 
 export async function publishPolicy(
   deps: PolicyUseCaseDeps,
@@ -13,14 +13,11 @@ export async function publishPolicy(
   const policy = await deps.policies.getById(policyId);
   if (!policy) throw new NotFoundError('Policy');
 
-  const project =
-    policy.projectId !== undefined ? await deps.projects.getById(policy.projectId) : null;
-  if (!project) throw new NotFoundError('Policy');
-
-  const membership = await resolveMembership(deps, principalId, project);
-  if (!membership) throw new NotFoundError('Policy');
+  const resolved = await resolveMembershipForPolicy(deps, principalId, policy);
+  if (!resolved) throw new NotFoundError('Policy');
+  const { membership, organisationId } = resolved;
   if (!canPublishPolicy(membership.role)) {
-    throw new ForbiddenError('Only a project owner may publish a policy.');
+    throw new ForbiddenError('Only an owner may publish a policy.');
   }
 
   if (policy.status !== 'DRAFT') {
@@ -32,8 +29,8 @@ export async function publishPolicy(
 
   await deps.auditRecords.create({
     id: randomUUID() as AuditId,
-    organisationId: membership.organisationId,
-    projectId: project.id,
+    organisationId,
+    ...(policy.projectId !== undefined ? { projectId: policy.projectId } : {}),
     actorType: 'USER',
     actorId: principalId,
     action: 'policy.published',

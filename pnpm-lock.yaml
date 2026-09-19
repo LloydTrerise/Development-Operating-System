@@ -434,6 +434,9 @@ importers:
 
   tests/e2e:
     devDependencies:
+      '@devos/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
       '@devos/api':
         specifier: workspace:*
         version: link:../../apps/api

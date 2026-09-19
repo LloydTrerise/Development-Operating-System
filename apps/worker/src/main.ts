@@ -36,6 +36,7 @@ import {
   createIntegrationRepository,
   createKnowledgeSourceRepository,
   createMembershipRepository,
+  createOrganisationRepository,
   createPolicyRepository,
   createPostgresTaskQueue,
   createProjectRepository,
@@ -68,7 +69,12 @@ const database = createDatabaseClient({ connectionString: config.database.url })
 const taskQueue = createPostgresTaskQueue(database.db);
 /** DEVOS-087: workflow/agent/tool/queue metrics, recorded per claimed task. */
 export const metrics = createMetricsRegistry();
-const dispatcher = createTaskDispatcher(taskQueue, { metrics });
+const dispatcher = createTaskDispatcher(taskQueue, {
+  metrics,
+  // DEVOS-145: expires past-due PENDING approvals on the same periodic
+  // tick that already reclaims stale tasks and resumes ready WAITs.
+  approvals: createApprovalRepository(database.db),
+});
 
 const storage = createLocalFilesystemStorage(
   process.env.ARTIFACT_STORAGE_DIR ?? './data/artifacts',
@@ -153,6 +159,11 @@ const approvalTaskDeps: ApprovalTaskHandlerDeps = {
   workflowTasks: createWorkflowTaskRepository(database.db),
   artifactVersions: createArtifactVersionRepository(database.db),
   approvals: createApprovalRepository(database.db),
+  // DEVOS-146: risk-tiered approval routing — resolves a real organisation
+  // policy's requiredApprovers/enforceSeparationOfDuties when a node names
+  // a riskClass.
+  projects: createProjectRepository(database.db),
+  policies: createPolicyRepository(database.db),
 };
 dispatcher.registerHandler('APPROVAL', (task) => runApprovalTask(approvalTaskDeps, task));
 
@@ -243,6 +254,9 @@ if (modelAdapter === undefined) {
     artifactVersions: createArtifactVersionRepository(database.db),
     projects: createProjectRepository(database.db),
     memberships: createMembershipRepository(database.db),
+    // DEVOS-155: organisation-level budget alerting, alongside the
+    // pre-existing project-level check above.
+    organisations: createOrganisationRepository(database.db),
     policies: createPolicyRepository(database.db),
     toolCapabilities: createToolCapabilityRepository(database.db),
     toolInvocations: createToolInvocationRepository(database.db),

@@ -1,4 +1,9 @@
-import { NonRetryableTaskError, type TaskQueue, type WorkflowTask } from '@devos/domain';
+import {
+  NonRetryableTaskError,
+  type ApprovalRepository,
+  type TaskQueue,
+  type WorkflowTask,
+} from '@devos/domain';
 import type { MetricsRegistry } from '@devos/observability';
 
 export type TaskHandler = (task: WorkflowTask) => Promise<Record<string, unknown>>;
@@ -30,6 +35,12 @@ export interface TaskDispatcherOptions {
    * in any future caller that doesn't need them.
    */
   metrics?: MetricsRegistry;
+  /**
+   * DEVOS-145: only required to expire past-due `PENDING` approvals.
+   * Optional — omitted entirely in every existing test/caller that doesn't
+   * need approval expiry, mirroring `metrics`'s own optional pattern.
+   */
+  approvals?: ApprovalRepository;
 }
 
 function delay(ms: number): Promise<void> {
@@ -45,6 +56,7 @@ export function createTaskDispatcher(
   const staleThresholdMs = options.staleThresholdMs ?? 5 * 60 * 1000;
   const reclaimIntervalMs = options.reclaimIntervalMs ?? 60 * 1000;
   const metrics = options.metrics;
+  const approvals = options.approvals;
 
   let status: DispatcherStatus = 'ready';
   let stopRequested = false;
@@ -118,6 +130,15 @@ export function createTaskDispatcher(
           const resumed = await queue.resumeReadyWaits();
           if (resumed > 0) {
             metrics?.incrementCounter('task_queue.resumed_waiting', undefined, resumed);
+          }
+          // DEVOS-145: reuses this same periodic tick — no separate timer
+          // subsystem — to also expire any PENDING approval whose own
+          // recorded expiresAt has passed.
+          if (approvals) {
+            const expired = await approvals.expirePending(new Date().toISOString());
+            if (expired > 0) {
+              metrics?.incrementCounter('approval.expired', undefined, expired);
+            }
           }
           nextReclaimAt = Date.now() + reclaimIntervalMs;
         }

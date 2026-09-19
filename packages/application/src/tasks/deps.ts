@@ -2,6 +2,7 @@ import type {
   AgentExecutionRepository,
   AgentRepository,
   AgentVersionRepository,
+  ApprovalRepository,
   Artifact,
   ArtifactRepository,
   ArtifactVersion,
@@ -11,6 +12,7 @@ import type {
   IntegrationRepository,
   KnowledgeSourceRepository,
   MembershipRepository,
+  OrganisationRepository,
   PolicyRepository,
   ProjectRepository,
   ToolCapabilityRepository,
@@ -73,6 +75,13 @@ export interface AgentTaskHandlerDeps {
    * supplies it, since it already has the repository available.
    */
   auditRecords?: AuditRecordRepository;
+  /**
+   * DEVOS-155: the organisation-level mirror of `projects` above, needed
+   * only by the organisation-scoped budget check alongside it — the same
+   * optional-and-additive pattern as `auditRecords?` (DEVOS-098): every
+   * existing test fake for this interface stays valid unchanged.
+   */
+  organisations?: OrganisationRepository;
 }
 
 /**
@@ -132,6 +141,16 @@ export interface DevelopmentAgentTaskHandlerDeps extends AgentArtifactConsumerTa
    * stays valid unchanged.
    */
   credentialResolver?: CredentialResolver;
+  /**
+   * Gap revisit (post-Sprint-16): required by `@devos/tools`'s `ToolGatewayDeps`
+   * to act for real on a policy's own `REQUIRE_APPROVAL` decision. Optional
+   * and additive, mirroring `credentialResolver` immediately above — every
+   * existing test fake for this interface that doesn't supply them is
+   * completely unaffected (the gateway falls back to its own pre-existing
+   * straight-rejection behaviour).
+   */
+  approvals?: ApprovalRepository;
+  workflowTasks?: WorkflowTaskRepository;
 }
 
 /**
@@ -163,6 +182,9 @@ export interface ToolTaskHandlerDeps extends TaskHandlerDeps {
    * Deployment integration configured.
    */
   credentialResolver?: CredentialResolver;
+  /** Gap revisit (post-Sprint-16): see `DevelopmentAgentTaskHandlerDeps`'s own doc comment. */
+  approvals?: ApprovalRepository;
+  workflowTasks?: WorkflowTaskRepository;
 }
 
 /**

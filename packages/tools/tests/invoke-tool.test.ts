@@ -3,6 +3,8 @@ import type { WorkflowTaskId } from '@devos/contracts';
 import type {
   AgentVersion,
   AgentVersionRepository,
+  Approval,
+  ApprovalRepository,
   AuditRecord,
   AuditRecordRepository,
   Membership,
@@ -16,6 +18,10 @@ import type {
   ToolCapabilityRepository,
   ToolInvocation,
   ToolInvocationRepository,
+  WorkflowTask,
+  WorkflowTaskRepository,
+  WorkflowVersion,
+  WorkflowVersionRepository,
 } from '@devos/domain';
 import { NotFoundError } from '@devos/domain';
 import type { PolicyDefinition } from '@devos/policy';
@@ -36,6 +42,14 @@ function createInMemoryDeps(): {
   invocationsStore: Map<string, ToolInvocation>;
   auditRecordsStore: AuditRecord[];
   agentVersionsStore: Map<string, AgentVersion>;
+  workflowVersionsStore: Map<string, WorkflowVersion>;
+  approvalsStore: Map<string, Approval>;
+  workflowTasksStore: Map<string, WorkflowTask>;
+  // Not spread into `deps` above by default — every existing test keeps
+  // exercising the "not wired" fallback path unchanged; tests that need the
+  // real REQUIRE_APPROVAL flow spread these two into their own `deps` copy.
+  approvals: ApprovalRepository;
+  workflowTasks: WorkflowTaskRepository;
 } {
   const projects = new Map<string, Project>();
   const memberships = new Map<string, Membership>();
@@ -44,6 +58,7 @@ function createInMemoryDeps(): {
   const invocationsStore = new Map<string, ToolInvocation>();
   const auditRecordsStore: AuditRecord[] = [];
   const agentVersionsStore = new Map<string, AgentVersion>();
+  const workflowVersionsStore = new Map<string, WorkflowVersion>();
 
   const projectRepository: ProjectRepository = {
     getById: async (id) => projects.get(id) ?? null,
@@ -105,6 +120,16 @@ function createInMemoryDeps(): {
         .sort((a, b) => b.version - a.version)[0] ?? null,
     listForProject: async (projectId) =>
       [...policiesStore.values()].filter((p) => p.projectId === projectId),
+    getLatestForOrganisationAndKey: async (organisationId, key) =>
+      [...policiesStore.values()]
+        .filter(
+          (p) => p.organisationId === organisationId && p.projectId === undefined && p.key === key,
+        )
+        .sort((a, b) => b.version - a.version)[0] ?? null,
+    listForOrganisation: async (organisationId) =>
+      [...policiesStore.values()].filter(
+        (p) => p.organisationId === organisationId && p.projectId === undefined,
+      ),
     create: async (policy) => {
       policiesStore.set(policy.id, policy);
     },
@@ -133,6 +158,8 @@ function createInMemoryDeps(): {
       auditRecordsStore.push(record);
     },
     listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
+    listForOrganisation: async (organisationId) =>
+      auditRecordsStore.filter((r) => r.organisationId === organisationId),
   };
 
   const agentVersions: AgentVersionRepository = {
@@ -157,6 +184,78 @@ function createInMemoryDeps(): {
     },
   };
 
+  const workflowVersions: WorkflowVersionRepository = {
+    getById: async (id) => workflowVersionsStore.get(id) ?? null,
+    getByDefinitionAndVersion: async (workflowDefinitionId, version) =>
+      [...workflowVersionsStore.values()].find(
+        (v) => v.workflowDefinitionId === workflowDefinitionId && v.version === version,
+      ) ?? null,
+    getLatestForDefinition: async (workflowDefinitionId) =>
+      [...workflowVersionsStore.values()]
+        .filter((v) => v.workflowDefinitionId === workflowDefinitionId)
+        .sort((a, b) => b.version - a.version)[0] ?? null,
+    listForDefinition: async (workflowDefinitionId) =>
+      [...workflowVersionsStore.values()].filter(
+        (v) => v.workflowDefinitionId === workflowDefinitionId,
+      ),
+    create: async (version) => {
+      workflowVersionsStore.set(version.id, version);
+    },
+    updateDefinition: async (id, definition) => {
+      const existing = workflowVersionsStore.get(id);
+      if (!existing) return;
+      workflowVersionsStore.set(id, { ...existing, definition });
+    },
+    publish: async (id, publishedAt) => {
+      const existing = workflowVersionsStore.get(id);
+      if (!existing) return;
+      workflowVersionsStore.set(id, { ...existing, status: 'PUBLISHED', publishedAt });
+    },
+  };
+
+  const approvalsStore = new Map<string, Approval>();
+  const approvals: ApprovalRepository = {
+    getById: async (id) => approvalsStore.get(id) ?? null,
+    listForProject: async (projectId) =>
+      [...approvalsStore.values()].filter((a) => a.projectId === projectId),
+    listForRun: async (workflowRunId) =>
+      [...approvalsStore.values()].filter((a) => a.workflowRunId === workflowRunId),
+    getPendingForRunAndType: async (workflowRunId, approvalType) =>
+      [...approvalsStore.values()].find(
+        (a) =>
+          a.workflowRunId === workflowRunId &&
+          a.approvalType === approvalType &&
+          a.status === 'PENDING',
+      ) ?? null,
+    create: async (approval) => {
+      approvalsStore.set(approval.id, approval);
+    },
+    decide: async (id, status, decidedBy, decisionReason, decidedAt) => {
+      const existing = approvalsStore.get(id);
+      if (!existing) return;
+      approvalsStore.set(id, {
+        ...existing,
+        status,
+        decidedBy,
+        ...(decisionReason !== undefined ? { decisionReason } : {}),
+        decidedAt,
+      });
+    },
+    recordDecision: async () => {},
+    listDecisionsForApproval: async () => [],
+    expirePending: async () => 0,
+  };
+
+  const workflowTasksStore = new Map<string, WorkflowTask>();
+  const workflowTasks: WorkflowTaskRepository = {
+    getById: async (id) => workflowTasksStore.get(id) ?? null,
+    listForRun: async (workflowRunId) =>
+      [...workflowTasksStore.values()].filter((t) => t.workflowRunId === workflowRunId),
+    create: async (task) => {
+      workflowTasksStore.set(task.id, task);
+    },
+  };
+
   return {
     deps: {
       projects: projectRepository,
@@ -166,13 +265,45 @@ function createInMemoryDeps(): {
       toolInvocations,
       auditRecords,
       agentVersions,
+      workflowVersions,
       adapters: {},
     },
     policiesStore,
     invocationsStore,
     auditRecordsStore,
     agentVersionsStore,
+    workflowVersionsStore,
+    approvalsStore,
+    workflowTasksStore,
+    approvals,
+    workflowTasks,
   };
+}
+
+function seedWorkflowVersion(
+  workflowVersionsStore: Map<string, WorkflowVersion>,
+  overrides: Partial<WorkflowVersion> = {},
+): WorkflowVersion {
+  const version: WorkflowVersion = {
+    id: randomUUID() as WorkflowVersion['id'],
+    workflowDefinitionId: randomUUID() as WorkflowVersion['workflowDefinitionId'],
+    version: 1,
+    status: 'PUBLISHED',
+    definition: {
+      name: 'Test Workflow',
+      trigger: {},
+      inputs: [],
+      nodes: [],
+      edges: [],
+      policies: [],
+      outputs: [],
+    },
+    createdBy: 'alice',
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  };
+  workflowVersionsStore.set(version.id, version);
+  return version;
 }
 
 function seedAgentVersion(
@@ -251,10 +382,11 @@ describe('invokeTool', () => {
   let workflowTaskId: WorkflowTaskId;
   let auditRecordsStore: AuditRecord[];
   let agentVersionsStore: Map<string, AgentVersion>;
+  let workflowVersionsStore: Map<string, WorkflowVersion>;
   const organisationId = randomUUID() as OrganisationId;
 
   beforeEach(async () => {
-    ({ deps, auditRecordsStore, agentVersionsStore } = createInMemoryDeps());
+    ({ deps, auditRecordsStore, agentVersionsStore, workflowVersionsStore } = createInMemoryDeps());
     const now = new Date().toISOString();
     const project: Project = {
       id: randomUUID() as Project['id'],
@@ -561,6 +693,131 @@ describe('invokeTool', () => {
     expect(invocation.errorCode).toBe('DEVOS_AGENT_CAPABILITY_DENIED');
   });
 
+  it('DEVOS-139: an organisation-scoped DENY overrides a project-scoped ALLOW for the same action', async () => {
+    await seedCapability(deps, projectId);
+    const organisationDenyPolicy: Policy = {
+      id: randomUUID() as Policy['id'],
+      organisationId,
+      key: 'org-lockdown',
+      version: 1,
+      status: 'PUBLISHED',
+      definition: { rules: [{ action: 'git-commit', effect: 'DENY' }] } as unknown as Record<
+        string,
+        unknown
+      >,
+      createdBy: 'alice',
+      publishedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+    await deps.policies.create(organisationDenyPolicy);
+    const projectAllowPolicy = publishedPolicy(projectId, organisationId, {
+      rules: [{ action: 'git-commit', effect: 'ALLOW' }],
+    });
+    await deps.policies.create(projectAllowPolicy);
+    let invoked = false;
+    deps.adapters['git-commit'] = {
+      invoke: async () => {
+        invoked = true;
+        return { outputMetadata: {} };
+      },
+    };
+
+    const invocation = await invokeTool(deps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+
+    expect(invocation.status).toBe('REJECTED');
+    expect(invocation.errorCode).toBe('DEVOS_TOOL_POLICY_DENY');
+    expect(invoked).toBe(false);
+  });
+
+  it('DEVOS-139: a project-scoped ALLOW still governs when no organisation policy addresses the action', async () => {
+    await seedCapability(deps, projectId);
+    const organisationUnrelatedPolicy: Policy = {
+      id: randomUUID() as Policy['id'],
+      organisationId,
+      key: 'org-unrelated',
+      version: 1,
+      status: 'PUBLISHED',
+      definition: { rules: [{ action: 'deploy', effect: 'DENY' }] } as unknown as Record<
+        string,
+        unknown
+      >,
+      createdBy: 'alice',
+      publishedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+    await deps.policies.create(organisationUnrelatedPolicy);
+    deps.adapters['git-commit'] = {
+      invoke: async () => ({ outputMetadata: { commitSha: 'abc123' } }),
+    };
+
+    const invocation = await invokeTool(deps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+
+    expect(invocation.status).toBe('SUCCEEDED');
+  });
+
+  it('DEVOS-138: a policy keyed on riskClass governs a real tool invocation', async () => {
+    await seedCapability(deps, projectId, { riskClass: 'R3' });
+    const policy = publishedPolicy(projectId, organisationId, {
+      rules: [{ action: 'git-commit', effect: 'DENY', condition: { riskClass: 'R3' } }],
+    });
+    await deps.policies.create(policy);
+    let invoked = false;
+    deps.adapters['git-commit'] = {
+      invoke: async () => {
+        invoked = true;
+        return { outputMetadata: {} };
+      },
+    };
+
+    const invocation = await invokeTool(deps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+
+    expect(invocation.status).toBe('REJECTED');
+    expect(invocation.errorCode).toBe('DEVOS_TOOL_POLICY_DENY');
+    expect(invoked).toBe(false);
+  });
+
+  it('DEVOS-138: a policy keyed on workflowId/workflowVersion governs a real tool invocation', async () => {
+    await seedCapability(deps, projectId);
+    const workflowVersion = seedWorkflowVersion(workflowVersionsStore);
+    const policy = publishedPolicy(projectId, organisationId, {
+      rules: [
+        {
+          action: 'git-commit',
+          effect: 'DENY',
+          condition: {
+            workflowId: workflowVersion.workflowDefinitionId,
+            workflowVersion: workflowVersion.version,
+          },
+        },
+      ],
+    });
+    await deps.policies.create(policy);
+    let invoked = false;
+    deps.adapters['git-commit'] = {
+      invoke: async () => {
+        invoked = true;
+        return { outputMetadata: {} };
+      },
+    };
+
+    const governed = await invokeTool(deps, 'alice', projectId, workflowTaskId, {
+      ...VALID_INPUT,
+      workflowVersionId: workflowVersion.id,
+    });
+    expect(governed.status).toBe('REJECTED');
+    expect(governed.errorCode).toBe('DEVOS_TOOL_POLICY_DENY');
+    expect(invoked).toBe(false);
+
+    const otherWorkflowVersion = seedWorkflowVersion(workflowVersionsStore);
+    const ungoverned = await invokeTool(deps, 'alice', projectId, workflowTaskId, {
+      ...VALID_INPUT,
+      idempotencyKey: 'idem-2',
+      workflowVersionId: otherWorkflowVersion.id,
+    });
+    expect(ungoverned.status).toBe('SUCCEEDED');
+    expect(invoked).toBe(true);
+  });
+
   it('DEVOS-088: records a supplied correlationId in both inputMetadata and the audit record', async () => {
     await seedCapability(deps, projectId);
     deps.adapters['git-commit'] = {
@@ -631,5 +888,186 @@ describe('invokeTool', () => {
     expect(invocation.inputMetadata).not.toHaveProperty('agentVersionId');
     const record = auditRecordsStore.find((r) => r.targetId === invocation.id);
     expect(record?.metadata).not.toHaveProperty('agentVersionId');
+  });
+
+  describe('Gap revisit: a policy REQUIRE_APPROVAL decision creates and resolves a real Approval', () => {
+    function seedWorkflowTask(
+      workflowTasksStore: Map<string, WorkflowTask>,
+      taskId: WorkflowTaskId,
+    ): WorkflowTask {
+      const now = new Date().toISOString();
+      const task: WorkflowTask = {
+        id: taskId,
+        workflowRunId: randomUUID() as WorkflowTask['workflowRunId'],
+        taskKey: 'release',
+        taskType: 'TOOL_TASK',
+        status: 'RUNNING',
+        attempt: 1,
+        input: {},
+        createdAt: now,
+        updatedAt: now,
+      };
+      workflowTasksStore.set(task.id, task);
+      return task;
+    }
+
+    it('falls back to the old straight-rejection behaviour when approvals/workflowTasks are not wired', async () => {
+      await seedCapability(deps, projectId);
+      const policy = publishedPolicy(projectId, organisationId, {
+        rules: [{ action: 'git-commit', effect: 'REQUIRE_APPROVAL' }],
+      });
+      await deps.policies.create(policy);
+
+      const invocation = await invokeTool(deps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+
+      expect(invocation.status).toBe('REJECTED');
+      expect(invocation.errorCode).toBe('DEVOS_TOOL_POLICY_REQUIRE_APPROVAL');
+    });
+
+    it('creates a real, PENDING Approval on the first invocation and rejects with a distinguishable "pending" code', async () => {
+      const { approvals, workflowTasks, workflowTasksStore } = createInMemoryDeps();
+      const fullDeps: ToolGatewayDeps = { ...deps, approvals, workflowTasks };
+      await seedCapability(fullDeps, projectId);
+      const task = seedWorkflowTask(workflowTasksStore, workflowTaskId);
+      const policy = publishedPolicy(projectId, organisationId, {
+        rules: [{ action: 'git-commit', effect: 'REQUIRE_APPROVAL' }],
+      });
+      await fullDeps.policies.create(policy);
+      let invoked = false;
+      fullDeps.adapters['git-commit'] = {
+        invoke: async () => {
+          invoked = true;
+          return { outputMetadata: {} };
+        },
+      };
+
+      const invocation = await invokeTool(fullDeps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+
+      expect(invocation.status).toBe('REJECTED');
+      expect(invocation.errorCode).toBe('DEVOS_TOOL_POLICY_REQUIRE_APPROVAL_PENDING');
+      expect(invoked).toBe(false);
+
+      const created = await approvals.listForRun(task.workflowRunId);
+      expect(created).toHaveLength(1);
+      expect(created[0]).toMatchObject({
+        status: 'PENDING',
+        requestedBy: 'alice',
+        riskClass: 'R2',
+      });
+    });
+
+    it('resolves the same Approval (does not create a second) on a retried invocation with the same idempotencyKey', async () => {
+      const { approvals, workflowTasks, workflowTasksStore } = createInMemoryDeps();
+      const fullDeps: ToolGatewayDeps = { ...deps, approvals, workflowTasks };
+      await seedCapability(fullDeps, projectId);
+      const task = seedWorkflowTask(workflowTasksStore, workflowTaskId);
+      const policy = publishedPolicy(projectId, organisationId, {
+        rules: [{ action: 'git-commit', effect: 'REQUIRE_APPROVAL' }],
+      });
+      await fullDeps.policies.create(policy);
+
+      await invokeTool(fullDeps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+      await invokeTool(fullDeps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+
+      const created = await approvals.listForRun(task.workflowRunId);
+      expect(created).toHaveLength(1);
+    });
+
+    it('proceeds to invoke the real adapter once the real Approval is APPROVED', async () => {
+      const { approvals, workflowTasks, workflowTasksStore } = createInMemoryDeps();
+      const fullDeps: ToolGatewayDeps = { ...deps, approvals, workflowTasks };
+      await seedCapability(fullDeps, projectId);
+      const task = seedWorkflowTask(workflowTasksStore, workflowTaskId);
+      const policy = publishedPolicy(projectId, organisationId, {
+        rules: [{ action: 'git-commit', effect: 'REQUIRE_APPROVAL' }],
+      });
+      await fullDeps.policies.create(policy);
+      fullDeps.adapters['git-commit'] = {
+        invoke: async () => ({ outputMetadata: { commitSha: 'abc123' } }),
+      };
+
+      const first = await invokeTool(fullDeps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+      expect(first.status).toBe('REJECTED');
+
+      const pending = (await approvals.listForRun(task.workflowRunId))[0]!;
+      await approvals.decide(pending.id, 'APPROVED', 'bob', undefined, new Date().toISOString());
+
+      // Same idempotencyKey as the first call — the realistic retry a task
+      // handler's own WAIT-style polling would make, now that the dedup
+      // check correctly does not replay a stale "still pending" rejection.
+      const second = await invokeTool(fullDeps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+
+      expect(second.status).toBe('SUCCEEDED');
+      expect(second.outputMetadata).toEqual({ commitSha: 'abc123' });
+    });
+
+    it('permanently rejects once the real Approval is REJECTED, without ever invoking the adapter', async () => {
+      const { approvals, workflowTasks, workflowTasksStore } = createInMemoryDeps();
+      const fullDeps: ToolGatewayDeps = { ...deps, approvals, workflowTasks };
+      await seedCapability(fullDeps, projectId);
+      const task = seedWorkflowTask(workflowTasksStore, workflowTaskId);
+      const policy = publishedPolicy(projectId, organisationId, {
+        rules: [{ action: 'git-commit', effect: 'REQUIRE_APPROVAL' }],
+      });
+      await fullDeps.policies.create(policy);
+      let invoked = false;
+      fullDeps.adapters['git-commit'] = {
+        invoke: async () => {
+          invoked = true;
+          return { outputMetadata: {} };
+        },
+      };
+
+      await invokeTool(fullDeps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+      const pending = (await approvals.listForRun(task.workflowRunId))[0]!;
+      await approvals.decide(pending.id, 'REJECTED', 'bob', 'Too risky.', new Date().toISOString());
+
+      // Same idempotencyKey as the first call — see the "APPROVED" test above.
+      const second = await invokeTool(fullDeps, 'alice', projectId, workflowTaskId, VALID_INPUT);
+
+      expect(second.status).toBe('REJECTED');
+      expect(second.errorCode).toBe('DEVOS_TOOL_POLICY_REQUIRE_APPROVAL_REJECTED');
+      expect(invoked).toBe(false);
+    });
+
+    it('carries the real agentId/agentVersion/workflowId/workflowVersion ABAC context on the created Approval', async () => {
+      const {
+        deps: freshDeps,
+        approvals,
+        workflowTasks,
+        workflowTasksStore,
+        agentVersionsStore,
+        workflowVersionsStore: fullWorkflowVersionsStore,
+      } = createInMemoryDeps();
+      const fullDeps: ToolGatewayDeps = {
+        ...deps,
+        approvals,
+        workflowTasks,
+        agentVersions: freshDeps.agentVersions,
+        workflowVersions: freshDeps.workflowVersions,
+      };
+      await seedCapability(fullDeps, projectId, { key: 'git-commit' });
+      const task = seedWorkflowTask(workflowTasksStore, workflowTaskId);
+      const agentVersion = seedAgentVersion(agentVersionsStore, ['git-commit']);
+      const workflowVersion = seedWorkflowVersion(fullWorkflowVersionsStore);
+      const policy = publishedPolicy(projectId, organisationId, {
+        rules: [{ action: 'git-commit', effect: 'REQUIRE_APPROVAL' }],
+      });
+      await fullDeps.policies.create(policy);
+
+      await invokeTool(fullDeps, 'alice', projectId, workflowTaskId, {
+        ...VALID_INPUT,
+        agentVersionId: agentVersion.id,
+        workflowVersionId: workflowVersion.id,
+      });
+
+      const created = (await approvals.listForRun(task.workflowRunId))[0];
+      expect(created).toMatchObject({
+        agentId: agentVersion.agentId,
+        agentVersion: agentVersion.version,
+        workflowId: workflowVersion.workflowDefinitionId,
+        workflowVersion: workflowVersion.version,
+      });
+    });
   });
 });

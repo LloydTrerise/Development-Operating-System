@@ -220,6 +220,8 @@ describe('closeWorkItem (real project-scoped evidence lookup)', () => {
       evidenceReference: { artifactVersionIds: [], scopeHash: 'x'.repeat(64) },
       requestedAt: new Date(0).toISOString(),
       decidedAt: new Date(1).toISOString(),
+      requiredApprovers: 1,
+      enforceSeparationOfDuties: false,
     };
 
     const projects: ProjectRepository = {
@@ -264,6 +266,9 @@ describe('closeWorkItem (real project-scoped evidence lookup)', () => {
       getPendingForRunAndType: async () => null,
       create: async () => {},
       decide: async () => {},
+      recordDecision: async () => {},
+      listDecisionsForApproval: async () => [],
+      expirePending: async () => 0,
     };
 
     const closeWorkItemCalls: Array<{

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   NonRetryableTaskError,
+  type ApprovalRepository,
   type TaskFailure,
   type TaskQueue,
   type WorkflowTask,
@@ -235,6 +236,46 @@ describe('task dispatcher', () => {
       dispatcher.start();
       await vi.waitFor(() => expect(metrics.getCounter('task_queue.reclaimed_stale')).toBe(2));
       await dispatcher.stop();
+    });
+
+    it('DEVOS-145: calls approvals.expirePending() on the same periodic tick and records the count, when an approvals repository is supplied', async () => {
+      const { taskQueue } = createFakeQueue([]);
+      const metrics = createMetricsRegistry();
+      const approvals: ApprovalRepository = {
+        getById: async () => null,
+        listForProject: async () => [],
+        listForRun: async () => [],
+        getPendingForRunAndType: async () => null,
+        create: async () => {},
+        decide: async () => {},
+        recordDecision: async () => {},
+        listDecisionsForApproval: async () => [],
+        expirePending: async () => 3,
+      };
+      const dispatcher = createTaskDispatcher(taskQueue, {
+        pollIntervalMs: 5,
+        reclaimIntervalMs: 60_000,
+        metrics,
+        approvals,
+      });
+
+      dispatcher.start();
+      await vi.waitFor(() => expect(metrics.getCounter('approval.expired')).toBe(3));
+      await dispatcher.stop();
+    });
+
+    it('DEVOS-145: never calls expirePending() when no approvals repository is supplied (existing behaviour unaffected)', async () => {
+      const { taskQueue } = createFakeQueue([]);
+      const dispatcher = createTaskDispatcher(taskQueue, {
+        pollIntervalMs: 5,
+        reclaimIntervalMs: 60_000,
+      });
+
+      dispatcher.start();
+      await vi.waitFor(() => expect(dispatcher.status()).toBe('running'));
+      await dispatcher.stop();
+      // No assertion needed beyond "did not throw" — there is no approvals
+      // dependency to have been called incorrectly.
     });
 
     it('does not throw or require metrics when none is supplied (fully optional)', async () => {

@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ProjectTypeId } from '@devos/contracts';
 import type {
+  Approval,
+  ApprovalRepository,
   Artifact,
   ArtifactRepository,
   ArtifactVersion,
@@ -26,6 +28,7 @@ import type {
   WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
+  WorkflowTaskRepository,
   WorkItem,
   WorkItemRepository,
 } from '@devos/domain';
@@ -209,6 +212,8 @@ async function buildScenario(
     getByProjectAndKeyAndVersion: async () => null,
     getLatestForProjectAndKey: async () => null,
     listForProject: async () => [] as Policy[],
+    getLatestForOrganisationAndKey: async () => null,
+    listForOrganisation: async () => [],
     create: async () => {},
     publish: async () => {},
   };
@@ -239,6 +244,8 @@ async function buildScenario(
       auditRecordsList.push(record);
     },
     listForProject: async (projectId) => auditRecordsList.filter((r) => r.projectId === projectId),
+    listForOrganisation: async (organisationId) =>
+      auditRecordsList.filter((r) => r.organisationId === organisationId),
   };
   const extraIntegrations = extraIntegrationsFactory?.(project.id) ?? [];
   const allIntegrations = [gitIntegration, ...extraIntegrations];
@@ -450,6 +457,8 @@ describe('runReleaseTask (real local git repository, real local staging deployme
       getByProjectAndKeyAndVersion: async () => null,
       getLatestForProjectAndKey: async () => null,
       listForProject: async () => [denyPolicy],
+      getLatestForOrganisationAndKey: async () => null,
+      listForOrganisation: async () => [],
       create: async () => {},
       publish: async () => {},
     };
@@ -457,6 +466,66 @@ describe('runReleaseTask (real local git repository, real local staging deployme
     const deps = buildDeps(scenario, storage, () => {});
 
     await expect(runReleaseTask(deps, scenario.task)).rejects.toThrow(NonRetryableTaskError);
+  });
+
+  it('Gap revisit: reports waitUntil (does not throw) when the deploy is REQUIRE_APPROVAL-gated and a real Approval is still pending', async () => {
+    const scenario = await buildScenario(repositoryPath, stagingRoot, commitSha, {
+      releaseEnvironment: 'production',
+      healthCheckCommand: 'test -f index.html',
+    });
+    const requireApprovalPolicy: Policy = {
+      id: randomUUID() as Policy['id'],
+      organisationId: randomUUID() as OrganisationId,
+      projectId: scenario.project.id,
+      key: 'release-policy',
+      version: 1,
+      status: 'PUBLISHED',
+      definition: {
+        rules: [
+          { action: 'deploy', effect: 'REQUIRE_APPROVAL', condition: { environment: 'production' } },
+        ],
+      },
+      createdBy: 'alice',
+      publishedAt: new Date(0).toISOString(),
+      createdAt: new Date(0).toISOString(),
+    };
+    scenario.policies = {
+      getById: async () => null,
+      getByProjectAndKeyAndVersion: async () => null,
+      getLatestForProjectAndKey: async () => null,
+      listForProject: async () => [requireApprovalPolicy],
+      getLatestForOrganisationAndKey: async () => null,
+      listForOrganisation: async () => [],
+      create: async () => {},
+      publish: async () => {},
+    };
+    const approvalsCreated: Approval[] = [];
+    const approvals: ApprovalRepository = {
+      getById: async () => null,
+      listForProject: async () => [],
+      listForRun: async () => approvalsCreated,
+      getPendingForRunAndType: async () => null,
+      create: async (approval) => {
+        approvalsCreated.push(approval);
+      },
+      decide: async () => {},
+      recordDecision: async () => {},
+      listDecisionsForApproval: async () => [],
+      expirePending: async () => 0,
+    };
+    const workflowTasks: WorkflowTaskRepository = {
+      getById: async (id) => (id === scenario.task.id ? scenario.task : null),
+      listForRun: async () => [scenario.task],
+      create: async () => {},
+    };
+    const storage = createLocalFilesystemStorage(storageDir);
+    const deps: ToolTaskHandlerDeps = { ...buildDeps(scenario, storage, () => {}), approvals, workflowTasks };
+
+    const output = await runReleaseTask(deps, scenario.task);
+
+    expect(typeof output.waitUntil).toBe('string');
+    expect(approvalsCreated).toHaveLength(1);
+    expect(approvalsCreated[0]?.status).toBe('PENDING');
   });
 
   it('DEVOS-077: throws a plain (retryable) Error, not NonRetryableTaskError, when the deploy adapter itself fails', async () => {

@@ -5,6 +5,12 @@ export interface Organisation {
   name: string;
   slug: string;
   status: string;
+  /**
+   * DEVOS-155: mirrors `Project.budgetUsd`'s own additive, optional
+   * pattern exactly — no budget configured means no threshold to check
+   * against, not a zero budget.
+   */
+  budgetUsd?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -17,6 +23,7 @@ export interface CreateOrganisationInput {
 export interface UpdateOrganisationInput {
   name?: string;
   status?: string;
+  budgetUsd?: number;
 }
 
 export interface OrganisationRepository {

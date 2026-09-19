@@ -195,6 +195,88 @@ describe('evaluatePolicies', () => {
     expect(result.matchedPolicyKey).toBe('release-policy');
   });
 
+  it('DEVOS-138: only matches an agent-identity-conditioned rule when agentId and agentVersion both match', () => {
+    const policy = makePolicy({
+      key: 'agent-scoped',
+      definition: {
+        rules: [
+          {
+            action: 'tool.invoke',
+            effect: 'DENY',
+            condition: { agentId: 'agent-1', agentVersion: 2 },
+          },
+        ],
+      },
+    });
+
+    const matching = evaluatePolicies([policy], {
+      action: 'tool.invoke',
+      agentId: 'agent-1',
+      agentVersion: 2,
+    });
+    expect(matching.decision).toBe('DENY');
+
+    const differentVersion = evaluatePolicies([policy], {
+      action: 'tool.invoke',
+      agentId: 'agent-1',
+      agentVersion: 1,
+    });
+    expect(differentVersion.decision).toBe('ALLOW');
+
+    const noAgent = evaluatePolicies([policy], { action: 'tool.invoke' });
+    expect(noAgent.decision).toBe('ALLOW');
+  });
+
+  it('DEVOS-138: only matches a workflow-identity-conditioned rule when workflowId and workflowVersion both match', () => {
+    const policy = makePolicy({
+      key: 'workflow-scoped',
+      definition: {
+        rules: [
+          {
+            action: 'tool.invoke',
+            effect: 'REQUIRE_APPROVAL',
+            condition: { workflowId: 'workflow-1', workflowVersion: 3 },
+          },
+        ],
+      },
+    });
+
+    const matching = evaluatePolicies([policy], {
+      action: 'tool.invoke',
+      workflowId: 'workflow-1',
+      workflowVersion: 3,
+    });
+    expect(matching.decision).toBe('REQUIRE_APPROVAL');
+
+    const differentWorkflow = evaluatePolicies([policy], {
+      action: 'tool.invoke',
+      workflowId: 'workflow-2',
+      workflowVersion: 3,
+    });
+    expect(differentWorkflow.decision).toBe('ALLOW');
+  });
+
+  it('DEVOS-138: only matches a riskClass-conditioned rule when riskClass matches', () => {
+    const policy = makePolicy({
+      key: 'high-risk-approval',
+      definition: {
+        rules: [
+          {
+            action: 'tool.invoke',
+            effect: 'REQUIRE_APPROVAL',
+            condition: { riskClass: 'R3' },
+          },
+        ],
+      },
+    });
+
+    const highRisk = evaluatePolicies([policy], { action: 'tool.invoke', riskClass: 'R3' });
+    expect(highRisk.decision).toBe('REQUIRE_APPROVAL');
+
+    const lowRisk = evaluatePolicies([policy], { action: 'tool.invoke', riskClass: 'R0' });
+    expect(lowRisk.decision).toBe('ALLOW');
+  });
+
   it('does not report a conflict when multiple matching policies agree on the same effect', () => {
     const first = makePolicy({
       key: 'release-a',

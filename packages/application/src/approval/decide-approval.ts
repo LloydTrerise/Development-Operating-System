@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import type { ApprovalId } from '@devos/contracts';
 import { canDecideApproval, type Approval } from '@devos/domain';
-import { evaluatePolicies } from '@devos/policy';
+import { evaluatePoliciesWithPrecedence } from '@devos/policy';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.js';
 import { resolveMembership } from '../projects/membership-access.js';
 import { startRunForVersion } from '../workflows/run-creation.js';
@@ -86,11 +87,27 @@ async function decideApproval(
     );
   }
 
-  const policies = await deps.policies.listForProject(project.id);
-  const policyDecision = evaluatePolicies(policies, {
+  // DEVOS-139: organisation-level policies take mandatory precedence over
+  // this project's own, same as `invoke-tool.ts`'s own call.
+  const [organisationPolicies, projectPolicies] = await Promise.all([
+    deps.policies.listForOrganisation(project.organisationId),
+    deps.policies.listForProject(project.id),
+  ]);
+  // Gap revisit (post-Sprint-16): when this approval carries real ABAC
+  // context (set by the tool-invocation-triggered creation path in
+  // `invoke-tool.ts`, or by a risk-tiered `APPROVAL` graph node), the same
+  // DEVOS-138 attributes that governed the original request now also govern
+  // its own decision — previously always omitted, since an `Approval` had
+  // nowhere to carry them.
+  const policyDecision = evaluatePoliciesWithPrecedence(organisationPolicies, projectPolicies, {
     action: approval.approvalType,
     actorRole: membership.role,
     resourceType: 'APPROVAL',
+    ...(approval.riskClass !== undefined ? { riskClass: approval.riskClass } : {}),
+    ...(approval.agentId !== undefined ? { agentId: approval.agentId } : {}),
+    ...(approval.agentVersion !== undefined ? { agentVersion: approval.agentVersion } : {}),
+    ...(approval.workflowId !== undefined ? { workflowId: approval.workflowId } : {}),
+    ...(approval.workflowVersion !== undefined ? { workflowVersion: approval.workflowVersion } : {}),
   });
   if (policyDecision.decision !== 'ALLOW') {
     throw new ForbiddenError(
@@ -98,7 +115,55 @@ async function decideApproval(
     );
   }
 
+  // DEVOS-144: an approval can require the decider to be a distinct
+  // identity from whoever requested it. Checked before anything else this
+  // decision would otherwise do, matching every other rejection above.
+  if (approval.enforceSeparationOfDuties && principalId === approval.requestedBy) {
+    throw new ForbiddenError(
+      'Separation of duties: the requester of this approval may not also decide it.',
+    );
+  }
+
+  // DEVOS-143: every prior decision this approval has already recorded —
+  // used both to reject a repeat decider and to know how close a
+  // multi-approver approval is to its own threshold.
+  const priorDecisions = await deps.approvals.listDecisionsForApproval(approval.id);
+  if (priorDecisions.some((decision) => decision.decidedBy === principalId)) {
+    throw new ValidationError('This principal has already decided this approval.');
+  }
+
   const decidedAt = new Date().toISOString();
+  await deps.approvals.recordDecision({
+    id: randomUUID(),
+    approvalId: approval.id,
+    decidedBy: principalId,
+    decision: status,
+    ...(input.comment !== undefined ? { reason: input.comment } : {}),
+    decidedAt,
+  });
+
+  // DEVOS-143 (extended by a later gap revisit): an APPROVED decision only
+  // finalizes the approval once the count of distinct APPROVED deciders
+  // reaches its own `requiredApprovers` (default `1`, so every
+  // pre-DEVOS-143 approval finalizes on its first — and only — decision
+  // exactly as before). A REJECTED decision is symmetric: it finalizes once
+  // distinct REJECTED deciders reach `requiredRejections` (also default
+  // `1` — fail-fast on the very first rejection, DEVOS-143's own original
+  // behaviour, now a real configurable threshold rather than a hardcoded
+  // rule, per this codebase's own "no spec-mandated design, so make it a
+  // flagged, disclosed, configurable assumption" convention).
+  const isFinal =
+    (status === 'APPROVED' &&
+      priorDecisions.filter((decision) => decision.decision === 'APPROVED').length + 1 >=
+        approval.requiredApprovers) ||
+    (status === 'REJECTED' &&
+      priorDecisions.filter((decision) => decision.decision === 'REJECTED').length + 1 >=
+        approval.requiredRejections);
+
+  if (!isFinal) {
+    return { ...approval, status: 'PENDING' };
+  }
+
   // DEVOS-111: one atomic transaction — a crash between the decision write
   // and the run transition can no longer leave one applied without the
   // other.

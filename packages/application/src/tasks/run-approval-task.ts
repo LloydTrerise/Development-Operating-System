@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import type { OrganisationId, ToolCapabilityRiskClass } from '@devos/contracts';
 import type {
   Approval,
   ApprovalRepository,
   ArtifactVersionRepository,
+  PolicyRepository,
+  ProjectRepository,
   WorkflowRunRepository,
   WorkflowTask,
   WorkflowTaskRepository,
@@ -17,12 +20,82 @@ export interface ApprovalTaskHandlerDeps {
   workflowTasks: WorkflowTaskRepository;
   artifactVersions: ArtifactVersionRepository;
   approvals: ApprovalRepository;
+  /**
+   * DEVOS-146: only required to resolve risk-tiered approval requirements
+   * from a real organisation policy when a node's own `config.riskClass` is
+   * set. Optional — omitted entirely in every existing test/caller that
+   * never configures a `riskClass`, mirroring `ToolGatewayDeps.agentVersions`'s
+   * own optional-dependency pattern.
+   */
+  projects?: ProjectRepository;
+  policies?: PolicyRepository;
 }
 
 interface ApprovalNodeConfig {
   approvalType?: string;
   /** Default 2s — how soon to re-check a still-`PENDING` approval's own status. */
   pollIntervalSeconds?: number;
+  /**
+   * DEVOS-146: an author-specified risk tier for this gate — the same kind
+   * of real graph-authoring input `WAIT`'s `waitType`/`CONDITION`'s `rule`
+   * already are. When set, and `projects`/`policies` are both supplied, the
+   * organisation's own published policy for this `approvalType` is
+   * consulted for `requiredApprovers`/`enforceSeparationOfDuties`.
+   */
+  riskClass?: ToolCapabilityRiskClass;
+}
+
+/**
+ * DEVOS-146: mirrors `evaluatePolicies`'s own "highest published version per
+ * key" precedence for the one matching rule found (a direct, small
+ * duplication of that shape rather than exporting evaluator internals
+ * across the `@devos/policy`/`@devos/application` package boundary — this
+ * needs the rule's own extra `requiredApprovers`/`enforceSeparationOfDuties`
+ * fields, not just its `effect`, which `evaluatePolicies`'s own return value
+ * never surfaces).
+ */
+async function resolveApprovalRequirements(
+  deps: ApprovalTaskHandlerDeps,
+  organisationId: OrganisationId,
+  approvalType: string,
+  riskClass: ToolCapabilityRiskClass | undefined,
+): Promise<{ requiredApprovers: number; enforceSeparationOfDuties: boolean; requiredRejections: number }> {
+  const defaults = { requiredApprovers: 1, enforceSeparationOfDuties: false, requiredRejections: 1 };
+  if (!riskClass || !deps.policies) return defaults;
+
+  const policies = await deps.policies.listForOrganisation(organisationId);
+  const byKey = new Map<string, (typeof policies)[number]>();
+  for (const policy of policies) {
+    if (policy.status !== 'PUBLISHED') continue;
+    const current = byKey.get(policy.key);
+    if (!current || policy.version > current.version) byKey.set(policy.key, policy);
+  }
+
+  for (const policy of [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key))) {
+    const definition = policy.definition as unknown as {
+      rules?: Array<{
+        action: string;
+        condition?: { riskClass?: string };
+        requiredApprovers?: number;
+        enforceSeparationOfDuties?: boolean;
+        requiredRejections?: number;
+      }>;
+    };
+    const rule = definition.rules?.find(
+      (candidate) =>
+        candidate.action === approvalType && candidate.condition?.riskClass === riskClass,
+    );
+    if (rule) {
+      return {
+        requiredApprovers: rule.requiredApprovers ?? defaults.requiredApprovers,
+        enforceSeparationOfDuties:
+          rule.enforceSeparationOfDuties ?? defaults.enforceSeparationOfDuties,
+        requiredRejections: rule.requiredRejections ?? defaults.requiredRejections,
+      };
+    }
+  }
+
+  return defaults;
 }
 
 const SYSTEM_ACTOR_ID = 'devos-worker';
@@ -117,6 +190,18 @@ export async function runApprovalTask(
   if (!approval) {
     const artifactVersionIds = await collectRunArtifactVersionIds(deps, task.workflowRunId);
     const now = new Date().toISOString();
+    // DEVOS-146: risk-tiered routing — real defaults unless the node names
+    // a riskClass and the project's own organisation has a real published
+    // policy naming stricter requirements for it.
+    const project = deps.projects ? await deps.projects.getById(run.projectId) : null;
+    const { requiredApprovers, enforceSeparationOfDuties, requiredRejections } = project
+      ? await resolveApprovalRequirements(
+          deps,
+          project.organisationId,
+          approvalType,
+          config?.riskClass,
+        )
+      : { requiredApprovers: 1, enforceSeparationOfDuties: false, requiredRejections: 1 };
     const created: Approval = {
       id: randomUUID() as Approval['id'],
       projectId: run.projectId,
@@ -124,11 +209,20 @@ export async function runApprovalTask(
       approvalType,
       status: 'PENDING',
       requestedBy: SYSTEM_ACTOR_ID,
+      // Gap revisit: real ABAC context, sourced from data already resolved
+      // above — the node's own author-specified riskClass, and the real
+      // workflow version this run is actually executing.
+      ...(config?.riskClass !== undefined ? { riskClass: config.riskClass } : {}),
+      workflowId: version.workflowDefinitionId,
+      workflowVersion: version.version,
       evidenceReference: {
         artifactVersionIds,
         scopeHash: computeScopeHash(artifactVersionIds),
       },
       requestedAt: now,
+      requiredApprovers,
+      enforceSeparationOfDuties,
+      requiredRejections,
     };
     await deps.approvals.create(created);
 
@@ -146,6 +240,16 @@ export async function runApprovalTask(
       `Approval for node "${task.taskKey}" was rejected${
         approval.decisionReason ? `: ${approval.decisionReason}` : '.'
       }`,
+    );
+  }
+
+  // DEVOS-145: expiry is a permanent failure exactly like rejection — the
+  // existing queue.fail()/resolveTaskFailure() path (including DEVOS-120's
+  // tolerant-JOIN semantics) decides whether that fails just this branch or
+  // the whole run.
+  if (approval.status === 'EXPIRED') {
+    throw new NonRetryableTaskError(
+      `Approval for node "${task.taskKey}" expired before it was decided.`,
     );
   }
 

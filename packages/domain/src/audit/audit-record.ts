@@ -21,4 +21,10 @@ export interface AuditRecord {
 export interface AuditRecordRepository {
   create: (record: AuditRecord) => Promise<void>;
   listForProject: (projectId: ProjectId, limit?: number) => Promise<AuditRecord[]>;
+  /**
+   * DEVOS-141: a direct `organisation_id` query — `AuditRecord.organisationId`
+   * is already required on every row, so this is a real, already-supported
+   * shape, not a workaround for the lack of one.
+   */
+  listForOrganisation: (organisationId: OrganisationId, limit?: number) => Promise<AuditRecord[]>;
 }

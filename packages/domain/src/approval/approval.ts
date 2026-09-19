@@ -1,4 +1,10 @@
-import type { ApprovalId, ApprovalStatus, ProjectId, WorkflowRunId } from '@devos/contracts';
+import type {
+  ApprovalId,
+  ApprovalStatus,
+  ProjectId,
+  ToolCapabilityRiskClass,
+  WorkflowRunId,
+} from '@devos/contracts';
 
 /**
  * "The manifest should identify material sources without unnecessarily
@@ -35,6 +41,57 @@ export interface Approval {
   evidenceReference: ApprovalEvidenceReference;
   requestedAt: string;
   decidedAt?: string;
+  /**
+   * DEVOS-143: how many *distinct* `APPROVED` decisions this approval needs
+   * before it finalizes. Defaults to `1` everywhere it is created — every
+   * pre-DEVOS-143 approval behaves exactly as before.
+   */
+  requiredApprovers: number;
+  /**
+   * DEVOS-144: when true, `decideApproval` rejects a decision from the same
+   * identity that requested the approval. Defaults to `false`.
+   */
+  enforceSeparationOfDuties: boolean;
+  /** DEVOS-145: a `PENDING` approval past this instant transitions to `EXPIRED`. */
+  expiresAt?: string;
+  /**
+   * Gap revisit (post-Sprint-16): how many *distinct* `REJECTED` decisions
+   * this approval needs before a rejection finalizes it — the configurable
+   * mirror of `requiredApprovers`. Defaults to `1` everywhere it is created
+   * (fail-fast on the first rejection), preserving DEVOS-143's own original
+   * behaviour exactly; a policy may configure a higher threshold via
+   * DEVOS-146's own risk-tiered routing mechanism.
+   */
+  requiredRejections: number;
+  /**
+   * Gap revisit (post-Sprint-16): real ABAC context for an approval
+   * triggered by a policy's own `REQUIRE_APPROVAL` decision on a real tool
+   * invocation (`invoke-tool.ts`) — so `decide-approval.ts`'s own policy
+   * check can evaluate the same DEVOS-138 attributes a tool invocation
+   * itself was governed by. All optional and unset by every pre-existing
+   * approval path (the two hardcoded whole-run gates, the `APPROVAL` graph
+   * node) — completely unaffected.
+   */
+  riskClass?: ToolCapabilityRiskClass;
+  agentId?: string;
+  agentVersion?: number;
+  workflowId?: string;
+  workflowVersion?: number;
+}
+
+/**
+ * DEVOS-143: one individual decision toward a (possibly multi-approver)
+ * `Approval`. `Approval.decidedBy`/`decisionReason`/`decidedAt` continue to
+ * record only the decision that actually finalized it — this is the full,
+ * per-decider audit trail underneath that.
+ */
+export interface ApprovalDecisionRecord {
+  id: string;
+  approvalId: ApprovalId;
+  decidedBy: string;
+  decision: 'APPROVED' | 'REJECTED';
+  reason?: string;
+  decidedAt: string;
 }
 
 export interface ApprovalRepository {
@@ -53,4 +110,11 @@ export interface ApprovalRepository {
     decisionReason: string | undefined,
     decidedAt: string,
   ) => Promise<void>;
+  /** DEVOS-143: records one individual decision without itself finalizing the approval. */
+  recordDecision: (record: ApprovalDecisionRecord) => Promise<void>;
+  listDecisionsForApproval: (approvalId: ApprovalId) => Promise<ApprovalDecisionRecord[]>;
+  /** DEVOS-145: transitions every `PENDING` approval whose `expiresAt` has
+   * passed to `EXPIRED`, mirroring `TaskQueue.resumeReadyWaits()`'s own
+   * shape. Returns the number of rows transitioned. */
+  expirePending: (now: string) => Promise<number>;
 }

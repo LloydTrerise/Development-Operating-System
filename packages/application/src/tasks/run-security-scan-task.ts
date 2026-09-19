@@ -5,6 +5,7 @@ import { invokeTool } from '@devos/tools';
 import { createCommandProviderAdapters } from './command-provider-adapters.js';
 import type { ToolTaskHandlerDeps } from './deps.js';
 import { resolveAuthenticatedCloneUrl } from './github-context.js';
+import { pendingApprovalWaitUntil } from './tool-invocation-outcome.js';
 
 const CONTENT_TYPE = 'application/json';
 
@@ -112,8 +113,11 @@ export async function runSecurityScanTask(
       target: { repositoryPath: workspace.path },
       parameters: { command: securityScanCommand },
       idempotencyKey: `${task.id}:security-scan`,
+      workflowVersionId: run.workflowVersionId,
       ...(correlationId !== undefined ? { correlationId } : {}),
     });
+    const scanWaitUntil = pendingApprovalWaitUntil(scanInvocation);
+    if (scanWaitUntil) return { waitUntil: scanWaitUntil };
     if (scanInvocation.status !== 'SUCCEEDED') {
       throw new Error(
         `Security scan invocation failed for task ${task.id}: ${scanInvocation.errorCode ?? 'unknown error'}`,

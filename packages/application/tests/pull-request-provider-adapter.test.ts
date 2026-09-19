@@ -91,6 +91,8 @@ function createInMemoryDeps(): ToolGatewayDeps {
     getLatestForProjectAndKey: async () => null,
     listForProject: async (projectId) =>
       [...policiesStore.values()].filter((p) => p.projectId === projectId),
+    getLatestForOrganisationAndKey: async () => null,
+    listForOrganisation: async () => [],
     create: async (policy) => {
       policiesStore.set(policy.id, policy);
     },
@@ -116,6 +118,8 @@ function createInMemoryDeps(): ToolGatewayDeps {
       auditRecordsStore.push(record);
     },
     listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
+    listForOrganisation: async (organisationId) =>
+      auditRecordsStore.filter((r) => r.organisationId === organisationId),
   };
 
   return {

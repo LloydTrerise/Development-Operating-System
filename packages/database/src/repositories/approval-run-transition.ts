@@ -90,7 +90,11 @@ export async function transitionAfterApprovalDecisionInTrx(
     targetType: 'Approval',
     targetId: approvalId,
     outcome: 'SUCCESS',
-    ...(decisionReason !== undefined ? { metadata: { decisionReason } } : {}),
+    // Gap revisit (post-Sprint-16): `approvalType` is the real, reliable
+    // policy `action` a simulation can replay (DEVOS-141's own simulation
+    // only ever handled `tool_invocation.*`'s `metadata.capability` before
+    // this, since no other audit category stored a comparable attribute).
+    metadata: { approvalType, ...(decisionReason !== undefined ? { decisionReason } : {}) },
     correlationId: decisionEnvelope.correlationId,
   });
 

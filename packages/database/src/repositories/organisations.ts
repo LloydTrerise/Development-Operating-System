@@ -9,6 +9,7 @@ function toDomain(row: OrganisationsTable): Organisation {
     name: row.name,
     slug: row.slug,
     status: row.status,
+    ...(row.budget_usd !== null ? { budgetUsd: Number(row.budget_usd) } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -38,6 +39,7 @@ export function createOrganisationRepository(db: QueryExecutor): OrganisationRep
           name: organisation.name,
           slug: organisation.slug,
           status: organisation.status,
+          budget_usd: organisation.budgetUsd?.toString() ?? null,
           created_at: organisation.createdAt,
           updated_at: organisation.updatedAt,
         })
@@ -50,6 +52,7 @@ export function createOrganisationRepository(db: QueryExecutor): OrganisationRep
         .set({
           ...(changes.name !== undefined ? { name: changes.name } : {}),
           ...(changes.status !== undefined ? { status: changes.status } : {}),
+          ...(changes.budgetUsd !== undefined ? { budget_usd: changes.budgetUsd.toString() } : {}),
           updated_at: updatedAt,
         })
         .where('id', '=', id)

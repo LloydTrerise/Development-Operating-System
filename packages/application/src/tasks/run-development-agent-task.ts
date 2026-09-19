@@ -15,6 +15,7 @@ import { buildAuthenticatedCloneUrl, resolveGitHubRepositoryTarget } from './git
 import { createPullRequestProviderAdapter } from './pull-request-provider-adapter.js';
 import { runAgentTask } from './run-agent-task.js';
 import type { DevelopmentAgentTaskHandlerDeps } from './deps.js';
+import { pendingApprovalWaitUntil } from './tool-invocation-outcome.js';
 
 const CONTENT_TYPE = 'application/json';
 
@@ -249,8 +250,11 @@ export async function runDevelopmentAgentTask(
         parameters: { path: file.path, content: file.content, branch: branchName },
         idempotencyKey: `${task.id}:repo-write:${file.path}`,
         agentVersionId,
+        workflowVersionId: run.workflowVersionId,
         ...(correlationId !== undefined ? { correlationId } : {}),
       });
+      const repoWriteWaitUntil = pendingApprovalWaitUntil(invocation);
+      if (repoWriteWaitUntil) return { waitUntil: repoWriteWaitUntil };
       if (invocation.status !== 'SUCCEEDED') {
         throw new Error(
           `Failed to write proposed file "${file.path}" for task ${task.id}: ${invocation.errorCode ?? 'unknown error'}`,
@@ -269,9 +273,12 @@ export async function runDevelopmentAgentTask(
         parameters: { branch: branchName, message: commitMessage },
         idempotencyKey: `${task.id}:git-commit`,
         agentVersionId,
+        workflowVersionId: run.workflowVersionId,
         ...(correlationId !== undefined ? { correlationId } : {}),
       },
     );
+    const commitWaitUntil = pendingApprovalWaitUntil(commitInvocation);
+    if (commitWaitUntil) return { waitUntil: commitWaitUntil };
     if (commitInvocation.status !== 'SUCCEEDED') {
       throw new Error(
         `Failed to create commit for task ${task.id}: ${commitInvocation.errorCode ?? 'unknown error'}`,
@@ -310,9 +317,12 @@ export async function runDevelopmentAgentTask(
         },
         idempotencyKey: `${task.id}:pull-request-create`,
         agentVersionId,
+        workflowVersionId: run.workflowVersionId,
         ...(correlationId !== undefined ? { correlationId } : {}),
       },
     );
+    const pullRequestWaitUntil = pendingApprovalWaitUntil(pullRequestInvocation);
+    if (pullRequestWaitUntil) return { waitUntil: pullRequestWaitUntil };
     if (pullRequestInvocation.status !== 'SUCCEEDED') {
       throw new Error(
         `Failed to create pull request for task ${task.id}: ${pullRequestInvocation.errorCode ?? 'unknown error'}`,

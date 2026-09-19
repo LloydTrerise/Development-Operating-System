@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { estimateCostUsd, validateAgentOutput } from '@devos/agents';
-import type { AuditId, ProjectId, WorkflowRunId } from '@devos/contracts';
+import type { AuditId, OrganisationId, ProjectId, WorkflowRunId } from '@devos/contracts';
 import type {
   AgentExecution,
   ContextManifest,
@@ -67,54 +67,153 @@ export interface AgentTaskAdditionalContext {
 }
 
 /**
- * DEVOS-098: a real, checkable per-project budget threshold — not a payment
- * system, no automatic spend cutoff, just a real, visible audit record when
- * a project's real accumulated `estimatedCostUsd` first crosses its
- * configured `budgetUsd`. Optional (see `AgentTaskHandlerDeps`): a no-op
- * whenever `projects`/`auditRecords`/the repository's own optional
- * `sumEstimatedCostUsdForProject` aren't all supplied, or the project has
- * no configured budget, or this execution recorded no cost at all.
- *
- * Fires exactly once per crossing, not on every execution once already
- * over budget: `totalCostUsd` (post-completion) minus this execution's own
- * `estimatedCostUsd` gives the pre-completion total; the alert only fires
- * when that pre-completion total was still under budget.
+ * DEVOS-154: below-100% early-warning fraction of a configured budget — a
+ * disclosed, approximate default (no spec states one), mirrored between
+ * the project- and organisation-level checks below.
+ */
+const WARNING_BUDGET_FRACTION = 0.8;
+
+interface BudgetTier {
+  action: string;
+  thresholdUsd: number;
+}
+
+/**
+ * DEVOS-098/DEVOS-154: a real, checkable budget threshold mechanism — not a
+ * payment system, no automatic spend cutoff, just a real, visible audit
+ * record the first time a real accumulated total crosses each of a list of
+ * tiers (originally one hard 100% tier; DEVOS-154 generalizes to also
+ * support an earlier warning tier, reused unchanged for DEVOS-155's
+ * organisation-level check). Each tier fires independently and at most
+ * once per real crossing: `previousTotalUsd` (pre-completion) versus
+ * `totalUsd` (post-completion) — a tier fires only when the pre-completion
+ * total was still at or under that tier's own threshold and the
+ * post-completion total is over it. `targetId`/`projectId` distinguish a
+ * project-level alert (`projectId` set, `targetType: 'Project'`) from an
+ * organisation-level one (`projectId` omitted, `targetType: 'Organisation'`).
+ */
+async function fireBudgetTierAlerts(
+  auditRecords: NonNullable<AgentTaskHandlerDeps['auditRecords']>,
+  organisationId: OrganisationId,
+  projectId: ProjectId | undefined,
+  targetType: 'Project' | 'Organisation',
+  targetId: string,
+  previousTotalUsd: number,
+  totalUsd: number,
+  tiers: BudgetTier[],
+): Promise<void> {
+  const now = new Date().toISOString();
+  for (const tier of tiers) {
+    if (previousTotalUsd > tier.thresholdUsd || totalUsd <= tier.thresholdUsd) continue;
+    await auditRecords.create({
+      id: randomUUID() as AuditId,
+      organisationId,
+      ...(projectId !== undefined ? { projectId } : {}),
+      actorType: 'SYSTEM',
+      actorId: SYSTEM_ACTOR_ID,
+      action: tier.action,
+      targetType,
+      targetId,
+      outcome: 'FAILURE',
+      metadata: { thresholdUsd: tier.thresholdUsd, accumulatedCostUsd: totalUsd },
+      createdAt: now,
+    });
+  }
+}
+
+/**
+ * DEVOS-098/DEVOS-154: the project-scoped check — a warning tier at
+ * `WARNING_BUDGET_FRACTION` of `Project.budgetUsd` plus the pre-existing
+ * hard 100% tier, both via `fireBudgetTierAlerts` above. Optional (see
+ * `AgentTaskHandlerDeps`): a no-op whenever `projects`/`auditRecords`/the
+ * repository's own optional `sumEstimatedCostUsdForProject` aren't all
+ * supplied, or the project has no configured budget, or this execution
+ * recorded no cost at all.
  */
 async function maybeAlertOnBudgetExceeded(
   deps: AgentTaskHandlerDeps,
   projectId: ProjectId,
   estimatedCostUsd: number | undefined,
 ): Promise<void> {
+  if (!deps.projects || !deps.auditRecords || estimatedCostUsd === undefined) return;
+
+  const project = await deps.projects.getById(projectId);
+  if (!project) return;
+
+  if (project.budgetUsd !== undefined && deps.agentExecutions.sumEstimatedCostUsdForProject) {
+    const totalCostUsd = await deps.agentExecutions.sumEstimatedCostUsdForProject(projectId);
+    const previousTotalCostUsd = totalCostUsd - estimatedCostUsd;
+
+    await fireBudgetTierAlerts(
+      deps.auditRecords,
+      project.organisationId,
+      projectId,
+      'Project',
+      projectId,
+      previousTotalCostUsd,
+      totalCostUsd,
+      [
+        {
+          action: 'project.budget_warning',
+          thresholdUsd: project.budgetUsd * WARNING_BUDGET_FRACTION,
+        },
+        { action: 'project.budget_exceeded', thresholdUsd: project.budgetUsd },
+      ],
+    );
+  }
+
+  // DEVOS-155: independent of the project's own budget state above —
+  // reuses `project.organisationId` already resolved here rather than a
+  // second lookup at the call site.
+  await maybeAlertOnOrganisationBudgetExceeded(deps, project.organisationId, estimatedCostUsd);
+}
+
+/**
+ * DEVOS-155: the organisation-scoped mirror of `maybeAlertOnBudgetExceeded`
+ * — checked independently alongside it (not instead of it) after the same
+ * completed execution's cost is recorded, using Sprint 17's real
+ * `sumEstimatedCostUsdForOrganisation`. A no-op whenever
+ * `auditRecords`/the repository's own optional
+ * `sumEstimatedCostUsdForOrganisation` aren't supplied, the organisation
+ * has no configured budget, or this execution recorded no cost at all.
+ */
+async function maybeAlertOnOrganisationBudgetExceeded(
+  deps: AgentTaskHandlerDeps,
+  organisationId: OrganisationId,
+  estimatedCostUsd: number | undefined,
+): Promise<void> {
   if (
-    !deps.projects ||
+    !deps.organisations ||
     !deps.auditRecords ||
-    !deps.agentExecutions.sumEstimatedCostUsdForProject ||
+    !deps.agentExecutions.sumEstimatedCostUsdForOrganisation ||
     estimatedCostUsd === undefined
   ) {
     return;
   }
 
-  const project = await deps.projects.getById(projectId);
-  if (!project || project.budgetUsd === undefined) return;
+  const organisation = await deps.organisations.getById(organisationId);
+  if (!organisation || organisation.budgetUsd === undefined) return;
 
-  const totalCostUsd = await deps.agentExecutions.sumEstimatedCostUsdForProject(projectId);
+  const totalCostUsd =
+    await deps.agentExecutions.sumEstimatedCostUsdForOrganisation(organisationId);
   const previousTotalCostUsd = totalCostUsd - estimatedCostUsd;
-  if (previousTotalCostUsd > project.budgetUsd || totalCostUsd <= project.budgetUsd) return;
 
-  const now = new Date().toISOString();
-  await deps.auditRecords.create({
-    id: randomUUID() as AuditId,
-    organisationId: project.organisationId,
-    projectId,
-    actorType: 'SYSTEM',
-    actorId: SYSTEM_ACTOR_ID,
-    action: 'project.budget_exceeded',
-    targetType: 'Project',
-    targetId: projectId,
-    outcome: 'FAILURE',
-    metadata: { budgetUsd: project.budgetUsd, accumulatedCostUsd: totalCostUsd },
-    createdAt: now,
-  });
+  await fireBudgetTierAlerts(
+    deps.auditRecords,
+    organisationId,
+    undefined,
+    'Organisation',
+    organisationId,
+    previousTotalCostUsd,
+    totalCostUsd,
+    [
+      {
+        action: 'organisation.budget_warning',
+        thresholdUsd: organisation.budgetUsd * WARNING_BUDGET_FRACTION,
+      },
+      { action: 'organisation.budget_exceeded', thresholdUsd: organisation.budgetUsd },
+    ],
+  );
 }
 
 /**
@@ -290,7 +389,9 @@ export async function runAgentTask(
 
   const completedAt = new Date().toISOString();
   const estimatedCostUsd =
-    invocation.usage !== undefined ? estimateCostUsd(invocation.usage) : undefined;
+    invocation.usage !== undefined
+      ? estimateCostUsd(invocation.usage, invocation.modelReference)
+      : undefined;
 
   await deps.agentExecutions.complete(
     execution.id,

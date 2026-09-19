@@ -1,4 +1,4 @@
-import type { PolicyId } from '@devos/contracts';
+import type { PolicyId, ToolCapabilityRiskClass } from '@devos/contracts';
 
 /**
  * No policy evaluation algorithm or rule language is specified anywhere in
@@ -20,17 +20,47 @@ import type { PolicyId } from '@devos/contracts';
  * action. No release-specific rule shape is specified anywhere in the spec
  * corpus; this reuses the exact same condition-matching mechanism DEVOS-048
  * already extended once, rather than introducing a parallel model.
+ *
+ * DEVOS-138: `agentId`/`agentVersion`/`workflowId`/`workflowVersion`/
+ * `riskClass` are the real ABAC attributes Security spec §10 names that this
+ * engine can evaluate from data already resolved at its one real call site
+ * (`invoke-tool.ts`) — additive fields using the exact same
+ * present-if-and-only-if-checked matching rule as every field above, not a
+ * new condition language.
  */
 export type PolicyEffect = 'ALLOW' | 'DENY' | 'REQUIRE_APPROVAL';
+
+export interface PolicyRuleCondition {
+  actorRole?: string;
+  resourceType?: string;
+  environment?: string;
+  agentId?: string;
+  agentVersion?: number;
+  workflowId?: string;
+  workflowVersion?: number;
+  riskClass?: ToolCapabilityRiskClass;
+}
 
 export interface PolicyRule {
   action: string;
   effect: PolicyEffect;
-  condition?: {
-    actorRole?: string;
-    resourceType?: string;
-    environment?: string;
-  };
+  condition?: PolicyRuleCondition;
+  /**
+   * DEVOS-146: real approval-routing configuration carried alongside a
+   * matched rule's own `effect` — read directly by `runApprovalTask`
+   * (`packages/application/src/tasks/run-approval-task.ts`), never by
+   * `evaluatePolicies` itself, which continues to return exactly its own
+   * existing `PolicyEvaluationResult` shape unchanged.
+   */
+  requiredApprovers?: number;
+  enforceSeparationOfDuties?: boolean;
+  /**
+   * Gap revisit (post-Sprint-16): the configurable mirror of
+   * `requiredApprovers` — how many distinct `REJECTED` decisions an
+   * approval this rule routes needs before a rejection finalizes it.
+   * Defaults to `1` (fail-fast) wherever left unset.
+   */
+  requiredRejections?: number;
 }
 
 export interface PolicyDefinition {
@@ -44,6 +74,11 @@ export interface PolicyEvaluationRequest {
   actorRole?: string;
   resourceType?: string;
   environment?: string;
+  agentId?: string;
+  agentVersion?: number;
+  workflowId?: string;
+  workflowVersion?: number;
+  riskClass?: ToolCapabilityRiskClass;
 }
 
 /**

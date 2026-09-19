@@ -191,6 +191,8 @@ async function buildScenario(
     getByProjectAndKeyAndVersion: async () => null,
     getLatestForProjectAndKey: async () => null,
     listForProject: async () => [] as Policy[],
+    getLatestForOrganisationAndKey: async () => null,
+    listForOrganisation: async () => [],
     create: async () => {},
     publish: async () => {},
   };
@@ -221,6 +223,8 @@ async function buildScenario(
       auditRecordsList.push(record);
     },
     listForProject: async (projectId) => auditRecordsList.filter((r) => r.projectId === projectId),
+    listForOrganisation: async (organisationId) =>
+      auditRecordsList.filter((r) => r.organisationId === organisationId),
   };
   const integrations: IntegrationRepository = {
     getById: async (id) => (id === gitIntegration.id ? gitIntegration : null),

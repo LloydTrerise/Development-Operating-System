@@ -1,6 +1,17 @@
-import type { ApprovalId, ApprovalStatus, ProjectId, WorkflowRunId } from '@devos/contracts';
-import type { Approval, ApprovalEvidenceReference, ApprovalRepository } from '@devos/domain';
-import type { ApprovalsTable } from '../database.js';
+import type {
+  ApprovalId,
+  ApprovalStatus,
+  ProjectId,
+  ToolCapabilityRiskClass,
+  WorkflowRunId,
+} from '@devos/contracts';
+import type {
+  Approval,
+  ApprovalDecisionRecord,
+  ApprovalEvidenceReference,
+  ApprovalRepository,
+} from '@devos/domain';
+import type { ApprovalDecisionsTable, ApprovalsTable } from '../database.js';
 import type { QueryExecutor } from './base.js';
 
 function toDomain(row: ApprovalsTable): Approval {
@@ -16,6 +27,26 @@ function toDomain(row: ApprovalsTable): Approval {
     evidenceReference: row.evidence_reference as ApprovalEvidenceReference,
     requestedAt: row.requested_at,
     ...(row.decided_at !== null ? { decidedAt: row.decided_at } : {}),
+    requiredApprovers: row.required_approvers,
+    enforceSeparationOfDuties: row.enforce_separation_of_duties,
+    ...(row.expires_at !== null ? { expiresAt: row.expires_at } : {}),
+    requiredRejections: row.required_rejections,
+    ...(row.risk_class !== null ? { riskClass: row.risk_class as ToolCapabilityRiskClass } : {}),
+    ...(row.agent_id !== null ? { agentId: row.agent_id } : {}),
+    ...(row.agent_version !== null ? { agentVersion: row.agent_version } : {}),
+    ...(row.workflow_id !== null ? { workflowId: row.workflow_id } : {}),
+    ...(row.workflow_version !== null ? { workflowVersion: row.workflow_version } : {}),
+  };
+}
+
+function toDecisionDomain(row: ApprovalDecisionsTable): ApprovalDecisionRecord {
+  return {
+    id: row.id,
+    approvalId: row.approval_id as ApprovalId,
+    decidedBy: row.decided_by,
+    decision: row.decision as ApprovalDecisionRecord['decision'],
+    ...(row.reason !== null ? { reason: row.reason } : {}),
+    decidedAt: row.decided_at,
   };
 }
 
@@ -76,6 +107,15 @@ export function createApprovalRepository(db: QueryExecutor): ApprovalRepository 
           evidence_reference: JSON.stringify(approval.evidenceReference),
           requested_at: approval.requestedAt,
           decided_at: approval.decidedAt ?? null,
+          required_approvers: approval.requiredApprovers,
+          enforce_separation_of_duties: approval.enforceSeparationOfDuties,
+          expires_at: approval.expiresAt ?? null,
+          required_rejections: approval.requiredRejections,
+          risk_class: approval.riskClass ?? null,
+          agent_id: approval.agentId ?? null,
+          agent_version: approval.agentVersion ?? null,
+          workflow_id: approval.workflowId ?? null,
+          workflow_version: approval.workflowVersion ?? null,
         })
         .execute();
     },
@@ -91,6 +131,41 @@ export function createApprovalRepository(db: QueryExecutor): ApprovalRepository 
         })
         .where('id', '=', id)
         .execute();
+    },
+
+    async recordDecision(record) {
+      await db
+        .insertInto('approval_decisions')
+        .values({
+          id: record.id,
+          approval_id: record.approvalId,
+          decided_by: record.decidedBy,
+          decision: record.decision,
+          reason: record.reason ?? null,
+          decided_at: record.decidedAt,
+        })
+        .execute();
+    },
+
+    async listDecisionsForApproval(approvalId) {
+      const rows = await db
+        .selectFrom('approval_decisions')
+        .selectAll()
+        .where('approval_id', '=', approvalId)
+        .orderBy('decided_at', 'asc')
+        .execute();
+      return rows.map(toDecisionDomain);
+    },
+
+    async expirePending(now) {
+      const result = await db
+        .updateTable('approvals')
+        .set({ status: 'EXPIRED' })
+        .where('status', '=', 'PENDING')
+        .where('expires_at', 'is not', null)
+        .where('expires_at', '<', now)
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows ?? 0n);
     },
   };
 }

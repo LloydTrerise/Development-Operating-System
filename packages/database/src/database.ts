@@ -3,6 +3,7 @@ export interface OrganisationsTable {
   name: string;
   slug: string;
   status: string;
+  budget_usd: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -286,6 +287,24 @@ export interface ApprovalsTable {
   evidence_reference: unknown;
   requested_at: string;
   decided_at: string | null;
+  required_approvers: number;
+  enforce_separation_of_duties: boolean;
+  expires_at: string | null;
+  required_rejections: number;
+  risk_class: string | null;
+  agent_id: string | null;
+  agent_version: number | null;
+  workflow_id: string | null;
+  workflow_version: number | null;
+}
+
+export interface ApprovalDecisionsTable {
+  id: string;
+  approval_id: string;
+  decided_by: string;
+  decision: string;
+  reason: string | null;
+  decided_at: string;
 }
 
 export interface ToolCapabilitiesTable {
@@ -351,6 +370,7 @@ export interface Database {
   knowledge_references: KnowledgeReferencesTable;
   policies: PoliciesTable;
   approvals: ApprovalsTable;
+  approval_decisions: ApprovalDecisionsTable;
   tool_capabilities: ToolCapabilitiesTable;
   tool_invocations: ToolInvocationsTable;
   integrations: IntegrationsTable;
