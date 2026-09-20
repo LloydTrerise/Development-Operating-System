@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listRepositoryFiles } from '../src/retrieval/list-repository-files.js';
+import { retrieveRelevantRepositoryContext } from '../src/retrieval/retrieve-relevant-repository-context.js';
 import { retrieveRepositoryFile } from '../src/retrieval/retrieve-repository-file.js';
 import { retrieveRepositoryListing } from '../src/retrieval/retrieve-repository-listing.js';
 import { searchRepository } from '../src/retrieval/search-repository.js';
@@ -86,5 +87,67 @@ describe('repository context retrieval', () => {
     const source = await searchRepository(repositoryPath, FAKE_REVISION, 'needle', 2);
     const { matches } = source.content as { matches: unknown[] };
     expect(matches).toHaveLength(2);
+  });
+
+  // DEVOS-192: the real, first-ever caller of `searchRepository`/
+  // `retrieveRepositoryFile`, composed with `retrieveRepositoryListing`.
+  describe('retrieveRelevantRepositoryContext', () => {
+    it('always includes the real repository listing', async () => {
+      const context = await retrieveRelevantRepositoryContext(repositoryPath, FAKE_REVISION);
+
+      expect(context.listing.type).toBe('REPOSITORY_LISTING');
+      expect(context.listing.ref).toBe(`repository-listing:${FAKE_REVISION}`);
+      expect(context.files).toEqual([]);
+      expect(context.searchResult).toBeUndefined();
+    });
+
+    it('returns real, bounded file content for a real query match', async () => {
+      const context = await retrieveRelevantRepositoryContext(
+        repositoryPath,
+        FAKE_REVISION,
+        'What is the answer to everything?',
+      );
+
+      expect(context.searchResult?.type).toBe('REPOSITORY_SEARCH_RESULT');
+      expect(context.files).toHaveLength(1);
+      const file = context.files[0]!;
+      expect(file.type).toBe('REPOSITORY_FILE');
+      const content = file.content as { path: string; content: string };
+      expect(content.path.replace(/\\/g, '/')).toBe('src/index.ts');
+      expect(content.content).toBe('export const answer = 42;\n');
+    });
+
+    it('falls back to just the listing on a query matching nothing real', async () => {
+      const context = await retrieveRelevantRepositoryContext(
+        repositoryPath,
+        FAKE_REVISION,
+        'a query matching absolutely nothing here',
+      );
+
+      expect(context.files).toEqual([]);
+      expect(context.searchResult).toBeUndefined();
+    });
+
+    it('falls back to just the listing when no query is supplied', async () => {
+      const context = await retrieveRelevantRepositoryContext(repositoryPath, FAKE_REVISION, '');
+
+      expect(context.files).toEqual([]);
+      expect(context.searchResult).toBeUndefined();
+    });
+
+    it('caps distinct files at maxFiles', async () => {
+      for (let i = 0; i < 5; i++) {
+        await writeFile(join(repositoryPath, `needle-${i}.txt`), 'needle\n', 'utf8');
+      }
+
+      const context = await retrieveRelevantRepositoryContext(
+        repositoryPath,
+        FAKE_REVISION,
+        'needle',
+        { maxFiles: 2 },
+      );
+
+      expect(context.files).toHaveLength(2);
+    });
   });
 });

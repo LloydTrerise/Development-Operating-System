@@ -34,6 +34,7 @@ import {
   createContextManifestRecorder,
   createDatabaseClient,
   createIntegrationRepository,
+  createKnowledgeReferenceRepository,
   createKnowledgeSourceRepository,
   createMembershipRepository,
   createOrganisationRepository,
@@ -275,6 +276,9 @@ if (modelAdapter === undefined) {
     // DEVOS-065/067: the review agent's own extra needs — engineering
     // standards retrieval, and starting a rework run on CHANGES_REQUIRED.
     knowledgeSources: createKnowledgeSourceRepository(database.db),
+    // DEVOS-184: real usage traceability for `buildContext()`'s
+    // knowledge-source selections.
+    knowledgeReferences: createKnowledgeReferenceRepository(database.db),
     workflowDefinitions: createWorkflowDefinitionRepository(database.db),
     workflowVersions: createWorkflowVersionRepository(database.db),
     workflowTasks: createWorkflowTaskRepository(database.db),

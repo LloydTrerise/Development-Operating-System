@@ -1,4 +1,4 @@
-import type { ProjectId, WorkflowRunId } from '@devos/contracts';
+import type { ProjectId, WorkflowRunId, WorkItemId } from '@devos/contracts';
 import type { RetrievalDeps } from '../retrieval/deps.js';
 import { retrieveActiveKnowledgeSources } from '../retrieval/retrieve-knowledge-sources.js';
 import { retrieveArtifactsForRun } from '../retrieval/retrieve-run-artifacts.js';
@@ -10,6 +10,13 @@ import type { AssembledContext, AssembledContextSource } from './assembled-conte
 export interface ContextBuildInput {
   projectId: ProjectId;
   workflowRunId?: WorkflowRunId;
+  /**
+   * DEVOS-187: when supplied (and `deps.workItems` is available), the work
+   * item's own title/description become a real full-text query narrowing
+   * `retrieveActiveKnowledgeSources` to relevant sources — optional and
+   * additive, zero change to any existing caller that doesn't supply it.
+   */
+  workItemId?: WorkItemId;
 }
 
 export interface ContextBuildOptions {
@@ -47,7 +54,20 @@ export async function buildContext(
   const projectContext = await retrieveProjectContext(deps, input.projectId);
   if (projectContext) candidates.push(projectContext);
 
-  candidates.push(...(await retrieveActiveKnowledgeSources(deps, input.projectId)));
+  // DEVOS-187: a real work item's title/description becomes the real
+  // full-text query `retrieveActiveKnowledgeSources` uses to narrow to
+  // relevant sources — absent for any caller that doesn't supply
+  // `workItemId`/`deps.workItems`, which keeps today's exact unconditional
+  // inclusion (see that function's own fallback logic).
+  const workItem =
+    input.workItemId !== undefined && deps.workItems !== undefined
+      ? await deps.workItems.getById(input.workItemId)
+      : null;
+  const relevanceQuery = workItem
+    ? [workItem.title, workItem.description].filter(Boolean).join(' ')
+    : undefined;
+
+  candidates.push(...(await retrieveActiveKnowledgeSources(deps, input.projectId, relevanceQuery)));
 
   if (input.workflowRunId !== undefined) {
     candidates.push(...(await retrieveArtifactsForRun(deps, input.projectId, input.workflowRunId)));

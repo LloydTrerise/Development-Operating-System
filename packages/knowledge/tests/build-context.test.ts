@@ -8,8 +8,10 @@ import type {
   KnowledgeSourceRepository,
   Project,
   ProjectRepository,
+  WorkItem,
+  WorkItemRepository,
 } from '@devos/domain';
-import type { OrganisationId, ProjectId, WorkflowRunId } from '@devos/contracts';
+import type { OrganisationId, ProjectId, WorkflowRunId, WorkItemId } from '@devos/contracts';
 import { describe, expect, it } from 'vitest';
 import type { RetrievalDeps } from '../src/retrieval/deps.js';
 import { buildContext } from '../src/context/build-context.js';
@@ -22,6 +24,7 @@ function createDeps(): {
     overrides: Partial<Artifact>,
     versions: Array<Partial<ArtifactVersion>>,
   ) => Artifact;
+  addWorkItem: (overrides: Partial<WorkItem>) => WorkItem;
 } {
   const project: Project = {
     id: randomUUID() as ProjectId,
@@ -52,6 +55,35 @@ function createDeps(): {
     create: async (source) => {
       knowledgeSourcesStore.set(source.id, source);
     },
+    update: async (id, changes, updatedAt) => {
+      const existing = knowledgeSourcesStore.get(id);
+      if (!existing) return;
+      knowledgeSourcesStore.set(id, { ...existing, ...changes, updatedAt });
+    },
+    // DEVOS-187: mirrors retrieval.test.ts's own in-memory stand-in for the
+    // real Postgres full-text search.
+    searchForProject: async (projectId, query) => {
+      // A plain word-overlap stand-in for real `ts_rank` keyword matching —
+      // good enough to prove `retrieveActiveKnowledgeSources`'s own
+      // narrow/fallback logic without a real database in this unit test.
+      const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+      return [...knowledgeSourcesStore.values()].filter((s) => {
+        if (s.projectId !== projectId || s.status !== 'ACTIVE') return false;
+        const haystack = `${s.name} ${s.content}`.toLowerCase();
+        return words.some((word) => haystack.includes(word));
+      });
+    },
+  };
+
+  const workItemsStore = new Map<string, WorkItem>();
+  const workItems: WorkItemRepository = {
+    getById: async (id) => workItemsStore.get(id) ?? null,
+    listForProject: async (projectId) =>
+      [...workItemsStore.values()].filter((w) => w.projectId === projectId),
+    create: async (workItem) => {
+      workItemsStore.set(workItem.id, workItem);
+    },
+    update: async () => {},
   };
 
   const artifactsStore = new Map<string, Artifact>();
@@ -74,7 +106,7 @@ function createDeps(): {
     },
   };
 
-  const deps: RetrievalDeps = { projects, knowledgeSources, artifacts, artifactVersions };
+  const deps: RetrievalDeps = { projects, knowledgeSources, artifacts, artifactVersions, workItems };
 
   const addKnowledgeSource = (overrides: Partial<KnowledgeSource>): KnowledgeSource => {
     const now = new Date().toISOString();
@@ -129,7 +161,26 @@ function createDeps(): {
     return artifact;
   };
 
-  return { deps, project, addKnowledgeSource, addArtifact };
+  const addWorkItem = (overrides: Partial<WorkItem>): WorkItem => {
+    const now = new Date().toISOString();
+    const workItem: WorkItem = {
+      id: randomUUID() as WorkItemId,
+      projectId: project.id,
+      title: 'Work item',
+      type: 'GENERAL',
+      status: 'OPEN',
+      priority: 'MEDIUM',
+      metadata: {},
+      createdBy: 'alice',
+      createdAt: now,
+      updatedAt: now,
+      ...overrides,
+    };
+    workItemsStore.set(workItem.id, workItem);
+    return workItem;
+  };
+
+  return { deps, project, addKnowledgeSource, addArtifact, addWorkItem };
 }
 
 describe('buildContext', () => {
@@ -206,5 +257,37 @@ describe('buildContext', () => {
     const context = await buildContext(deps, { projectId: randomUUID() as ProjectId });
 
     expect(context.sources).toEqual([]);
+  });
+
+  // DEVOS-187: real query-scoped relevance retrieval, wired through
+  // buildContext()'s own workItemId input.
+  it('narrows knowledge sources to the work item\'s own real relevance query when workItemId is supplied', async () => {
+    const { deps, project, addKnowledgeSource, addWorkItem } = createDeps();
+    const matching = addKnowledgeSource({
+      key: 'matching',
+      name: 'Timeout Handling',
+      content: 'How to diagnose slow query timeouts.',
+    });
+    addKnowledgeSource({ key: 'unrelated', name: 'Unrelated', content: 'Naming conventions.' });
+    const workItem = addWorkItem({
+      title: 'Investigate slow query',
+      description: 'Users report timeouts.',
+    });
+
+    const context = await buildContext(deps, { projectId: project.id, workItemId: workItem.id });
+
+    const knowledgeSourceRefs = context.sources.filter((s) => s.type === 'KNOWLEDGE_SOURCE');
+    expect(knowledgeSourceRefs).toEqual([
+      expect.objectContaining({ ref: `knowledge-source:${matching.id}` }),
+    ]);
+  });
+
+  it('is unaffected when workItemId is omitted — zero regression for every existing caller', async () => {
+    const { deps, project, addKnowledgeSource } = createDeps();
+    addKnowledgeSource({ name: 'Standards' });
+
+    const context = await buildContext(deps, { projectId: project.id });
+
+    expect(context.sources.map((s) => s.type)).toEqual(['PROJECT_CONTEXT', 'KNOWLEDGE_SOURCE']);
   });
 });

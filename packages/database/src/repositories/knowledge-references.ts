@@ -35,6 +35,16 @@ export function createKnowledgeReferenceRepository(
       return rows.map(toDomain);
     },
 
+    // DEVOS-184: the read-side mirror of `listForTask`.
+    async listForSource(knowledgeSourceId) {
+      const rows = await db
+        .selectFrom('knowledge_references')
+        .selectAll()
+        .where('knowledge_source_id', '=', knowledgeSourceId)
+        .execute();
+      return rows.map(toDomain);
+    },
+
     async create(reference) {
       await db
         .insertInto('knowledge_references')

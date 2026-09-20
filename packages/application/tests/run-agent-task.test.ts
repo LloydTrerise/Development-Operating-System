@@ -5,7 +5,7 @@ import {
   type PromptRepository,
   type SchemaRepository,
 } from '@devos/agents';
-import type { OrganisationId, ProjectTypeId } from '@devos/contracts';
+import type { KnowledgeSourceId, OrganisationId, ProjectTypeId } from '@devos/contracts';
 import type {
   Agent,
   AgentExecution,
@@ -18,6 +18,8 @@ import type {
   AuditRecord,
   AuditRecordRepository,
   ContextManifest,
+  KnowledgeReference,
+  KnowledgeReferenceRepository,
   KnowledgeSourceRepository,
   Organisation,
   OrganisationRepository,
@@ -939,6 +941,108 @@ describe('runAgentTask', () => {
       await runAgentTask(deps, scenario.task);
 
       expect(auditRecords).toHaveLength(0);
+    });
+  });
+
+  // DEVOS-184: real usage traceability — closes the gap between
+  // specs/workflows/software-change-workflow.md §28's "traceable" claim and
+  // the prior silent no-op (KnowledgeReference existed since Sprint 3 but
+  // was never written to anywhere).
+  describe('knowledge reference traceability (DEVOS-184)', () => {
+    function withActiveKnowledgeSource(scenario: ReturnType<typeof buildScenario>) {
+      const source = {
+        id: randomUUID() as KnowledgeSourceId,
+        projectId: scenario.projectId,
+        key: 'standard',
+        name: 'Coding Standard',
+        sourceType: 'STANDARD',
+        content: 'Prefer explicit types.',
+        status: 'ACTIVE',
+        createdBy: 'alice',
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      };
+      const knowledgeSources: KnowledgeSourceRepository = {
+        ...scenario.knowledgeSources,
+        getById: async (id) => (id === source.id ? source : null),
+        listForProject: async () => [source],
+      };
+      return { source, knowledgeSources };
+    }
+
+    it('records a real KnowledgeReference for every knowledge source buildContext() selects, when deps.knowledgeReferences is present', async () => {
+      const scenario = buildScenario();
+      const { source, knowledgeSources } = withActiveKnowledgeSource(scenario);
+      const references: KnowledgeReference[] = [];
+      const knowledgeReferences: KnowledgeReferenceRepository = {
+        listForTask: async (taskId) => references.filter((r) => r.workflowTaskId === taskId),
+        listForSource: async (sourceId) =>
+          references.filter((r) => r.knowledgeSourceId === sourceId),
+        create: async (reference) => {
+          references.push(reference);
+        },
+      };
+      const modelAdapter: AgentModelAdapter = {
+        invoke: async () => ({ status: 'SUCCEEDED', result: {} }),
+      };
+
+      const deps: AgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions: scenario.agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        projects: scenario.projects,
+        knowledgeSources,
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        knowledgeReferences,
+      };
+
+      await runAgentTask(deps, scenario.task);
+
+      expect(references).toHaveLength(1);
+      expect(references[0]).toEqual(
+        expect.objectContaining({
+          projectId: scenario.projectId,
+          knowledgeSourceId: source.id,
+          workflowTaskId: scenario.task.id,
+          agentExecutionId: scenario.executions[0]?.id,
+        }),
+      );
+    });
+
+    it('changes nothing else when deps.knowledgeReferences is omitted — today\'s exact existing behaviour', async () => {
+      const scenario = buildScenario();
+      const { knowledgeSources } = withActiveKnowledgeSource(scenario);
+      const modelAdapter: AgentModelAdapter = {
+        invoke: async () => ({ status: 'SUCCEEDED', result: {} }),
+      };
+
+      const deps: AgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions: scenario.agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        projects: scenario.projects,
+        knowledgeSources,
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+      };
+
+      await expect(runAgentTask(deps, scenario.task)).resolves.toBeDefined();
+      expect(scenario.contextManifests[0]?.sources).toContainEqual(
+        expect.objectContaining({ type: 'KNOWLEDGE_SOURCE' }),
+      );
     });
   });
 });

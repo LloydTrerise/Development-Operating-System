@@ -544,6 +544,137 @@ describe('runDevelopmentAgentTask (real local git repository)', () => {
     expect(pullRequestReference).toBeTruthy();
   }, 30_000);
 
+  it('DEVOS-192: includes real, current content of repository files matching the plan summary as relevantRepositoryFiles', async () => {
+    // A real file whose content genuinely matches a keyword term derived
+    // from buildScenario's own default plan summary ("Add a status field
+    // to the record and its API.") — proving this is real content read
+    // from the real repository, not a fabricated stand-in.
+    await writeFile(
+      path.join(repositoryPath, 'status-helper.ts'),
+      'export const status = "planned";\n',
+      'utf8',
+    );
+    await runGit(['add', 'status-helper.ts'], repositoryPath);
+    await runGit(['commit', '-m', 'add status helper'], repositoryPath);
+
+    const scenario = await buildScenario(repositoryPath);
+
+    let receivedInput: Record<string, unknown> | undefined;
+    const modelAdapter: AgentModelAdapter = {
+      invoke: async (request) => {
+        receivedInput = request.input;
+        return {
+          status: 'SUCCEEDED',
+          result: {
+            summary: 'Add a STATUS.md file documenting the new status field.',
+            branchName: 'devos/add-status-field-192',
+            commitMessage: 'Add status field documentation',
+            files: [{ path: 'STATUS.md', content: 'status: planned\n' }],
+          },
+        };
+      },
+    };
+
+    const deps: DevelopmentAgentTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agents,
+      agentVersions: scenario.agentVersions,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async () => {},
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      memberships: scenario.memberships,
+      policies: scenario.policies,
+      toolCapabilities: scenario.toolCapabilities,
+      toolInvocations: scenario.toolInvocationRepository,
+      auditRecords: scenario.auditRecordRepository,
+      pullRequestProvider: createLocalPullRequestProvider(),
+      integrations: scenario.integrations,
+    };
+
+    await runDevelopmentAgentTask(deps, scenario.task);
+
+    expect(receivedInput?.repositoryFiles).toEqual(
+      expect.arrayContaining(['README.md', 'status-helper.ts']),
+    );
+
+    const relevantFiles = receivedInput?.relevantRepositoryFiles as
+      | { path: string; content: string; truncated: boolean }[]
+      | undefined;
+    expect(relevantFiles).toBeDefined();
+    const match = relevantFiles?.find(
+      (file) => file.path.replace(/\\/g, '/') === 'status-helper.ts',
+    );
+    // The real content of the real fixture file — not a mocked or
+    // summarized stand-in. Line endings are normalized before comparing:
+    // `retrieveRepositoryFile` reads the real checked-out working tree, and
+    // git's own `core.autocrlf` may convert LF to CRLF on checkout
+    // (environment-dependent, e.g. on Windows) — a real, expected git
+    // behaviour, not a defect in this wiring.
+    expect(match?.content.replace(/\r\n/g, '\n')).toBe('export const status = "planned";\n');
+    expect(match?.truncated).toBe(false);
+  }, 30_000);
+
+  it('DEVOS-192: omits relevantRepositoryFiles when the plan summary matches nothing — zero regression for every existing scenario', async () => {
+    const scenario = await buildScenario(repositoryPath);
+    // buildScenario's plan summary is "Add a status field to the record
+    // and its API." — the repository fixture here has only the initial
+    // README.md ("# test repo\n"), which shares no real keyword match.
+    let receivedInput: Record<string, unknown> | undefined;
+    const modelAdapter: AgentModelAdapter = {
+      invoke: async (request) => {
+        receivedInput = request.input;
+        return {
+          status: 'SUCCEEDED',
+          result: {
+            summary: 'Add a STATUS.md file.',
+            branchName: 'devos/add-status-field-192b',
+            commitMessage: 'Add status field documentation',
+            files: [{ path: 'STATUS.md', content: 'status: planned\n' }],
+          },
+        };
+      },
+    };
+
+    const deps: DevelopmentAgentTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agents,
+      agentVersions: scenario.agentVersions,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async () => {},
+      artifacts: scenario.artifacts,
+      artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+      memberships: scenario.memberships,
+      policies: scenario.policies,
+      toolCapabilities: scenario.toolCapabilities,
+      toolInvocations: scenario.toolInvocationRepository,
+      auditRecords: scenario.auditRecordRepository,
+      pullRequestProvider: createLocalPullRequestProvider(),
+      integrations: scenario.integrations,
+    };
+
+    await runDevelopmentAgentTask(deps, scenario.task);
+
+    expect(receivedInput?.repositoryFiles).toEqual(['README.md']);
+    expect(receivedInput?.relevantRepositoryFiles).toBeUndefined();
+  }, 30_000);
+
   it('DEVOS-067: folds the latest CHANGES_REQUIRED review findings into the model input on a rework attempt', async () => {
     const scenario = await buildScenario(repositoryPath);
 

@@ -3,6 +3,7 @@ import type {
   ArtifactVersionRepository,
   KnowledgeSourceRepository,
   ProjectRepository,
+  WorkItemRepository,
 } from '@devos/domain';
 
 /**
@@ -20,4 +21,14 @@ export interface RetrievalDeps {
   knowledgeSources: KnowledgeSourceRepository;
   artifacts: ArtifactRepository;
   artifactVersions: ArtifactVersionRepository;
+  /**
+   * DEVOS-187: resolves the current work item's title/description to build
+   * a real full-text query for `retrieveActiveKnowledgeSources`. Optional
+   * and additive, mirroring `KnowledgeSourceRepository.searchForProject?`'s
+   * own optional pattern, so every existing `RetrievalDeps` test fake stays
+   * valid unchanged — every real caller (`AgentTaskHandlerDeps`) already has
+   * a real `WorkItemRepository` to supply here, confirmed by direct
+   * inspection.
+   */
+  workItems?: WorkItemRepository;
 }

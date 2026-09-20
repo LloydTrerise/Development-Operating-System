@@ -14,13 +14,19 @@ import {
   type ProjectTypeAgentRepository,
   type ProjectTypeRepository,
   type ProjectTypeWorkflowRepository,
+  type SharedKnowledgeSource,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../src/projects/create-project.js';
 import type { CreateProjectWithClones } from '../src/projects/deps.js';
+import { archiveKnowledgeSource } from '../src/knowledge/archive-knowledge-source.js';
 import { createKnowledgeSource } from '../src/knowledge/create-knowledge-source.js';
 import { getKnowledgeSourceForPrincipal } from '../src/knowledge/get-knowledge-source.js';
+import { installKnowledgeSource } from '../src/knowledge/install-knowledge-source.js';
 import { listKnowledgeSourcesForProject } from '../src/knowledge/list-knowledge-sources.js';
+import { listSharedKnowledgeSourcesForOrganisation } from '../src/knowledge/list-shared-knowledge-sources-for-organisation.js';
+import { shareKnowledgeSource } from '../src/knowledge/share-knowledge-source.js';
+import { updateKnowledgeSource } from '../src/knowledge/update-knowledge-source.js';
 import { NotFoundError, ValidationError } from '../src/errors.js';
 
 function createInMemoryDeps() {
@@ -73,6 +79,32 @@ function createInMemoryDeps() {
       [...sourcesStore.values()].filter((s) => s.projectId === projectId),
     create: async (source) => {
       sourcesStore.set(source.id, source);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = sourcesStore.get(id);
+      if (!existing) return;
+      sourcesStore.set(id, { ...existing, ...changes, updatedAt });
+    },
+    setSharedAcrossOrganisation: async (id, shared) => {
+      const existing = sourcesStore.get(id);
+      if (!existing) return;
+      sourcesStore.set(id, { ...existing, sharedAcrossOrganisation: shared });
+    },
+    listSharedForOrganisation: async (organisationId): Promise<SharedKnowledgeSource[]> => {
+      return [...sourcesStore.values()]
+        .filter((s) => s.sharedAcrossOrganisation === true)
+        .map((s) => {
+          const sourceProject = projects.get(s.projectId);
+          return {
+            ...s,
+            sourceProjectId: s.projectId,
+            sourceProjectName: sourceProject?.name ?? '',
+          };
+        })
+        .filter((s) => {
+          const sourceProject = projects.get(s.projectId);
+          return sourceProject?.organisationId === organisationId;
+        });
     },
   };
 
@@ -251,5 +283,237 @@ describe('knowledge source use cases', () => {
     });
     const otherSources = await listKnowledgeSourcesForProject(deps, 'bob', otherProject.id);
     expect(otherSources).toHaveLength(0);
+  });
+
+  // DEVOS-182
+  it('updates a knowledge source and audits it', async () => {
+    const source = await createKnowledgeSource(deps, 'alice', projectId, {
+      key: 'editable',
+      name: 'Original name',
+      sourceType: 'STANDARD',
+      content: 'Original content',
+    });
+
+    const updated = await updateKnowledgeSource(deps, 'alice', source.id, {
+      name: 'New name',
+      content: 'New content',
+    });
+    expect(updated.name).toBe('New name');
+    expect(updated.content).toBe('New content');
+    expect(updated.sourceType).toBe('STANDARD');
+
+    const auditRecords = await deps.auditRecords.listForProject(projectId);
+    expect(auditRecords).toContainEqual(
+      expect.objectContaining({ action: 'knowledge-source.updated', targetId: source.id }),
+    );
+  });
+
+  it('rejects an update with empty content', async () => {
+    const source = await createKnowledgeSource(deps, 'alice', projectId, {
+      key: 'reject-empty',
+      name: 'Name',
+      sourceType: 'STANDARD',
+      content: 'content',
+    });
+
+    await expect(
+      updateKnowledgeSource(deps, 'alice', source.id, { content: '   ' }),
+    ).rejects.toThrow(ValidationError);
+  });
+
+  // DEVOS-182
+  it('archives an active knowledge source, rejects double-archive, and excludes it from listing status', async () => {
+    const source = await createKnowledgeSource(deps, 'alice', projectId, {
+      key: 'archivable',
+      name: 'Archivable',
+      sourceType: 'STANDARD',
+      content: 'content',
+    });
+
+    const archived = await archiveKnowledgeSource(deps, 'alice', source.id);
+    expect(archived.status).toBe('ARCHIVED');
+
+    const auditRecords = await deps.auditRecords.listForProject(projectId);
+    expect(auditRecords).toContainEqual(
+      expect.objectContaining({ action: 'knowledge-source.archived', targetId: source.id }),
+    );
+
+    await expect(archiveKnowledgeSource(deps, 'alice', source.id)).rejects.toThrow(
+      ValidationError,
+    );
+  });
+
+  it('rejects update/archive from a non-member', async () => {
+    const source = await createKnowledgeSource(deps, 'alice', projectId, {
+      key: 'protected',
+      name: 'Protected',
+      sourceType: 'STANDARD',
+      content: 'content',
+    });
+
+    await expect(
+      updateKnowledgeSource(deps, 'mallory', source.id, { name: 'Hacked' }),
+    ).rejects.toThrow(NotFoundError);
+    await expect(archiveKnowledgeSource(deps, 'mallory', source.id)).rejects.toThrow(
+      NotFoundError,
+    );
+  });
+
+  // DEVOS-188/189
+  describe('sharing and installing', () => {
+    it('shares an active knowledge source as its OWNER, and rejects a non-OWNER', async () => {
+      const source = await createKnowledgeSource(deps, 'alice', projectId, {
+        key: 'shareable',
+        name: 'Shareable',
+        sourceType: 'STANDARD',
+        content: 'Prefer explicit types.',
+      });
+
+      const shared = await shareKnowledgeSource(deps, 'alice', source.id, true);
+      expect(shared.sharedAcrossOrganisation).toBe(true);
+
+      const auditRecords = await deps.auditRecords.listForProject(projectId);
+      expect(auditRecords).toContainEqual(
+        expect.objectContaining({ action: 'knowledge-source.shared', targetId: source.id }),
+      );
+
+      // A second, non-owner member is rejected.
+      await deps.memberships.create({
+        id: randomUUID(),
+        organisationId,
+        projectId,
+        principalId: 'contributor',
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      await expect(
+        shareKnowledgeSource(deps, 'contributor', source.id, true),
+      ).rejects.toThrow();
+    });
+
+    it('rejects sharing an archived knowledge source', async () => {
+      const source = await createKnowledgeSource(deps, 'alice', projectId, {
+        key: 'archived-unshareable',
+        name: 'Name',
+        sourceType: 'STANDARD',
+        content: 'content',
+      });
+      await archiveKnowledgeSource(deps, 'alice', source.id);
+
+      await expect(shareKnowledgeSource(deps, 'alice', source.id, true)).rejects.toThrow(
+        ValidationError,
+      );
+    });
+
+    it('lists shared knowledge sources for an organisation, real-join scoped, never cross-organisation', async () => {
+      const source = await createKnowledgeSource(deps, 'alice', projectId, {
+        key: 'org-shared',
+        name: 'Org Shared',
+        sourceType: 'STANDARD',
+        content: 'content',
+      });
+      await shareKnowledgeSource(deps, 'alice', source.id, true);
+
+      const shared = await listSharedKnowledgeSourcesForOrganisation(deps, 'alice', organisationId);
+      expect(shared.map((s) => s.id)).toContain(source.id);
+
+      const otherOrganisationId = randomUUID() as OrganisationId;
+      await expect(
+        listSharedKnowledgeSourcesForOrganisation(deps, 'alice', otherOrganisationId),
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it('installs a shared knowledge source into a same-organisation project as a real, independent copy', async () => {
+      const source = await createKnowledgeSource(deps, 'alice', projectId, {
+        key: 'installable',
+        name: 'Installable',
+        sourceType: 'STANDARD',
+        content: 'Real content to clone.',
+      });
+      await shareKnowledgeSource(deps, 'alice', source.id, true);
+
+      const targetProject = await createProject(deps, 'bob', {
+        organisationId,
+        name: 'Target Project',
+        slug: 'target-project',
+      });
+
+      const installed = await installKnowledgeSource(deps, 'bob', source.id, targetProject.id);
+      expect(installed.id).not.toBe(source.id);
+      expect(installed.projectId).toBe(targetProject.id);
+      expect(installed.content).toBe('Real content to clone.');
+      expect(installed.status).toBe('ACTIVE');
+
+      const auditRecords = await deps.auditRecords.listForProject(targetProject.id);
+      expect(auditRecords).toContainEqual(
+        expect.objectContaining({ action: 'knowledge-source.installed', targetId: installed.id }),
+      );
+    });
+
+    it('rejects installing a non-shared knowledge source', async () => {
+      const source = await createKnowledgeSource(deps, 'alice', projectId, {
+        key: 'not-shared',
+        name: 'Not shared',
+        sourceType: 'STANDARD',
+        content: 'content',
+      });
+      const targetProject = await createProject(deps, 'bob', {
+        organisationId,
+        name: 'Target Project 2',
+        slug: 'target-project-2',
+      });
+
+      await expect(
+        installKnowledgeSource(deps, 'bob', source.id, targetProject.id),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('rejects a cross-organisation install with NotFoundError, never a distinguishable forbidden response', async () => {
+      const source = await createKnowledgeSource(deps, 'alice', projectId, {
+        key: 'cross-org',
+        name: 'Cross org',
+        sourceType: 'STANDARD',
+        content: 'content',
+      });
+      await shareKnowledgeSource(deps, 'alice', source.id, true);
+
+      const otherOrgProject = await createProject(deps, 'carol', {
+        organisationId: randomUUID() as OrganisationId,
+        name: 'Different Org Project',
+        slug: 'different-org-project',
+      });
+
+      await expect(
+        installKnowledgeSource(deps, 'carol', source.id, otherOrgProject.id),
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it('disambiguates a real key collision in the target project rather than failing the install', async () => {
+      const source = await createKnowledgeSource(deps, 'alice', projectId, {
+        key: 'collide',
+        name: 'Source',
+        sourceType: 'STANDARD',
+        content: 'content',
+      });
+      await shareKnowledgeSource(deps, 'alice', source.id, true);
+
+      const targetProject = await createProject(deps, 'bob', {
+        organisationId,
+        name: 'Collision Target',
+        slug: 'collision-target',
+      });
+      await createKnowledgeSource(deps, 'bob', targetProject.id, {
+        key: 'collide',
+        name: 'Existing',
+        sourceType: 'STANDARD',
+        content: 'existing content',
+      });
+
+      const installed = await installKnowledgeSource(deps, 'bob', source.id, targetProject.id);
+      expect(installed.key).not.toBe('collide');
+      expect(installed.key.startsWith('collide-')).toBe(true);
+    });
   });
 });

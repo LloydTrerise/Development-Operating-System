@@ -1,10 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { estimateCostUsd, validateAgentOutput } from '@devos/agents';
-import type { AuditId, OrganisationId, ProjectId, WorkflowRunId } from '@devos/contracts';
+import type {
+  AuditId,
+  KnowledgeReferenceId,
+  KnowledgeSourceId,
+  OrganisationId,
+  ProjectId,
+  WorkflowRunId,
+} from '@devos/contracts';
 import type {
   AgentExecution,
   ContextManifest,
   ContextManifestSource,
+  KnowledgeReference,
   WorkflowTask,
 } from '@devos/domain';
 import { authorityLevelFor, buildContext } from '@devos/knowledge';
@@ -317,7 +325,38 @@ export async function runAgentTask(
   const assembledContext = await buildContext(deps, {
     projectId: run.projectId,
     workflowRunId: run.id as WorkflowRunId,
+    workItemId: workItem.id,
   });
+
+  // DEVOS-184: durably records real usage traceability for every knowledge
+  // source this execution actually used — closes the gap between
+  // specs/workflows/software-change-workflow.md §28's "context is
+  // authorised and traceable" claim and the prior silent no-op (the
+  // `KnowledgeReference` table/repository existed since Sprint 3 but was
+  // never written to anywhere). Optional and additive: omitting
+  // `deps.knowledgeReferences` changes nothing else about this function.
+  if (deps.knowledgeReferences) {
+    const knowledgeSourceRefs = assembledContext.sources.filter(
+      (source) => source.type === 'KNOWLEDGE_SOURCE',
+    );
+    await Promise.all(
+      knowledgeSourceRefs.map((source) => {
+        const knowledgeSourceId = source.ref.replace(
+          'knowledge-source:',
+          '',
+        ) as KnowledgeSourceId;
+        const reference: KnowledgeReference = {
+          id: randomUUID() as KnowledgeReferenceId,
+          projectId: run.projectId,
+          knowledgeSourceId,
+          workflowTaskId: task.id,
+          agentExecutionId: execution.id,
+          createdAt: now,
+        };
+        return deps.knowledgeReferences!.create(reference);
+      }),
+    );
+  }
 
   const manifest: ContextManifest = {
     id: randomUUID() as ContextManifest['id'],

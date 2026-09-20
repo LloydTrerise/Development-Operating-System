@@ -25,6 +25,7 @@ import { CostPage } from './pages/CostPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { EngineeringIntelligencePage } from './pages/EngineeringIntelligencePage.js';
 import { GovernancePage } from './pages/GovernancePage.js';
+import { KnowledgeSourcesPage } from './pages/KnowledgeSourcesPage.js';
 import { OrganisationsPage } from './pages/OrganisationsPage.js';
 import { ProjectTypesPage } from './pages/ProjectTypesPage.js';
 import { ProjectsPage } from './pages/ProjectsPage.js';
@@ -48,6 +49,7 @@ const NAV_ITEMS = [
   { to: '/project-types', label: 'Project Types' },
   { to: '/work-items', label: 'Work Items' },
   { to: '/agents', label: 'Agents' },
+  { to: '/knowledge', label: 'Knowledge' },
   { to: '/workflows', label: 'Workflows' },
   { to: '/workflow-library', label: 'Workflow Library' },
   { to: '/runs', label: 'Runs' },
@@ -301,6 +303,7 @@ export function App() {
           <Route path="/project-types" element={<ProjectTypesPage />} />
           <Route path="/work-items" element={<WorkItemsPage />} />
           <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/knowledge" element={<KnowledgeSourcesPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/workflow-library" element={<WorkflowLibraryPage />} />
           <Route path="/runs" element={<RunsPage />} />

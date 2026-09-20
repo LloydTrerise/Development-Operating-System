@@ -952,6 +952,106 @@ export function getOrganisationEngineeringReport(
   );
 }
 
+/** DEVOS-183: mirrors `apps/api/src/dto/knowledge-source.ts`'s `toKnowledgeSourceDto` — the
+ * first web UI this concept has ever had (previously create/list-only, direct-API-only). */
+export interface KnowledgeSource {
+  id: string;
+  projectId: string;
+  key: string;
+  name: string;
+  sourceType: string;
+  content: string;
+  status: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  sharedAcrossOrganisation: boolean;
+}
+
+export interface SharedKnowledgeSource extends KnowledgeSource {
+  sourceProjectId: string;
+  sourceProjectName: string;
+}
+
+export interface KnowledgeReference {
+  id: string;
+  projectId: string;
+  knowledgeSourceId: string;
+  workflowTaskId: string;
+  agentExecutionId?: string;
+  createdAt: string;
+}
+
+export function listKnowledgeSources(projectId: string): Promise<ApiResult<KnowledgeSource[]>> {
+  return request<KnowledgeSource[]>(`/api/v1/projects/${projectId}/knowledge-sources`);
+}
+
+export function createKnowledgeSource(
+  projectId: string,
+  input: { key: string; name: string; sourceType: string; content: string },
+): Promise<ApiResult<KnowledgeSource>> {
+  return request<KnowledgeSource>(`/api/v1/projects/${projectId}/knowledge-sources`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+/** DEVOS-182: closes the create-only gap this table has had since Sprint 3. */
+export function updateKnowledgeSource(
+  knowledgeSourceId: string,
+  input: { name?: string; content?: string; sourceType?: string },
+): Promise<ApiResult<KnowledgeSource>> {
+  return request<KnowledgeSource>(`/api/v1/knowledge-sources/${knowledgeSourceId}`, {
+    method: 'PATCH',
+    body: input,
+  });
+}
+
+export function archiveKnowledgeSource(
+  knowledgeSourceId: string,
+): Promise<ApiResult<KnowledgeSource>> {
+  return request<KnowledgeSource>(`/api/v1/knowledge-sources/${knowledgeSourceId}/archive`, {
+    method: 'POST',
+  });
+}
+
+/** DEVOS-184: real usage traceability — which real executions actually used this source. */
+export function getKnowledgeSourceReferences(
+  knowledgeSourceId: string,
+): Promise<ApiResult<KnowledgeReference[]>> {
+  return request<KnowledgeReference[]>(`/api/v1/knowledge-sources/${knowledgeSourceId}/references`);
+}
+
+/** DEVOS-188: the real, organisation-scoped "share" primitive. */
+export function shareKnowledgeSource(
+  knowledgeSourceId: string,
+  shared: boolean,
+): Promise<ApiResult<KnowledgeSource>> {
+  return request<KnowledgeSource>(`/api/v1/knowledge-sources/${knowledgeSourceId}/share`, {
+    method: 'POST',
+    body: { shared },
+  });
+}
+
+export function listSharedKnowledgeSources(
+  organisationId: string,
+): Promise<ApiResult<SharedKnowledgeSource[]>> {
+  return request<SharedKnowledgeSource[]>(
+    `/api/v1/organisations/${organisationId}/shared-knowledge-sources`,
+  );
+}
+
+export function installKnowledgeSource(
+  organisationId: string,
+  knowledgeSourceId: string,
+  targetProjectId: string,
+): Promise<ApiResult<KnowledgeSource>> {
+  return request<KnowledgeSource>(
+    `/api/v1/organisations/${organisationId}/shared-knowledge-sources/${knowledgeSourceId}/install`,
+    { method: 'POST', body: { targetProjectId } },
+  );
+}
+
 /** DEVOS-171: the real, worker-sourced bottleneck ranking, proxied via `apps/api`. Returns an empty array (not an error) when the worker's metrics bridge isn't configured. */
 export function getSlowestWorkflows(projectId: string): Promise<ApiResult<SlowestWorkflowRow[]>> {
   return request<SlowestWorkflowRow[]>(`/api/v1/projects/${projectId}/slowest-workflows`);

@@ -8,7 +8,7 @@ import {
   runGit,
   type PullRequestProvider,
 } from '@devos/integrations';
-import { listRepositoryFiles } from '@devos/knowledge';
+import { retrieveRelevantRepositoryContext } from '@devos/knowledge';
 import { invokeTool } from '@devos/tools';
 import { createGitProviderAdapters } from './git-provider-adapters.js';
 import { buildAuthenticatedCloneUrl, resolveGitHubRepositoryTarget } from './github-context.js';
@@ -191,7 +191,26 @@ export async function runDevelopmentAgentTask(
   try {
     const { stdout: revisionOut } = await runGit(['rev-parse', 'HEAD'], workspace.path);
     const revision = revisionOut.trim();
-    const repositoryFiles = await listRepositoryFiles(workspace.path);
+
+    // DEVOS-192: the real, first-ever caller of `searchRepository`/
+    // `retrieveRepositoryFile` (dead code since their own introduction —
+    // see specs/DEVOS-KNOWLEDGE-PLATFORM-BACKLOG.md §9 and
+    // specs/sprints/sprint-26/README.md's own grounding). The plan's own
+    // summary text is the only real signal available to derive keyword
+    // terms from — no structured field names specific files — so this is a
+    // real, bounded improvement over "zero file content," not a claim that
+    // every relevant file is found.
+    const planSummary =
+      typeof latestPlanVersion.metadata?.summary === 'string'
+        ? latestPlanVersion.metadata.summary
+        : undefined;
+    const repositoryContext = await retrieveRelevantRepositoryContext(
+      workspace.path,
+      revision,
+      planSummary,
+    );
+    const repositoryFiles = (repositoryContext.listing.content as { files: { path: string }[] })
+      .files;
 
     const {
       agentExecutionId,
@@ -201,11 +220,18 @@ export async function runDevelopmentAgentTask(
       input: {
         implementationPlan: latestPlanVersion.metadata ?? {},
         repositoryFiles: repositoryFiles.map((file) => file.path),
+        ...(repositoryContext.files.length > 0
+          ? { relevantRepositoryFiles: repositoryContext.files.map((file) => file.content) }
+          : {}),
         ...(priorReview ? { priorReviewFindings: priorReview.metadata?.findings ?? [] } : {}),
       },
       sources: [
         { type: 'ARTIFACT', ref: `artifact:${planArtifact.id}:v${latestPlanVersion.version}` },
-        { type: 'REPOSITORY_LISTING', ref: `repository-listing:${revision}` },
+        { type: repositoryContext.listing.type, ref: repositoryContext.listing.ref },
+        ...(repositoryContext.searchResult
+          ? [{ type: repositoryContext.searchResult.type, ref: repositoryContext.searchResult.ref }]
+          : []),
+        ...repositoryContext.files.map((file) => ({ type: file.type, ref: file.ref })),
         ...(priorReview && reviewArtifact
           ? [
               {

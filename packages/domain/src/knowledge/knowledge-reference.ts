@@ -25,5 +25,8 @@ export interface KnowledgeReference {
 
 export interface KnowledgeReferenceRepository {
   listForTask: (workflowTaskId: WorkflowTaskId) => Promise<KnowledgeReference[]>;
+  /** DEVOS-184: the read-side mirror of `listForTask` — every real
+   * execution that has used a given knowledge source. */
+  listForSource: (knowledgeSourceId: KnowledgeSourceId) => Promise<KnowledgeReference[]>;
   create: (reference: KnowledgeReference) => Promise<void>;
 }

@@ -6,6 +6,7 @@ export * from './retrieval/deps.js';
 export * from './retrieval/list-repository-files.js';
 export * from './retrieval/retrieve-knowledge-sources.js';
 export * from './retrieval/retrieve-project-context.js';
+export * from './retrieval/retrieve-relevant-repository-context.js';
 export * from './retrieval/retrieve-repository-file.js';
 export * from './retrieval/retrieve-repository-listing.js';
 export * from './retrieval/retrieve-run-artifacts.js';

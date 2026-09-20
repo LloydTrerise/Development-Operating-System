@@ -252,6 +252,7 @@ export interface KnowledgeSourcesTable {
   created_by: string;
   created_at: string;
   updated_at: string;
+  shared_across_organisation: boolean;
 }
 
 export interface KnowledgeReferencesTable {

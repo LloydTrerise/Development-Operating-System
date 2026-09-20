@@ -10,6 +10,7 @@ import type {
   AuditRecordRepository,
   ContextManifest,
   IntegrationRepository,
+  KnowledgeReferenceRepository,
   KnowledgeSourceRepository,
   MembershipRepository,
   OrganisationRepository,
@@ -82,6 +83,13 @@ export interface AgentTaskHandlerDeps {
    * existing test fake for this interface stays valid unchanged.
    */
   organisations?: OrganisationRepository;
+  /**
+   * DEVOS-184: durable, real usage traceability for `buildContext()`'s
+   * knowledge-source selections — optional and additive, mirroring
+   * `auditRecords?`/`organisations?`'s established pattern, so every
+   * existing test fake for this interface stays valid unchanged.
+   */
+  knowledgeReferences?: KnowledgeReferenceRepository;
 }
 
 /**

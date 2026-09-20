@@ -54,6 +54,27 @@ function createDeps(): {
     create: async (source) => {
       knowledgeSourcesStore.set(source.id, source);
     },
+    update: async (id, changes, updatedAt) => {
+      const existing = knowledgeSourcesStore.get(id);
+      if (!existing) return;
+      knowledgeSourcesStore.set(id, { ...existing, ...changes, updatedAt });
+    },
+    // DEVOS-187: a plain in-memory stand-in for the real Postgres full-text
+    // search — proves `retrieveActiveKnowledgeSources`'s own fallback logic
+    // without needing a real database in this package's unit tests (the
+    // real `tsvector`/`ts_rank` mechanics are verified for real in the
+    // Sprint 25 e2e pilot instead).
+    searchForProject: async (projectId, query) => {
+      // A plain word-overlap stand-in for real `ts_rank` keyword matching —
+      // good enough to prove `retrieveActiveKnowledgeSources`'s own
+      // narrow/fallback logic without a real database in this unit test.
+      const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+      return [...knowledgeSourcesStore.values()].filter((s) => {
+        if (s.projectId !== projectId || s.status !== 'ACTIVE') return false;
+        const haystack = `${s.name} ${s.content}`.toLowerCase();
+        return words.some((word) => haystack.includes(word));
+      });
+    },
   };
 
   const artifactsStore = new Map<string, Artifact>();
@@ -159,6 +180,97 @@ describe('retrieveActiveKnowledgeSources', () => {
     const sources = await retrieveActiveKnowledgeSources(deps, otherProjectId);
 
     expect(sources).toEqual([]);
+  });
+
+  // DEVOS-187: real query-scoped relevance retrieval.
+  it('narrows to real, query-matching sources when a non-empty query is supplied and the repository supports search', async () => {
+    const { deps, project, addKnowledgeSource } = createDeps();
+    const matching = addKnowledgeSource({
+      key: 'matching',
+      name: 'Timeout Handling',
+      content: 'How to diagnose slow query timeouts.',
+    });
+    addKnowledgeSource({ key: 'unrelated', name: 'Unrelated', content: 'Naming conventions.' });
+
+    const sources = await retrieveActiveKnowledgeSources(deps, project.id, 'slow query timeout');
+
+    expect(sources).toEqual([
+      {
+        type: 'KNOWLEDGE_SOURCE',
+        ref: `knowledge-source:${matching.id}`,
+        name: matching.name,
+        content: matching.content,
+      },
+    ]);
+  });
+
+  it('falls back to unconditional inclusion on zero query matches — never a surprising empty context', async () => {
+    const { deps, project, addKnowledgeSource } = createDeps();
+    const unrelated = addKnowledgeSource({
+      key: 'unrelated',
+      name: 'Naming',
+      content: 'Naming conventions.',
+    });
+
+    const sources = await retrieveActiveKnowledgeSources(
+      deps,
+      project.id,
+      'a query matching nothing at all',
+    );
+
+    expect(sources).toEqual([
+      {
+        type: 'KNOWLEDGE_SOURCE',
+        ref: `knowledge-source:${unrelated.id}`,
+        name: unrelated.name,
+        content: unrelated.content,
+      },
+    ]);
+  });
+
+  it('falls back to unconditional inclusion when no query is supplied — zero regression for every existing caller', async () => {
+    const { deps, project, addKnowledgeSource } = createDeps();
+    const active = addKnowledgeSource({ key: 'a', name: 'Active', content: 'be explicit' });
+
+    const sources = await retrieveActiveKnowledgeSources(deps, project.id);
+
+    expect(sources).toEqual([
+      {
+        type: 'KNOWLEDGE_SOURCE',
+        ref: `knowledge-source:${active.id}`,
+        name: active.name,
+        content: active.content,
+      },
+    ]);
+  });
+
+  it('falls back to unconditional inclusion when the repository has no searchForProject support', async () => {
+    const { project, addKnowledgeSource } = createDeps();
+    const active = addKnowledgeSource({ key: 'a', name: 'Active', content: 'be explicit' });
+    const noSearchKnowledgeSources: KnowledgeSourceRepository = {
+      getById: async () => null,
+      getByProjectAndKey: async () => null,
+      listForProject: async () => [active],
+      create: async () => {},
+      update: async () => {},
+    };
+    const depsWithoutSearch: RetrievalDeps = {
+      projects: { getById: async () => null, listForOrganisation: async () => [], create: async () => {}, update: async () => {} },
+      knowledgeSources: noSearchKnowledgeSources,
+      artifacts: { getById: async () => null, listForProject: async () => [], create: async () => {} },
+      artifactVersions: { getById: async () => null, listForArtifact: async () => [], create: async () => {} },
+    };
+
+    const sources = await retrieveActiveKnowledgeSources(depsWithoutSearch, project.id, 'anything');
+
+    expect(sources).toEqual([
+      {
+        type: 'KNOWLEDGE_SOURCE',
+        ref: `knowledge-source:${active.id}`,
+        name: active.name,
+        content: active.content,
+      },
+    ]);
   });
 });
 

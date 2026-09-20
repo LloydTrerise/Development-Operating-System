@@ -22,6 +22,7 @@ import {
   createAuditRecordRepository,
   createContextManifestRepository,
   createDatabaseClient,
+  createKnowledgeReferenceRepository,
   createKnowledgeSourceRepository,
   createMembershipRepository,
   createOrganisationRepository,
@@ -367,6 +368,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     memberships: projectDeps.memberships,
     knowledgeSources: createKnowledgeSourceRepository(database.db),
     auditRecords: auditRecordRepository,
+    knowledgeReferences: createKnowledgeReferenceRepository(database.db),
   };
   const organisationDeps: OrganisationUseCaseDeps = options.organisationDeps ?? {
     organisations: createOrganisationRepository(database.db),
