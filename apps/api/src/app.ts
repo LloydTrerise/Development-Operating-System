@@ -56,6 +56,7 @@ import type {
   ArtifactUseCaseDeps,
   AuditUseCaseDeps,
   CostUseCaseDeps,
+  EngineeringIntelligenceUseCaseDeps,
   KnowledgeUseCaseDeps,
   OrganisationUseCaseDeps,
   PolicyUseCaseDeps,
@@ -85,6 +86,7 @@ import { createApprovalRoutes } from './routes/approvals.js';
 import { createArtifactRoutes } from './routes/artifacts.js';
 import { createAuditRoutes } from './routes/audit.js';
 import { createCostRoutes } from './routes/cost.js';
+import { createEngineeringIntelligenceRoutes } from './routes/engineering-intelligence.js';
 import { createHealthRoutes } from './routes/health.js';
 import { createKnowledgeSourceRoutes } from './routes/knowledge-sources.js';
 import { createMeRoutes } from './routes/me.js';
@@ -199,6 +201,7 @@ export interface CreateAppOptions {
   artifactDeps?: ArtifactUseCaseDeps;
   auditDeps?: AuditUseCaseDeps;
   costDeps?: CostUseCaseDeps;
+  engineeringIntelligenceDeps?: EngineeringIntelligenceUseCaseDeps;
   agentDeps?: AgentUseCaseDeps;
   agentExecutionSummaryDeps?: AgentExecutionSummaryUseCaseDeps;
   toolInvocationSummaryDeps?: ToolInvocationSummaryUseCaseDeps;
@@ -316,6 +319,19 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     organisations: createOrganisationRepository(database.db),
     agentExecutions: createAgentExecutionRepository(database.db),
   };
+  const engineeringIntelligenceDeps: EngineeringIntelligenceUseCaseDeps =
+    options.engineeringIntelligenceDeps ?? {
+      projects: projectDeps.projects,
+      memberships: projectDeps.memberships,
+      // DEVOS-164: separate instances from `auditDeps.organisations`/
+      // `costDeps.organisations`/`workItemDeps.workItems` above (construction
+      // order) — all stateless wrappers over the same real `database.db`,
+      // mirroring `costDeps.organisations`'s own established precedent.
+      organisations: createOrganisationRepository(database.db),
+      artifacts: createArtifactRepository(database.db),
+      workItems: createWorkItemRepository(database.db),
+      projectTypes: projectTypeRepository,
+    };
   const agentExecutionSummaryDeps: AgentExecutionSummaryUseCaseDeps =
     options.agentExecutionSummaryDeps ?? {
       projects: projectDeps.projects,
@@ -402,6 +418,11 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createArtifactRoutes(API_PREFIX, artifactDeps),
     ...createAuditRoutes(API_PREFIX, auditDeps),
     ...createCostRoutes(API_PREFIX, costDeps),
+    ...createEngineeringIntelligenceRoutes(
+      API_PREFIX,
+      engineeringIntelligenceDeps,
+      options.env ?? process.env,
+    ),
     ...createAgentRoutes(API_PREFIX, agentDeps),
     ...createAgentExecutionSummaryRoutes(API_PREFIX, agentExecutionSummaryDeps),
     ...createToolInvocationSummaryRoutes(API_PREFIX, toolInvocationSummaryDeps),

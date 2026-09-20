@@ -65,5 +65,60 @@ export function createArtifactRepository(db: QueryExecutor): ArtifactRepository 
         })
         .execute();
     },
+
+    // DEVOS-163: real evidence rows — a real `artifacts` ⋈
+    // `artifact_versions` join (on `version = 1`, true for every real
+    // evidence-writing call site today) inlining each artifact's own real
+    // metadata, so no further per-artifact lookup is needed by a caller.
+    async listEvidenceForProject(projectId, artifactType) {
+      const rows = await db
+        .selectFrom('artifacts')
+        .innerJoin('artifact_versions', (join) =>
+          join
+            .onRef('artifact_versions.artifact_id', '=', 'artifacts.id')
+            .on('artifact_versions.version', '=', 1),
+        )
+        .where('artifacts.project_id', '=', projectId)
+        .where('artifacts.artifact_type', '=', artifactType)
+        .select([
+          'artifacts.id as artifact_id',
+          'artifacts.created_at as created_at',
+          'artifact_versions.metadata as metadata',
+        ])
+        .execute();
+      return rows.map((row) => ({
+        artifactId: row.artifact_id as ArtifactId,
+        createdAt: row.created_at,
+        metadata: (row.metadata as Record<string, unknown> | null) ?? {},
+      }));
+    },
+
+    // DEVOS-163: the organisation-scoped mirror, a real `artifacts` ⋈
+    // `projects` ⋈ `artifact_versions` join — mirrors
+    // `sumEstimatedCostUsdForOrganisation`'s real-join, never-a-client-loop
+    // precedent (DEVOS-150).
+    async listEvidenceForOrganisation(organisationId, artifactType) {
+      const rows = await db
+        .selectFrom('artifacts')
+        .innerJoin('projects', 'projects.id', 'artifacts.project_id')
+        .innerJoin('artifact_versions', (join) =>
+          join
+            .onRef('artifact_versions.artifact_id', '=', 'artifacts.id')
+            .on('artifact_versions.version', '=', 1),
+        )
+        .where('projects.organisation_id', '=', organisationId)
+        .where('artifacts.artifact_type', '=', artifactType)
+        .select([
+          'artifacts.id as artifact_id',
+          'artifacts.created_at as created_at',
+          'artifact_versions.metadata as metadata',
+        ])
+        .execute();
+      return rows.map((row) => ({
+        artifactId: row.artifact_id as ArtifactId,
+        createdAt: row.created_at,
+        metadata: (row.metadata as Record<string, unknown> | null) ?? {},
+      }));
+    },
   };
 }

@@ -22,6 +22,7 @@ import { getHealth } from './api-client.js';
 import { ApprovalsPage } from './pages/ApprovalsPage.js';
 import { CostPage } from './pages/CostPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
+import { EngineeringIntelligencePage } from './pages/EngineeringIntelligencePage.js';
 import { GovernancePage } from './pages/GovernancePage.js';
 import { OrganisationsPage } from './pages/OrganisationsPage.js';
 import { ProjectTypesPage } from './pages/ProjectTypesPage.js';
@@ -51,6 +52,7 @@ const NAV_ITEMS = [
   { to: '/approvals', label: 'Approvals' },
   { to: '/governance', label: 'Governance' },
   { to: '/cost', label: 'Cost' },
+  { to: '/engineering-intelligence', label: 'Engineering Intelligence' },
 ] as const;
 
 function OrganisationSelector() {
@@ -302,6 +304,7 @@ export function App() {
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/governance" element={<GovernancePage />} />
           <Route path="/cost" element={<CostPage />} />
+          <Route path="/engineering-intelligence" element={<EngineeringIntelligencePage />} />
         </Routes>
       </Box>
     </Box>

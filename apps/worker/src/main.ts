@@ -69,11 +69,16 @@ const database = createDatabaseClient({ connectionString: config.database.url })
 const taskQueue = createPostgresTaskQueue(database.db);
 /** DEVOS-087: workflow/agent/tool/queue metrics, recorded per claimed task. */
 export const metrics = createMetricsRegistry();
+// DEVOS-170: constructed before the dispatcher (moved up from its own
+// original construction site below) so `workflowVersionId` can be resolved
+// and labelled on every metric this dispatcher emits.
+const workflowRuns = createWorkflowRunRepository(database.db);
 const dispatcher = createTaskDispatcher(taskQueue, {
   metrics,
   // DEVOS-145: expires past-due PENDING approvals on the same periodic
   // tick that already reclaims stale tasks and resumes ready WAITs.
   approvals: createApprovalRepository(database.db),
+  workflowRuns,
 });
 
 const storage = createLocalFilesystemStorage(
@@ -96,7 +101,6 @@ const credentialResolver: CredentialResolver =
       })
     : createEnvCredentialResolver();
 const publishArtifact = createArtifactPublisher(database.db);
-const workflowRuns = createWorkflowRunRepository(database.db);
 const workItems = createWorkItemRepository(database.db);
 
 const taskHandlerDeps: TaskHandlerDeps = {
@@ -332,7 +336,13 @@ if (metricsSnapshotIntervalMs > 0) {
  * concurrently — a shared fixed default port would collide across them.
  */
 const metricsPort = Number(process.env.METRICS_PORT ?? 0);
-const metricsServer = metricsPort > 0 ? startMetricsServer(metrics, metricsPort) : undefined;
+const metricsServer =
+  metricsPort > 0
+    ? startMetricsServer(metrics, metricsPort, {
+        workflowVersions: createWorkflowVersionRepository(database.db),
+        workflowDefinitions: createWorkflowDefinitionRepository(database.db),
+      })
+    : undefined;
 if (metricsServer) {
   console.log(`DevOS worker metrics available at http://localhost:${metricsPort}/metrics`);
 }

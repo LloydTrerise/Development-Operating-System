@@ -4,6 +4,8 @@ import {
   type ApprovalRepository,
   type TaskFailure,
   type TaskQueue,
+  type WorkflowRun,
+  type WorkflowRunRepository,
   type WorkflowTask,
 } from '@devos/domain';
 import { createMetricsRegistry } from '@devos/observability';
@@ -180,6 +182,43 @@ describe('task dispatcher', () => {
       expect(metrics.getCounter('task_queue.completed', { taskType: 'AGENT_TASK' })).toBe(1);
       expect(
         metrics.getHistogram('workflow_task.duration_ms', { taskType: 'AGENT_TASK' })?.count,
+      ).toBe(1);
+    });
+
+    it('DEVOS-170: also labels every metric with the real workflowVersionId when a workflowRuns repository is supplied', async () => {
+      const workflowVersionId = randomUUID() as WorkflowRun['workflowVersionId'];
+      const task = createTask({ taskType: 'AGENT_TASK' });
+      const { taskQueue } = createFakeQueue([task]);
+      const metrics = createMetricsRegistry();
+      const run: WorkflowRun = {
+        id: task.workflowRunId,
+        projectId: randomUUID() as WorkflowRun['projectId'],
+        workflowVersionId,
+        workItemId: randomUUID() as WorkflowRun['workItemId'],
+        status: 'RUNNING',
+        input: {},
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      };
+      const workflowRuns: WorkflowRunRepository = {
+        getById: async (id) => (id === run.id ? run : null),
+        getByVersionAndIdempotencyKey: async () => null,
+        listForWorkItem: async () => [],
+        create: async () => {},
+      };
+      const dispatcher = createTaskDispatcher(taskQueue, { metrics, workflowRuns });
+      dispatcher.registerHandler('AGENT_TASK', async () => ({}));
+
+      await dispatcher.processNext();
+
+      expect(
+        metrics.getCounter('task_queue.claimed', { taskType: 'AGENT_TASK', workflowVersionId }),
+      ).toBe(1);
+      expect(
+        metrics.getHistogram('workflow_task.duration_ms', {
+          taskType: 'AGENT_TASK',
+          workflowVersionId,
+        })?.count,
       ).toBe(1);
     });
 

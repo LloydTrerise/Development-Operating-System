@@ -2,6 +2,7 @@ import {
   NonRetryableTaskError,
   type ApprovalRepository,
   type TaskQueue,
+  type WorkflowRunRepository,
   type WorkflowTask,
 } from '@devos/domain';
 import type { MetricsRegistry } from '@devos/observability';
@@ -41,6 +42,15 @@ export interface TaskDispatcherOptions {
    * need approval expiry, mirroring `metrics`'s own optional pattern.
    */
   approvals?: ApprovalRepository;
+  /**
+   * DEVOS-170: resolves a claimed task's `workflowRunId` to its
+   * `workflowVersionId`, added as a second metric label alongside the
+   * existing `taskType` — the minimal additive step toward bottleneck
+   * analytics past "system-wide average by task type." Optional, and only
+   * actually looked up when `metrics` is also configured (no point paying
+   * for the extra lookup when nothing will read the label).
+   */
+  workflowRuns?: WorkflowRunRepository;
 }
 
 function delay(ms: number): Promise<void> {
@@ -57,6 +67,7 @@ export function createTaskDispatcher(
   const reclaimIntervalMs = options.reclaimIntervalMs ?? 60 * 1000;
   const metrics = options.metrics;
   const approvals = options.approvals;
+  const workflowRuns = options.workflowRuns;
 
   let status: DispatcherStatus = 'ready';
   let stopRequested = false;
@@ -67,7 +78,14 @@ export function createTaskDispatcher(
     const task = await queue.claimNext();
     if (!task) return undefined;
 
-    const labels = { taskType: task.taskType };
+    const workflowVersionId =
+      metrics && workflowRuns
+        ? (await workflowRuns.getById(task.workflowRunId))?.workflowVersionId
+        : undefined;
+    const labels = {
+      taskType: task.taskType,
+      ...(workflowVersionId !== undefined ? { workflowVersionId } : {}),
+    };
     metrics?.incrementCounter('task_queue.claimed', labels);
     const startedAt = Date.now();
 

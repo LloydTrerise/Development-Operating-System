@@ -1,5 +1,6 @@
 import type { ProjectId, WorkItemId } from '@devos/contracts';
 import type { WorkItem, WorkItemRepository } from '@devos/domain';
+import { sql } from 'kysely';
 import type { WorkItemsTable } from '../database.js';
 import type { QueryExecutor } from './base.js';
 
@@ -76,6 +77,26 @@ export function createWorkItemRepository(db: QueryExecutor): WorkItemRepository 
         })
         .where('id', '=', id)
         .execute();
+    },
+
+    // DEVOS-163: `metadata->>'reworkCount'` mirrors
+    // `costBreakdownByRoleForOrganisation`'s own `agent_versions.configuration->>'role'`
+    // jsonb-text-extraction pattern. Cast to numeric for the `> 0` filter
+    // and for a correct (not lexicographic-string) ordering.
+    async countReworkCyclesForProject(projectId) {
+      const rows = await db
+        .selectFrom('work_items')
+        .where('project_id', '=', projectId)
+        .where(sql<boolean>`coalesce((metadata->>'reworkCount')::numeric, 0) > 0`)
+        .select((eb) => [
+          eb.ref('id').as('work_item_id'),
+          sql<string>`(metadata->>'reworkCount')::numeric`.as('rework_count'),
+        ])
+        .execute();
+      return rows.map((row) => ({
+        workItemId: row.work_item_id as WorkItemId,
+        reworkCount: Number(row.rework_count),
+      }));
     },
   };
 }

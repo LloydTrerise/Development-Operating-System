@@ -40,6 +40,36 @@ function metricKey(name: string, labels?: MetricLabels): string {
   return `${name}{${labelPart}}`;
 }
 
+export interface ParsedMetricKey {
+  name: string;
+  labels: MetricLabels;
+}
+
+/**
+ * DEVOS-170: the inverse of `metricKey` above — reverses a `snapshot()`
+ * entry's own serialized key (`name{a=1,b=2}`) back into a bare metric
+ * name plus its label object. Exported so both `prometheus-format.ts`
+ * (its original, only caller) and any new snapshot-reading query (e.g.
+ * `@devos/application`'s `get-slowest-workflows.ts`) share one parser
+ * rather than each re-implementing the same string format.
+ */
+export function parseMetricKey(key: string): ParsedMetricKey {
+  const braceIndex = key.indexOf('{');
+  if (braceIndex === -1) return { name: key, labels: {} };
+
+  const name = key.slice(0, braceIndex);
+  const labelPart = key.slice(braceIndex + 1, key.lastIndexOf('}'));
+  const labels: MetricLabels = {};
+  if (labelPart.length > 0) {
+    for (const pair of labelPart.split(',')) {
+      const eq = pair.indexOf('=');
+      if (eq === -1) continue;
+      labels[pair.slice(0, eq)] = pair.slice(eq + 1);
+    }
+  }
+  return { name, labels };
+}
+
 export function createMetricsRegistry(): MetricsRegistry {
   const counters = new Map<string, number>();
   const histograms = new Map<string, HistogramSummary>();

@@ -809,3 +809,91 @@ export function getOrganisationCostReport(
 ): Promise<ApiResult<OrganisationCostReport>> {
   return request<OrganisationCostReport>(`/api/v1/organisations/${organisationId}/cost-report`);
 }
+
+/** DEVOS-164: real, pre-aggregated review/test/security-scan/release pass
+ * rates and counts, plus a real rework-cycle count — the same shape at
+ * project and organisation scope (organisation scope always reports
+ * `reworkCycleCount: 0`, a real, disclosed limitation, not a silently
+ * wrong number — see `getOrganisationEngineeringReport`'s own doc comment). */
+/** DEVOS-167: deployment frequency / change failure rate over the report's own period. */
+export interface DoraReleaseMetrics {
+  deploymentCount: number;
+  deploymentsPerDay: number;
+  changeFailureCount: number;
+  changeFailureRate: number;
+}
+
+/** DEVOS-168: real lead-time-for-changes distribution (`0`s, not `NaN`, when no sample was matched). */
+export interface LeadTimeSummary {
+  sampleCount: number;
+  leadTimeMsP50: number;
+  leadTimeMsMean: number;
+}
+
+/** DEVOS-169: a disclosed time-to-restore proxy — never a true MTTR (no real incident-detection timestamp exists anywhere in this codebase); `label` is shown verbatim, never dropped. */
+export interface RecoveryProxySummary {
+  sampleCount: number;
+  meanMs: number;
+  label: string;
+}
+
+export interface QualityReport {
+  reviewCount: number;
+  reviewPassCount: number;
+  reviewPassRate: number;
+  testCount: number;
+  testPassCount: number;
+  testPassRate: number;
+  securityScanCount: number;
+  securityScanPassCount: number;
+  securityScanPassRate: number;
+  deployCount: number;
+  rollbackCount: number;
+  reworkCycleCount: number;
+  dora: DoraReleaseMetrics;
+  leadTime: LeadTimeSummary;
+  releaseRecoveryProxy: RecoveryProxySummary;
+}
+
+export interface ProjectEngineeringReport extends QualityReport {
+  projectId: string;
+  /** DEVOS-169: present only for a project whose ProjectType is the seeded Incident Response type. */
+  incidentRecoveryProxy?: RecoveryProxySummary;
+}
+
+export interface OrganisationEngineeringReport extends QualityReport {
+  organisationId: string;
+  projectCount: number;
+}
+
+/** DEVOS-170/171: one row of the worker's own live slowest-workflows ranking, proxied through `apps/api` (see `apps/api/src/routes/engineering-intelligence.ts`'s own doc comment for the real, disclosed cross-process/no-per-project-filtering limitation). */
+export interface SlowestWorkflowRow {
+  workflowVersionId: string;
+  workflowDefinitionName: string;
+  meanDurationMs: number;
+  taskCount: number;
+}
+
+/** DEVOS-164: real engineering-intelligence data for one project —
+ * previously unreachable from any client (the same "captured but no
+ * reporting surface" gap DEVOS-151 closed for cost data). */
+export function getProjectEngineeringReport(
+  projectId: string,
+): Promise<ApiResult<ProjectEngineeringReport>> {
+  return request<ProjectEngineeringReport>(`/api/v1/projects/${projectId}/engineering-report`);
+}
+
+/** DEVOS-164: the organisation-scoped mirror — a real cross-project
+ * evidence rollup, already correctly tenant-isolated server-side. */
+export function getOrganisationEngineeringReport(
+  organisationId: string,
+): Promise<ApiResult<OrganisationEngineeringReport>> {
+  return request<OrganisationEngineeringReport>(
+    `/api/v1/organisations/${organisationId}/engineering-report`,
+  );
+}
+
+/** DEVOS-171: the real, worker-sourced bottleneck ranking, proxied via `apps/api`. Returns an empty array (not an error) when the worker's metrics bridge isn't configured. */
+export function getSlowestWorkflows(projectId: string): Promise<ApiResult<SlowestWorkflowRow[]>> {
+  return request<SlowestWorkflowRow[]>(`/api/v1/projects/${projectId}/slowest-workflows`);
+}

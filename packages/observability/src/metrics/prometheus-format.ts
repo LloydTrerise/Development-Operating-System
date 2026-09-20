@@ -1,4 +1,4 @@
-import type { MetricsSnapshot } from './registry.js';
+import { parseMetricKey, type MetricsSnapshot } from './registry.js';
 
 /**
  * DEVOS-117: the real exporter behind `MetricsRegistry.snapshot()`'s
@@ -22,40 +22,14 @@ import type { MetricsSnapshot } from './registry.js';
 
 const METRIC_NAME_PATTERN = /^[A-Za-z_:][A-Za-z0-9_:]*$/;
 
-interface ParsedKey {
-  name: string;
-  labels: [string, string][];
-}
-
-/**
- * Reverses `registry.ts`'s own `metricKey` embedding (`name{a=1,b=2}`) back
- * into a bare metric name plus its label pairs, so each recorded series can
- * be re-serialized in Prometheus's own `name{a="1",b="2"}` syntax.
- */
-function parseKey(key: string): ParsedKey {
-  const braceIndex = key.indexOf('{');
-  if (braceIndex === -1) return { name: key, labels: [] };
-
-  const name = key.slice(0, braceIndex);
-  const labelPart = key.slice(braceIndex + 1, key.lastIndexOf('}'));
-  const labels: [string, string][] = labelPart.length === 0 ? [] : [];
-  if (labelPart.length > 0) {
-    for (const pair of labelPart.split(',')) {
-      const eq = pair.indexOf('=');
-      if (eq === -1) continue;
-      labels.push([pair.slice(0, eq), pair.slice(eq + 1)]);
-    }
-  }
-  return { name, labels };
-}
-
 function escapeLabelValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
-function formatLabels(labels: [string, string][]): string {
-  if (labels.length === 0) return '';
-  return `{${labels.map(([k, v]) => `${k}="${escapeLabelValue(v)}"`).join(',')}}`;
+function formatLabels(labels: Record<string, string>): string {
+  const entries = Object.entries(labels);
+  if (entries.length === 0) return '';
+  return `{${entries.map(([k, v]) => `${k}="${escapeLabelValue(v)}"`).join(',')}}`;
 }
 
 /**
@@ -74,7 +48,7 @@ export function formatPrometheusText(snapshot: MetricsSnapshot): string {
   const emittedType = new Set<string>();
 
   for (const [key, value] of Object.entries(snapshot.counters)) {
-    const { name, labels } = parseKey(key);
+    const { name, labels } = parseMetricKey(key);
     const metricName = sanitizeMetricName(name);
     if (!emittedType.has(metricName)) {
       lines.push(`# TYPE ${metricName} counter`);
@@ -84,7 +58,7 @@ export function formatPrometheusText(snapshot: MetricsSnapshot): string {
   }
 
   for (const [key, summary] of Object.entries(snapshot.histograms)) {
-    const { name, labels } = parseKey(key);
+    const { name, labels } = parseMetricKey(key);
     const metricName = sanitizeMetricName(name);
     // Not a real Prometheus histogram (no bucket boundaries exist anywhere
     // in this registry's own data model) — exported honestly as four
