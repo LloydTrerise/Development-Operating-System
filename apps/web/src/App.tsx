@@ -19,6 +19,7 @@ import {
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import { getHealth } from './api-client.js';
+import { AgentsPage } from './pages/AgentsPage.js';
 import { ApprovalsPage } from './pages/ApprovalsPage.js';
 import { CostPage } from './pages/CostPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
@@ -46,6 +47,7 @@ const NAV_ITEMS = [
   { to: '/projects', label: 'Projects' },
   { to: '/project-types', label: 'Project Types' },
   { to: '/work-items', label: 'Work Items' },
+  { to: '/agents', label: 'Agents' },
   { to: '/workflows', label: 'Workflows' },
   { to: '/workflow-library', label: 'Workflow Library' },
   { to: '/runs', label: 'Runs' },
@@ -298,6 +300,7 @@ export function App() {
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/project-types" element={<ProjectTypesPage />} />
           <Route path="/work-items" element={<WorkItemsPage />} />
+          <Route path="/agents" element={<AgentsPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/workflow-library" element={<WorkflowLibraryPage />} />
           <Route path="/runs" element={<RunsPage />} />

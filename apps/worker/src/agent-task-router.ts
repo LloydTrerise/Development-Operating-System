@@ -9,6 +9,7 @@ import {
   type ReviewAgentTaskHandlerDeps,
 } from '@devos/application';
 import {
+  computeAgentVersionQuality,
   selectAgentForTask,
   type Agent,
   type AgentVersion,
@@ -89,6 +90,29 @@ async function listPublishedCandidates(
   return candidates;
 }
 
+/**
+ * DEVOS-179 (Sprint 23): the real per-agent-version quality signal
+ * (E25's own `computeAgentVersionQuality`, DEVOS-174), reused here as
+ * `selectAgentForTask`'s optional second sort key. `deps.artifacts` is
+ * already a required dependency of every real caller of this router (both
+ * `DevelopmentAgentTaskHandlerDeps` and `ReviewAgentTaskHandlerDeps`
+ * already require it) — no new dependency added; only the optional
+ * `listEvidenceForProject` method (DEVOS-163) may be absent on a fake.
+ */
+async function getQualityByAgentVersionId(
+  deps: RouterDeps,
+  projectId: ProjectId,
+): Promise<Map<string, number>> {
+  if (!deps.artifacts.listEvidenceForProject) return new Map();
+
+  const [reviewEvidence, codeChangeEvidence] = await Promise.all([
+    deps.artifacts.listEvidenceForProject(projectId, 'REVIEW_EVIDENCE'),
+    deps.artifacts.listEvidenceForProject(projectId, 'CODE_CHANGE'),
+  ]);
+  const quality = computeAgentVersionQuality(reviewEvidence, codeChangeEvidence);
+  return new Map(quality.map((row) => [row.agentVersionId, row.passRate]));
+}
+
 export async function routeAgentTask(
   deps: RouterDeps,
   task: WorkflowTask,
@@ -130,7 +154,13 @@ export async function routeAgentTask(
       ? (task.input.requiredCapabilities as string[])
       : [];
     const candidates = await listPublishedCandidates(deps, run.projectId);
-    selected = selectAgentForTask(candidates, requiredRole as string, requiredCapabilities);
+    const qualityByAgentVersionId = await getQualityByAgentVersionId(deps, run.projectId);
+    selected = selectAgentForTask(
+      candidates,
+      requiredRole as string,
+      requiredCapabilities,
+      qualityByAgentVersionId,
+    );
     if (!selected) {
       throw new Error(
         `No agent handler registered for requiredRole "${requiredRole}" (task ${task.id}): no published agent in project ${run.projectId} matches that role and capabilities [${requiredCapabilities.join(', ')}].`,

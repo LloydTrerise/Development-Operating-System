@@ -3,6 +3,7 @@ import type {
   AgentRepository,
   AgentVersion,
   AgentVersionRepository,
+  ArtifactRepository,
   AuditRecordRepository,
   MembershipRepository,
   ProjectRepository,
@@ -18,4 +19,14 @@ export interface AgentUseCaseDeps {
   createDraft: CreateAgentDraft;
   /** DEVOS-086: agent version publish is audited. */
   auditRecords: AuditRecordRepository;
+  /**
+   * DEVOS-174: reads DEVOS-163's real `listEvidenceForProject` for the
+   * per-agent-version quality signal. Optional, matching every other
+   * repository extension this codebase adds after a use-case's own initial
+   * shape — a fake lacking it (or an artifact repository lacking the
+   * optional `listEvidenceForProject` method itself) simply reports an
+   * empty quality result, matching `getProjectEngineeringReport`'s own
+   * established no-op-when-absent convention.
+   */
+  artifacts?: ArtifactRepository;
 }

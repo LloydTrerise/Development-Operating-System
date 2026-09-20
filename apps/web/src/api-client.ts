@@ -554,6 +554,65 @@ export function listAgents(projectId: string): Promise<ApiResult<Agent[]>> {
   return request<Agent[]>(`/api/v1/projects/${projectId}/agents`);
 }
 
+/** DEVOS-172: mirrors `apps/api/src/dto/agent.ts`'s `toAgentVersionDto` —
+ * a real agent's own draft/published version, as opposed to
+ * `ProjectTypeAgent` (a template, no version concept at all). */
+export interface AgentVersion {
+  id: string;
+  agentId: string;
+  version: number;
+  status: string;
+  configuration: AgentConfiguration;
+  promptReference?: string;
+  createdBy: string;
+  publishedAt?: string;
+  createdAt: string;
+}
+
+/** DEVOS-173: the first real create path for a per-project (non-template) agent. */
+export function createAgent(
+  projectId: string,
+  input: {
+    key: string;
+    name: string;
+    description?: string;
+    configuration: AgentConfiguration;
+    promptReference?: string;
+  },
+): Promise<ApiResult<Agent & { version: AgentVersion }>> {
+  return request<Agent & { version: AgentVersion }>(`/api/v1/projects/${projectId}/agents`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+/** DEVOS-173: a real agent's real version history. */
+export function listAgentVersions(agentId: string): Promise<ApiResult<AgentVersion[]>> {
+  return request<AgentVersion[]>(`/api/v1/agents/${agentId}/versions`);
+}
+
+/** DEVOS-172: drafts a real new version, copying the latest published `configuration` verbatim. */
+export function createNewAgentVersion(agentId: string): Promise<ApiResult<AgentVersion>> {
+  return request<AgentVersion>(`/api/v1/agents/${agentId}/versions`, { method: 'POST' });
+}
+
+/** Publishes an agent's current draft version — real, single-step, OWNER-gated (unchanged). */
+export function publishAgentVersion(agentId: string): Promise<ApiResult<AgentVersion>> {
+  return request<AgentVersion>(`/api/v1/agents/${agentId}/publish`, { method: 'POST' });
+}
+
+/** DEVOS-174: a real per-agent-version review pass rate — labelled honestly, never a general "quality score." */
+export interface AgentVersionQuality {
+  agentVersionId: string;
+  reviewCount: number;
+  passCount: number;
+  passRate: number;
+}
+
+export function getAgentQuality(agentId: string): Promise<ApiResult<AgentVersionQuality[]>> {
+  return request<AgentVersionQuality[]>(`/api/v1/agents/${agentId}/quality`);
+}
+
 export function startRun(
   workflowId: string,
   input: { workItemId: string; inputs?: Record<string, unknown>; idempotencyKey: string },

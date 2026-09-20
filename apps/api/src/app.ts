@@ -308,6 +308,11 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     agentVersions: createAgentVersionRepository(database.db),
     createDraft: createAgentDraftCreator(database.db),
     auditRecords: auditRecordRepository,
+    // DEVOS-174: a separate instance from `artifactDeps.artifacts` above
+    // (construction order) — both are stateless wrappers over the same
+    // real `database.db`, mirroring `costDeps.organisations`'s own
+    // established precedent exactly.
+    artifacts: createArtifactRepository(database.db),
   };
   const costDeps: CostUseCaseDeps = options.costDeps ?? {
     projects: projectDeps.projects,

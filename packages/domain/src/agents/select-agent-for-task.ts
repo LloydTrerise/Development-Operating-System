@@ -18,14 +18,24 @@ export interface AgentSelectionCandidate {
  * result.
  *
  * Tie-break is deliberately simple and disclosed, not a scoring system: the
- * lowest `agent.key`, ascending. No cost/quality/performance preference is
- * considered — no such data exists yet (specs/DEVOS-COST-MANAGEMENT-BACKLOG.md
- * §2/§9), so there is nothing real to weigh.
+ * lowest `agent.key`, ascending — unchanged, and reproduced byte-for-byte
+ * when `qualityByAgentVersionId` (DEVOS-179, Sprint 23) is omitted or has no
+ * data for either candidate being compared.
+ *
+ * DEVOS-179: an optional second sort key — a real per-agent-version review
+ * pass rate (E25's own `computeAgentVersionQuality`, DEVOS-174) — applied
+ * *only* when both candidates being compared have a real, known rate; a
+ * candidate with no known rate is never numerically compared against one
+ * that does (never "penalized below a real 0%"), it simply falls straight
+ * through to the same ascending-key rule as today. This is one disclosed,
+ * deterministic secondary sort key, not a configurable weighted-scoring
+ * system.
  */
 export function selectAgentForTask(
   candidates: AgentSelectionCandidate[],
   requiredRole: string,
   requiredCapabilities: string[],
+  qualityByAgentVersionId?: Map<string, number>,
 ): AgentSelectionCandidate | null {
   const matches = candidates.filter(
     ({ version }) =>
@@ -38,7 +48,16 @@ export function selectAgentForTask(
 
   if (matches.length === 0) return null;
 
-  return matches.reduce((best, candidate) =>
-    candidate.agent.key < best.agent.key ? candidate : best,
-  );
+  const sorted = [...matches].sort((a, b) => {
+    const rateA = qualityByAgentVersionId?.get(a.version.id);
+    const rateB = qualityByAgentVersionId?.get(b.version.id);
+    if (rateA !== undefined && rateB !== undefined && rateA !== rateB) {
+      return rateB - rateA;
+    }
+    if (a.agent.key < b.agent.key) return -1;
+    if (a.agent.key > b.agent.key) return 1;
+    return 0;
+  });
+
+  return sorted[0]!;
 }

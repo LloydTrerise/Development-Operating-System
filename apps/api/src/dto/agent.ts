@@ -1,5 +1,5 @@
 import type { AgentConfiguration } from '@devos/contracts';
-import type { Agent, AgentVersion } from '@devos/domain';
+import type { Agent, AgentVersion, SharedAgentVersion } from '@devos/domain';
 import { BadRequestError } from '../http/errors.js';
 
 export function toAgentDto(agent: Agent) {
@@ -26,7 +26,26 @@ export function toAgentVersionDto(version: AgentVersion) {
     createdBy: version.createdBy,
     publishedAt: version.publishedAt,
     createdAt: version.createdAt,
+    sharedAcrossOrganisation: version.sharedAcrossOrganisation ?? false,
   };
+}
+
+export function toSharedAgentVersionDto(version: SharedAgentVersion) {
+  return {
+    ...toAgentVersionDto(version),
+    agentKey: version.agentKey,
+    agentName: version.agentName,
+    sourceProjectId: version.sourceProjectId,
+  };
+}
+
+export function parseInstallAgentVersionBody(body: unknown): { targetProjectId: string } {
+  const record = asRecord(body);
+  const targetProjectId = record.targetProjectId;
+  if (typeof targetProjectId !== 'string' || targetProjectId.trim().length === 0) {
+    throw new BadRequestError('targetProjectId is required.');
+  }
+  return { targetProjectId };
 }
 
 function asRecord(body: unknown): Record<string, unknown> {
@@ -88,6 +107,15 @@ export interface CreateAgentBody {
   description?: string;
   configuration: AgentConfiguration;
   promptReference?: string;
+}
+
+export function parseShareAgentVersionBody(body: unknown): { shared: boolean } {
+  const record = asRecord(body);
+  const shared = record.shared;
+  if (typeof shared !== 'boolean') {
+    throw new BadRequestError('shared must be a boolean.');
+  }
+  return { shared };
 }
 
 export function parseCreateAgentBody(body: unknown): CreateAgentBody {

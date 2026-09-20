@@ -102,6 +102,7 @@ export interface AgentVersionsTable {
   created_by: string;
   published_at: string | null;
   created_at: string;
+  shared_across_organisation: boolean;
 }
 
 export interface AgentExecutionsTable {

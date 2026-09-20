@@ -5,6 +5,8 @@ import {
   type AgentRepository,
   type AgentVersion,
   type AgentVersionRepository,
+  type ArtifactEvidenceRow,
+  type ArtifactRepository,
   type AuditRecord,
   type AuditRecordRepository,
   type Membership,
@@ -20,10 +22,16 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../src/projects/create-project.js';
 import { createAgent } from '../src/agents/create-agent.js';
+import { createNewAgentVersion } from '../src/agents/create-new-agent-version.js';
 import type { CreateAgentDraft } from '../src/agents/deps.js';
 import { getAgentForPrincipal } from '../src/agents/get-agent.js';
+import { getAgentQuality } from '../src/agents/get-agent-quality.js';
+import { installAgentVersion } from '../src/agents/install-agent-version.js';
+import { listAgentVersionsForAgent } from '../src/agents/list-agent-versions.js';
 import { listAgentsForProject } from '../src/agents/list-agents.js';
+import { listSharedAgentVersionsForOrganisation } from '../src/agents/list-shared-agent-versions.js';
 import { publishAgentVersion } from '../src/agents/publish-agent-version.js';
+import { shareAgentVersion } from '../src/agents/share-agent-version.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
 import type { CreateProjectWithClones } from '../src/projects/deps.js';
 
@@ -100,6 +108,28 @@ function createInMemoryDeps() {
       if (!existing) return;
       versionsStore.set(id, { ...existing, status: 'PUBLISHED', publishedAt });
     },
+    setSharedAcrossOrganisation: async (id, shared) => {
+      const existing = versionsStore.get(id);
+      if (!existing) return;
+      versionsStore.set(id, { ...existing, sharedAcrossOrganisation: shared });
+    },
+    listSharedForOrganisation: async (organisationId) => {
+      const shared = [...versionsStore.values()].filter((v) => v.sharedAcrossOrganisation === true);
+      const result = [];
+      for (const version of shared) {
+        const owningAgent = agentsStore.get(version.agentId);
+        if (!owningAgent) continue;
+        const owningProject = projects.get(owningAgent.projectId);
+        if (!owningProject || owningProject.organisationId !== organisationId) continue;
+        result.push({
+          ...version,
+          agentKey: owningAgent.key,
+          agentName: owningAgent.name,
+          sourceProjectId: owningAgent.projectId,
+        });
+      }
+      return result;
+    },
   };
 
   const auditRecordsStore: AuditRecord[] = [];
@@ -111,6 +141,21 @@ function createInMemoryDeps() {
     listForOrganisation: async (organisationId) =>
       auditRecordsStore.filter((r) => r.organisationId === organisationId),
   };
+
+  // DEVOS-174: a minimal fake — only `listEvidenceForProject` is exercised
+  // by these tests, matching `ArtifactRepository`'s own optional-method
+  // convention.
+  const evidenceByType = new Map<string, ArtifactEvidenceRow[]>();
+  const artifacts: ArtifactRepository = {
+    getById: async () => null,
+    listForProject: async () => [],
+    create: async () => {},
+    listEvidenceForProject: async (_projectId, artifactType) =>
+      evidenceByType.get(artifactType) ?? [],
+  };
+  function seedEvidence(artifactType: string, rows: ArtifactEvidenceRow[]): void {
+    evidenceByType.set(artifactType, [...(evidenceByType.get(artifactType) ?? []), ...rows]);
+  }
 
   const now = new Date().toISOString();
   const projectTypesStore = new Map<string, ProjectType>([
@@ -169,6 +214,8 @@ function createInMemoryDeps() {
     agentVersions,
     createDraft,
     auditRecords,
+    artifacts,
+    seedEvidence,
     projectTypes,
     projectTypeWorkflows,
     projectTypeAgents,
@@ -318,5 +365,279 @@ describe('agent use cases', () => {
     expect(fetched.id).toBe(agent.id);
 
     await expect(getAgentForPrincipal(deps, 'mallory', agent.id)).rejects.toThrow(NotFoundError);
+  });
+
+  describe('DEVOS-177: shareAgentVersion', () => {
+    it('flips the real sharedAcrossOrganisation flag on a published version and audits it', async () => {
+      const { agent, version } = await createAgent(deps, 'alice', projectId, {
+        key: 'shareable',
+        name: 'Shareable',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+
+      const shared = await shareAgentVersion(deps, 'alice', agent.id, version.version, true);
+      expect(shared.sharedAcrossOrganisation).toBe(true);
+
+      const records = await deps.auditRecords.listForProject(projectId);
+      expect(records).toContainEqual(
+        expect.objectContaining({
+          action: 'agent_version.shared',
+          actorId: 'alice',
+          targetType: 'AgentVersion',
+          targetId: version.id,
+          outcome: 'SUCCESS',
+        }),
+      );
+    });
+
+    it('rejects sharing a draft version', async () => {
+      const { agent, version } = await createAgent(deps, 'alice', projectId, {
+        key: 'unpublished',
+        name: 'Unpublished',
+        configuration: VALID_CONFIGURATION,
+      });
+
+      await expect(
+        shareAgentVersion(deps, 'alice', agent.id, version.version, true),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('rejects sharing by a non-owner member', async () => {
+      const { agent, version } = await createAgent(deps, 'alice', projectId, {
+        key: 'member-cannot-share',
+        name: 'Member Cannot Share',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+
+      await deps.memberships.create({
+        id: randomUUID() as Membership['id'],
+        organisationId,
+        projectId,
+        principalId: 'bob',
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      await expect(shareAgentVersion(deps, 'bob', agent.id, version.version, true)).rejects.toThrow(
+        ForbiddenError,
+      );
+    });
+  });
+
+  describe('DEVOS-178: installAgentVersion / listSharedAgentVersionsForOrganisation', () => {
+    it('installs a real shared version into a same-organisation project as a real, independent agent', async () => {
+      const { agent, version } = await createAgent(deps, 'alice', projectId, {
+        key: 'installable',
+        name: 'Installable',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+      await shareAgentVersion(deps, 'alice', agent.id, version.version, true);
+
+      const targetProject = await createProject(deps, 'alice', {
+        organisationId,
+        name: 'Target Project',
+        slug: 'target-project',
+      });
+
+      const shared = await listSharedAgentVersionsForOrganisation(deps, 'alice', organisationId);
+      expect(shared).toHaveLength(1);
+      expect(shared[0]!.agentKey).toBe('installable');
+
+      const installed = await installAgentVersion(deps, 'alice', shared[0]!.id, targetProject.id);
+      expect(installed.agent.projectId).toBe(targetProject.id);
+      expect(installed.agent.id).not.toBe(agent.id);
+      expect(installed.version.status).toBe('PUBLISHED');
+      expect(installed.version.configuration).toEqual(VALID_CONFIGURATION);
+
+      const records = await deps.auditRecords.listForProject(targetProject.id);
+      expect(records).toContainEqual(
+        expect.objectContaining({ action: 'agent.installed', outcome: 'SUCCESS' }),
+      );
+    });
+
+    it('rejects installing into a different organisation entirely (NotFoundError, never a distinguishable forbidden)', async () => {
+      const { agent, version } = await createAgent(deps, 'alice', projectId, {
+        key: 'cross-org',
+        name: 'Cross Org',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+      await shareAgentVersion(deps, 'alice', agent.id, version.version, true);
+
+      const otherOrganisationId = randomUUID() as OrganisationId;
+      const otherProject = await createProject(deps, 'alice', {
+        organisationId: otherOrganisationId,
+        name: 'Other Org Project',
+        slug: 'other-org-project',
+      });
+
+      await expect(installAgentVersion(deps, 'alice', version.id, otherProject.id)).rejects.toThrow(
+        NotFoundError,
+      );
+    });
+
+    it('rejects installing a version that has not been shared', async () => {
+      const { agent, version } = await createAgent(deps, 'alice', projectId, {
+        key: 'not-shared',
+        name: 'Not Shared',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+
+      const targetProject = await createProject(deps, 'alice', {
+        organisationId,
+        name: 'Target Project 2',
+        slug: 'target-project-2',
+      });
+
+      await expect(
+        installAgentVersion(deps, 'alice', version.id, targetProject.id),
+      ).rejects.toThrow(ValidationError);
+    });
+  });
+
+  describe('DEVOS-174: getAgentQuality', () => {
+    function evidenceRow(
+      metadata: Record<string, unknown>,
+      artifactId?: string,
+    ): ArtifactEvidenceRow {
+      return {
+        artifactId: (artifactId ?? randomUUID()) as ArtifactEvidenceRow['artifactId'],
+        createdAt: new Date().toISOString(),
+        metadata,
+      };
+    }
+
+    it('returns a real pass rate for this agent version, derived from real review/code-change evidence', async () => {
+      const { agent, version } = await createAgent(deps, 'alice', projectId, {
+        key: 'quality-checked',
+        name: 'Quality Checked',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+
+      const codeChangeId = randomUUID();
+      deps.seedEvidence('CODE_CHANGE', [evidenceRow({ agentVersionId: version.id }, codeChangeId)]);
+      deps.seedEvidence('REVIEW_EVIDENCE', [
+        evidenceRow({ decision: 'PASS', derivedFromArtifactId: codeChangeId }),
+      ]);
+
+      const quality = await getAgentQuality(deps, 'alice', agent.id);
+      expect(quality).toHaveLength(1);
+      expect(quality[0]!.agentVersionId).toBe(version.id);
+      expect(quality[0]!.passRate).toBe(1);
+    });
+
+    it('returns an empty result (not an error) when no evidence exists yet', async () => {
+      const { agent } = await createAgent(deps, 'alice', projectId, {
+        key: 'no-evidence',
+        name: 'No Evidence',
+        configuration: VALID_CONFIGURATION,
+      });
+
+      const quality = await getAgentQuality(deps, 'alice', agent.id);
+      expect(quality).toHaveLength(0);
+    });
+
+    it('rejects a non-member with NotFoundError', async () => {
+      const { agent } = await createAgent(deps, 'alice', projectId, {
+        key: 'quality-protected',
+        name: 'Quality Protected',
+        configuration: VALID_CONFIGURATION,
+      });
+
+      await expect(getAgentQuality(deps, 'mallory', agent.id)).rejects.toThrow(NotFoundError);
+    });
+  });
+
+  describe('DEVOS-173: listAgentVersionsForAgent', () => {
+    it("lists a real agent's real version history and rejects a non-member with NotFoundError", async () => {
+      const { agent } = await createAgent(deps, 'alice', projectId, {
+        key: 'history',
+        name: 'History',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+      await createNewAgentVersion(deps, 'alice', agent.id);
+
+      const versions = await listAgentVersionsForAgent(deps, 'alice', agent.id);
+      expect(versions).toHaveLength(2);
+      expect(versions.map((v) => v.version).sort()).toEqual([1, 2]);
+
+      await expect(listAgentVersionsForAgent(deps, 'mallory', agent.id)).rejects.toThrow(
+        NotFoundError,
+      );
+    });
+  });
+
+  describe('DEVOS-172: createNewAgentVersion', () => {
+    it('drafts a real new version copying the latest published configuration verbatim', async () => {
+      const { agent } = await createAgent(deps, 'alice', projectId, {
+        key: 'versionable',
+        name: 'Versionable',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+
+      const draft = await createNewAgentVersion(deps, 'alice', agent.id);
+
+      expect(draft.version).toBe(2);
+      expect(draft.status).toBe('DRAFT');
+      expect(draft.configuration).toEqual(VALID_CONFIGURATION);
+      expect(draft.createdBy).toBe('alice');
+
+      const published = await publishAgentVersion(deps, 'alice', agent.id);
+      expect(published.version).toBe(2);
+      expect(published.status).toBe('PUBLISHED');
+    });
+
+    it('rejects drafting a new version when the agent already has an unpublished draft', async () => {
+      const { agent } = await createAgent(deps, 'alice', projectId, {
+        key: 'already-drafted',
+        name: 'Already Drafted',
+        configuration: VALID_CONFIGURATION,
+      });
+
+      await expect(createNewAgentVersion(deps, 'alice', agent.id)).rejects.toThrow(ValidationError);
+    });
+
+    it('rejects a non-member with NotFoundError', async () => {
+      const { agent } = await createAgent(deps, 'alice', projectId, {
+        key: 'protected',
+        name: 'Protected',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+
+      await expect(createNewAgentVersion(deps, 'mallory', agent.id)).rejects.toThrow(NotFoundError);
+    });
+
+    it('writes a real agent_version.drafted audit record', async () => {
+      const { agent } = await createAgent(deps, 'alice', projectId, {
+        key: 'audited-draft',
+        name: 'Audited Draft',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+
+      const draft = await createNewAgentVersion(deps, 'alice', agent.id);
+
+      const records = await deps.auditRecords.listForProject(projectId);
+      expect(records).toContainEqual(
+        expect.objectContaining({
+          action: 'agent_version.drafted',
+          actorId: 'alice',
+          targetType: 'Agent',
+          targetId: agent.id,
+          outcome: 'SUCCESS',
+          metadata: expect.objectContaining({ versionId: draft.id, version: 2 }),
+        }),
+      );
+    });
   });
 });

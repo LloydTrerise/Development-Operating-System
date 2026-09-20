@@ -1,6 +1,7 @@
 export * from './agents/agent-execution.js';
 export * from './agents/agent-version.js';
 export * from './agents/agent.js';
+export * from './agents/compute-agent-version-quality.js';
 export * from './agents/select-agent-for-task.js';
 export * from './agents/context-manifest.js';
 export * from './approval/approval.js';

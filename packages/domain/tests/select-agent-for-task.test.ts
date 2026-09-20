@@ -89,4 +89,73 @@ describe('selectAgentForTask', () => {
     const result = selectAgentForTask(candidates, 'DEVELOPMENT', []);
     expect(result?.agent.key).toBe('agent-1');
   });
+
+  describe('DEVOS-179: quality-aware tie-break', () => {
+    it('prefers the real higher-pass-rate candidate over the lexicographically-earlier key', () => {
+      const candidates = [
+        {
+          agent: makeAgent({ id: 'agent-a' as Agent['id'], key: 'alpha' }),
+          version: makeVersion({ id: 'version-a' as AgentVersion['id'] }),
+        },
+        {
+          agent: makeAgent({ id: 'agent-b' as Agent['id'], key: 'zeta' }),
+          version: makeVersion({ id: 'version-b' as AgentVersion['id'] }),
+        },
+      ];
+      const quality = new Map([
+        ['version-a', 0.2],
+        ['version-b', 0.9],
+      ]);
+      const result = selectAgentForTask(candidates, 'DEVELOPMENT', [], quality);
+      expect(result?.agent.key).toBe('zeta');
+    });
+
+    it("reproduces today's exact ascending-key behaviour when no quality data exists", () => {
+      const candidates = [
+        { agent: makeAgent({ id: 'agent-b' as Agent['id'], key: 'zeta' }), version: makeVersion() },
+        {
+          agent: makeAgent({ id: 'agent-a' as Agent['id'], key: 'alpha' }),
+          version: makeVersion(),
+        },
+      ];
+      const result = selectAgentForTask(candidates, 'DEVELOPMENT', [], new Map());
+      expect(result?.agent.key).toBe('alpha');
+    });
+
+    it('never numerically compares a candidate with no known rate against one that has one — falls through to ascending key', () => {
+      const candidates = [
+        {
+          agent: makeAgent({ id: 'agent-a' as Agent['id'], key: 'zeta' }),
+          version: makeVersion({ id: 'version-a' as AgentVersion['id'] }),
+        },
+        {
+          agent: makeAgent({ id: 'agent-b' as Agent['id'], key: 'alpha' }),
+          version: makeVersion({ id: 'version-b' as AgentVersion['id'] }),
+        },
+      ];
+      // Only version-a (key "zeta") has a real, known 0% rate; version-b has none.
+      const quality = new Map([['version-a', 0]]);
+      const result = selectAgentForTask(candidates, 'DEVELOPMENT', [], quality);
+      expect(result?.agent.key).toBe('alpha');
+    });
+
+    it('falls back to ascending key when both candidates have the same real rate', () => {
+      const candidates = [
+        {
+          agent: makeAgent({ id: 'agent-a' as Agent['id'], key: 'zeta' }),
+          version: makeVersion({ id: 'version-a' as AgentVersion['id'] }),
+        },
+        {
+          agent: makeAgent({ id: 'agent-b' as Agent['id'], key: 'alpha' }),
+          version: makeVersion({ id: 'version-b' as AgentVersion['id'] }),
+        },
+      ];
+      const quality = new Map([
+        ['version-a', 0.5],
+        ['version-b', 0.5],
+      ]);
+      const result = selectAgentForTask(candidates, 'DEVELOPMENT', [], quality);
+      expect(result?.agent.key).toBe('alpha');
+    });
+  });
 });

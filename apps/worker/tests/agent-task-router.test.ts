@@ -19,6 +19,7 @@ import type {
   AgentVersion,
   AgentVersionRepository,
   Artifact,
+  ArtifactEvidenceRow,
   ArtifactRepository,
   ArtifactVersion,
   ArtifactVersionRepository,
@@ -600,6 +601,102 @@ describe('routeAgentTask', () => {
     // directly in packages/domain/tests/select-agent-for-task.test.ts.
     await routeAgentTask(deps, scenario.buildRoleTargetedTask('DISCOVERY'));
     expect(publishedArtifactType).toBe('DISCOVERY_REPORT');
+  });
+
+  it('DEVOS-179: prefers the real higher-pass-rate candidate over the lexicographically-earlier key', async () => {
+    const scenario = buildScenario();
+    // A second real DISCOVERY-role candidate with a key that sorts BEFORE
+    // the seeded one (so it would win on today's ascending-key tie-break
+    // alone) — its own real quality data is deliberately worse, proving the
+    // *seeded* (lexicographically later) agent wins because of its real
+    // higher pass rate, not by key accident.
+    const secondAgent: Agent = {
+      id: randomUUID() as Agent['id'],
+      projectId: scenario.projectId,
+      key: `aaa-${SEED_DISCOVERY_AGENT_KEY}`,
+      name: 'Second discovery agent',
+      status: 'ACTIVE',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    const secondVersion: AgentVersion = {
+      id: randomUUID() as AgentVersion['id'],
+      agentId: secondAgent.id,
+      version: 1,
+      status: 'PUBLISHED',
+      configuration: {
+        role: 'DISCOVERY',
+        provider: 'fake',
+        modelRef: 'fake-model',
+        allowedCapabilities: [],
+      },
+      createdBy: 'alice',
+      createdAt: new Date(0).toISOString(),
+    };
+    scenario.agents.push(secondAgent);
+    scenario.versions.push(secondVersion);
+    const seededVersion = scenario.versions.find((v) => v.agentId === scenario.agents[0]!.id)!;
+
+    const codeChangeSeeded = randomUUID();
+    const codeChangeSecond = randomUUID();
+    const evidenceArtifacts: ArtifactEvidenceRow[] = [
+      {
+        artifactId: codeChangeSeeded as ArtifactEvidenceRow['artifactId'],
+        createdAt: new Date(0).toISOString(),
+        metadata: { agentVersionId: seededVersion.id },
+      },
+      {
+        artifactId: codeChangeSecond as ArtifactEvidenceRow['artifactId'],
+        createdAt: new Date(0).toISOString(),
+        metadata: { agentVersionId: secondVersion.id },
+      },
+    ];
+    const reviewEvidenceArtifacts: ArtifactEvidenceRow[] = [
+      {
+        artifactId: randomUUID() as ArtifactEvidenceRow['artifactId'],
+        createdAt: new Date(0).toISOString(),
+        metadata: { decision: 'PASS', derivedFromArtifactId: codeChangeSeeded },
+      },
+      {
+        artifactId: randomUUID() as ArtifactEvidenceRow['artifactId'],
+        createdAt: new Date(0).toISOString(),
+        metadata: { decision: 'CHANGES_REQUIRED', derivedFromArtifactId: codeChangeSecond },
+      },
+    ];
+    const artifactsWithQuality: ArtifactRepository = {
+      ...scenario.artifacts,
+      listEvidenceForProject: async (_projectId, artifactType) =>
+        artifactType === 'CODE_CHANGE' ? evidenceArtifacts : reviewEvidenceArtifacts,
+    };
+
+    let publishedArtifactType: string | undefined;
+    const deps: AgentArtifactConsumerTaskHandlerDeps = {
+      workflowRuns: scenario.workflowRuns,
+      workItems: scenario.workItems,
+      agents: scenario.agentRepository,
+      agentVersions: scenario.agentVersionRepository,
+      agentExecutions: scenario.agentExecutions,
+      modelAdapter,
+      prompts,
+      schemas,
+      recordContextManifest: scenario.recordContextManifest,
+      storage: createLocalFilesystemStorage(storageDir),
+      publishArtifact: async (artifact) => {
+        publishedArtifactType = artifact.artifactType;
+      },
+      artifacts: artifactsWithQuality,
+      artifactVersions: scenario.artifactVersions,
+      projects: scenario.projects,
+      knowledgeSources: scenario.knowledgeSources,
+    };
+
+    const task = scenario.buildRoleTargetedTask('DISCOVERY');
+    await routeAgentTask(deps, task);
+    expect(publishedArtifactType).toBe('DISCOVERY_REPORT');
+
+    const executions = await scenario.agentExecutions.listForTask(task.id);
+    expect(executions).toHaveLength(1);
+    expect(executions[0]!.agentVersionId).toBe(seededVersion.id);
   });
 
   it('DEVOS-159: throws clearly when no published agent matches the required role', async () => {

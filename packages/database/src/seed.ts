@@ -236,6 +236,7 @@ async function main(): Promise<void> {
       created_by: SEED_PRINCIPAL_ID,
       published_at: now,
       created_at: now,
+      shared_across_organisation: false,
     })
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
@@ -267,6 +268,7 @@ async function main(): Promise<void> {
       created_by: SEED_PRINCIPAL_ID,
       published_at: now,
       created_at: now,
+      shared_across_organisation: false,
     })
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
@@ -298,6 +300,7 @@ async function main(): Promise<void> {
       created_by: SEED_PRINCIPAL_ID,
       published_at: now,
       created_at: now,
+      shared_across_organisation: false,
     })
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
@@ -329,6 +332,7 @@ async function main(): Promise<void> {
       created_by: SEED_PRINCIPAL_ID,
       published_at: now,
       created_at: now,
+      shared_across_organisation: false,
     })
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
@@ -360,6 +364,7 @@ async function main(): Promise<void> {
       created_by: SEED_PRINCIPAL_ID,
       published_at: now,
       created_at: now,
+      shared_across_organisation: false,
     })
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
@@ -392,6 +397,7 @@ async function main(): Promise<void> {
       created_by: SEED_PRINCIPAL_ID,
       published_at: now,
       created_at: now,
+      shared_across_organisation: false,
     })
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
