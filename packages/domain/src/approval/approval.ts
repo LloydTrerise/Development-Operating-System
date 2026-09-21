@@ -77,6 +77,19 @@ export interface Approval {
   agentVersion?: number;
   workflowId?: string;
   workflowVersion?: number;
+  /**
+   * DEVOS-199: whether this approval's own `APPROVAL` node configured a
+   * `reliabilityReduction`, and what `resolveApprovalReliability` (DEVOS-198)
+   * found — populated whenever `reliabilityReduction` was configured,
+   * regardless of outcome ("checked, not met" is as auditable as "checked,
+   * met"), `undefined` when the node has no `reliabilityReduction`
+   * configured at all (every pre-DEVOS-199 approval's exact prior shape).
+   */
+  reliabilityEvidence?: {
+    agentVersionId: string;
+    signal: 'MET' | 'UNMET' | 'INSUFFICIENT_SAMPLE';
+    appliedReducedRequiredApprovers?: number;
+  };
 }
 
 /**

@@ -16,6 +16,7 @@ export * from './approval/get-approval.js';
 export * from './approval/list-approvals-for-project.js';
 export * from './approval/list-approvals-for-run.js';
 export * from './approval/request-approval.js';
+export * from './approval/resolve-approval-reliability.js';
 export * from './artifacts/create-artifact.js';
 export * from './artifacts/deps.js';
 export * from './artifacts/get-artifact-provenance.js';

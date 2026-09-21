@@ -695,6 +695,17 @@ export interface Approval {
   };
   requestedAt: string;
   decidedAt?: string;
+  requiredApprovers: number;
+  /**
+   * DEVOS-199/DEVOS-200: populated only when this approval's own APPROVAL
+   * node configured a `reliabilityReduction` — undefined for every approval
+   * that never configured one.
+   */
+  reliabilityEvidence?: {
+    agentVersionId: string;
+    signal: 'MET' | 'UNMET' | 'INSUFFICIENT_SAMPLE';
+    appliedReducedRequiredApprovers?: number;
+  };
 }
 
 export function listApprovalsForProject(projectId: string): Promise<ApiResult<Approval[]>> {

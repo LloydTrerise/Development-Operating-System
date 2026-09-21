@@ -14,6 +14,11 @@ export function toApprovalDto(approval: Approval) {
     evidenceReference: approval.evidenceReference,
     requestedAt: approval.requestedAt,
     decidedAt: approval.decidedAt,
+    requiredApprovers: approval.requiredApprovers,
+    // DEVOS-199/DEVOS-200: whether this approval's own APPROVAL node
+    // configured a reliabilityReduction, and what it found — undefined
+    // (omitted) for every approval that never configured one.
+    reliabilityEvidence: approval.reliabilityEvidence,
   };
 }
 

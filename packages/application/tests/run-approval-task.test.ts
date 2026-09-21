@@ -3,6 +3,7 @@ import type { OrganisationId } from '@devos/contracts';
 import type {
   Approval,
   ApprovalRepository,
+  ArtifactEvidenceRow,
   ArtifactVersion,
   ArtifactVersionRepository,
   Policy,
@@ -16,8 +17,17 @@ import type {
   WorkflowVersionRepository,
 } from '@devos/domain';
 import { describe, expect, it } from 'vitest';
+import type { ArtifactEvidenceReader } from '../src/approval/resolve-approval-reliability.js';
 import type { ApprovalTaskHandlerDeps } from '../src/tasks/run-approval-task.js';
 import { runApprovalTask } from '../src/tasks/run-approval-task.js';
+
+function evidenceRow(metadata: Record<string, unknown>, artifactId?: string): ArtifactEvidenceRow {
+  return {
+    artifactId: (artifactId ?? randomUUID()) as ArtifactEvidenceRow['artifactId'],
+    createdAt: now,
+    metadata,
+  };
+}
 
 const now = new Date(0).toISOString();
 
@@ -62,6 +72,7 @@ function makeDeps(
     approvals?: Approval[];
     organisationId?: OrganisationId;
     organisationPolicies?: Policy[];
+    artifacts?: ArtifactEvidenceReader;
   } = {},
 ): ApprovalTaskHandlerDeps & { createdApprovals: Approval[] } {
   const siblingTasks = options.siblingTasks ?? [];
@@ -182,6 +193,7 @@ function makeDeps(
     approvals: approvalRepo,
     ...(projects ? { projects } : {}),
     ...(policies ? { policies } : {}),
+    ...(options.artifacts ? { artifacts: options.artifacts } : {}),
     createdApprovals,
   };
 }
@@ -303,6 +315,207 @@ describe('runApprovalTask', () => {
         requiredApprovers: 1,
         enforceSeparationOfDuties: false,
       });
+    });
+  });
+
+  describe('DEVOS-199: reliability-conditioned approval-requirement reduction', () => {
+    function makeReliabilityArtifacts(
+      agentVersionId: string,
+      reviewDecisions: Array<'PASS' | 'CHANGES_REQUIRED'>,
+    ): ArtifactEvidenceReader {
+      const codeChangeIds = reviewDecisions.map(() => randomUUID());
+      const codeChangeEvidence = codeChangeIds.map((id) =>
+        evidenceRow({ agentVersionId }, id),
+      );
+      const reviewEvidence = reviewDecisions.map((decision, index) =>
+        evidenceRow({ decision, derivedFromArtifactId: codeChangeIds[index] }),
+      );
+      return {
+        listEvidenceForProject: async (_projectId, artifactType) =>
+          artifactType === 'REVIEW_EVIDENCE' ? reviewEvidence : codeChangeEvidence,
+      };
+    }
+
+    it('reduces requiredApprovers and records reliabilityEvidence when the agent version has MET reliability', async () => {
+      const run = makeRun();
+      const organisationId = randomUUID() as OrganisationId;
+      const agentVersionId = randomUUID();
+      const task = makeTask(run, 'gate');
+      const policy: Policy = {
+        id: randomUUID() as Policy['id'],
+        organisationId,
+        key: 'risk-tiered-approvals',
+        version: 1,
+        status: 'PUBLISHED',
+        definition: {
+          rules: [
+            {
+              action: 'remediation-approval:gate',
+              effect: 'REQUIRE_APPROVAL',
+              condition: { riskClass: 'R3' },
+              requiredApprovers: 2,
+              enforceSeparationOfDuties: false,
+            },
+          ],
+        },
+        createdBy: 'alice',
+        publishedAt: now,
+        createdAt: now,
+      };
+      const deps = makeDeps(
+        run,
+        {
+          approvalType: 'remediation-approval',
+          riskClass: 'R3',
+          reliabilityReduction: {
+            agentVersionId,
+            minPassRate: 0.8,
+            minSampleSize: 3,
+            reducedRequiredApprovers: 1,
+          },
+        },
+        {
+          organisationId,
+          organisationPolicies: [policy],
+          artifacts: makeReliabilityArtifacts(agentVersionId, ['PASS', 'PASS', 'PASS']),
+        },
+      );
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.createdApprovals[0]).toMatchObject({
+        requiredApprovers: 1,
+        reliabilityEvidence: {
+          agentVersionId,
+          signal: 'MET',
+          appliedReducedRequiredApprovers: 1,
+        },
+      });
+    });
+
+    it('leaves requiredApprovers unchanged and records the UNMET outcome when the pass rate is below the minimum', async () => {
+      const run = makeRun();
+      const organisationId = randomUUID() as OrganisationId;
+      const agentVersionId = randomUUID();
+      const task = makeTask(run, 'gate');
+      const policy: Policy = {
+        id: randomUUID() as Policy['id'],
+        organisationId,
+        key: 'risk-tiered-approvals',
+        version: 1,
+        status: 'PUBLISHED',
+        definition: {
+          rules: [
+            {
+              action: 'remediation-approval:gate',
+              effect: 'REQUIRE_APPROVAL',
+              condition: { riskClass: 'R3' },
+              requiredApprovers: 2,
+              enforceSeparationOfDuties: false,
+            },
+          ],
+        },
+        createdBy: 'alice',
+        publishedAt: now,
+        createdAt: now,
+      };
+      const deps = makeDeps(
+        run,
+        {
+          approvalType: 'remediation-approval',
+          riskClass: 'R3',
+          reliabilityReduction: {
+            agentVersionId,
+            minPassRate: 0.8,
+            minSampleSize: 3,
+            reducedRequiredApprovers: 1,
+          },
+        },
+        {
+          organisationId,
+          organisationPolicies: [policy],
+          artifacts: makeReliabilityArtifacts(agentVersionId, [
+            'PASS',
+            'CHANGES_REQUIRED',
+            'CHANGES_REQUIRED',
+          ]),
+        },
+      );
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.createdApprovals[0]).toMatchObject({
+        requiredApprovers: 2,
+        reliabilityEvidence: {
+          agentVersionId,
+          signal: 'UNMET',
+        },
+      });
+      expect(deps.createdApprovals[0]?.reliabilityEvidence?.appliedReducedRequiredApprovers).toBeUndefined();
+    });
+
+    it('leaves requiredApprovers unchanged and records INSUFFICIENT_SAMPLE when fewer reviews exist than minSampleSize', async () => {
+      const run = makeRun();
+      const agentVersionId = randomUUID();
+      const task = makeTask(run, 'gate');
+      const deps = makeDeps(
+        run,
+        {
+          reliabilityReduction: {
+            agentVersionId,
+            minPassRate: 0.8,
+            minSampleSize: 3,
+            reducedRequiredApprovers: 1,
+          },
+        },
+        { artifacts: makeReliabilityArtifacts(agentVersionId, ['PASS', 'PASS']) },
+      );
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.createdApprovals[0]).toMatchObject({
+        requiredApprovers: 1,
+        reliabilityEvidence: {
+          agentVersionId,
+          signal: 'INSUFFICIENT_SAMPLE',
+        },
+      });
+    });
+
+    it('cannot be configured below requiredApprovers: 1 even with a hostile reducedRequiredApprovers: 0', async () => {
+      const run = makeRun();
+      const agentVersionId = randomUUID();
+      const task = makeTask(run, 'gate');
+      const deps = makeDeps(
+        run,
+        {
+          reliabilityReduction: {
+            agentVersionId,
+            minPassRate: 0.8,
+            minSampleSize: 3,
+            reducedRequiredApprovers: 0,
+          },
+        },
+        { artifacts: makeReliabilityArtifacts(agentVersionId, ['PASS', 'PASS', 'PASS']) },
+      );
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.createdApprovals[0]?.requiredApprovers).toBe(1);
+      expect(deps.createdApprovals[0]?.reliabilityEvidence).toMatchObject({
+        signal: 'MET',
+        appliedReducedRequiredApprovers: 1,
+      });
+    });
+
+    it('leaves every case without reliabilityReduction configured completely unaffected (no reliabilityEvidence)', async () => {
+      const run = makeRun();
+      const task = makeTask(run, 'gate');
+      const deps = makeDeps(run, undefined);
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.createdApprovals[0]?.reliabilityEvidence).toBeUndefined();
     });
   });
 

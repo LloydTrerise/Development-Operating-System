@@ -169,6 +169,9 @@ const approvalTaskDeps: ApprovalTaskHandlerDeps = {
   // a riskClass.
   projects: createProjectRepository(database.db),
   policies: createPolicyRepository(database.db),
+  // DEVOS-199: resolves a node's own reliabilityReduction against real
+  // captured reliability evidence (DEVOS-198) when configured.
+  artifacts: createArtifactRepository(database.db),
 };
 dispatcher.registerHandler('APPROVAL', (task) => runApprovalTask(approvalTaskDeps, task));
 

@@ -2546,6 +2546,57 @@ describe('DEVOS-084: tenant isolation — policies, approvals, knowledge sources
     expect(decideResponse.status).toBe(404);
   });
 
+  it('DEVOS-200: surfaces reliabilityEvidence and requiredApprovers on the approval listing DTO when present, and omits reliabilityEvidence when absent', async () => {
+    const now = new Date().toISOString();
+    await approvalDeps.approvals.create({
+      id: 'devos-200-with-reliability' as Approval['id'],
+      projectId: projectId as Approval['projectId'],
+      workflowRunId: 'devos-200-run' as Approval['workflowRunId'],
+      approvalType: 'remediation-approval:gate',
+      status: 'PENDING',
+      requestedBy: 'alice',
+      evidenceReference: { artifactVersionIds: [], scopeHash: 'b'.repeat(64) },
+      requestedAt: now,
+      requiredApprovers: 1,
+      enforceSeparationOfDuties: false,
+      requiredRejections: 1,
+      reliabilityEvidence: {
+        agentVersionId: 'devos-200-agent-version',
+        signal: 'MET',
+        appliedReducedRequiredApprovers: 1,
+      },
+    });
+    await approvalDeps.approvals.create({
+      id: 'devos-200-without-reliability' as Approval['id'],
+      projectId: projectId as Approval['projectId'],
+      workflowRunId: 'devos-200-run-2' as Approval['workflowRunId'],
+      approvalType: 'PLANNING',
+      status: 'PENDING',
+      requestedBy: 'alice',
+      evidenceReference: { artifactVersionIds: [], scopeHash: 'c'.repeat(64) },
+      requestedAt: now,
+      requiredApprovers: 2,
+      enforceSeparationOfDuties: false,
+      requiredRejections: 1,
+    });
+
+    const response = await authed(`/api/v1/projects/${projectId}/approvals`, 'alice');
+    expect(response.status).toBe(200);
+    const { data } = (await response.json()) as { data: Array<Record<string, unknown>> };
+
+    const withReliability = data.find((row) => row.id === 'devos-200-with-reliability');
+    expect(withReliability?.requiredApprovers).toBe(1);
+    expect(withReliability?.reliabilityEvidence).toEqual({
+      agentVersionId: 'devos-200-agent-version',
+      signal: 'MET',
+      appliedReducedRequiredApprovers: 1,
+    });
+
+    const withoutReliability = data.find((row) => row.id === 'devos-200-without-reliability');
+    expect(withoutReliability?.requiredApprovers).toBe(2);
+    expect(withoutReliability?.reliabilityEvidence).toBeUndefined();
+  });
+
   it('denies a non-member from reading the audit trail for another project', async () => {
     await auditDeps.auditRecords.create({
       id: 'isolation-audit' as AuditRecord['id'],

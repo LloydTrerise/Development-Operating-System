@@ -364,11 +364,30 @@ export function GovernancePage() {
             {approvals.map((approval) => (
               <ListItem key={approval.id} disableGutters>
                 <ListItemText
-                  primary={approval.approvalType}
+                  primary={
+                    <>
+                      {approval.approvalType} — requires {approval.requiredApprovers} approver
+                      {approval.requiredApprovers === 1 ? '' : 's'}
+                    </>
+                  }
                   secondary={
-                    approval.decidedBy
-                      ? `decided by ${approval.decidedBy}`
-                      : `requested by ${approval.requestedBy}`
+                    <>
+                      {approval.decidedBy
+                        ? `decided by ${approval.decidedBy}`
+                        : `requested by ${approval.requestedBy}`}
+                      {approval.reliabilityEvidence && (
+                        <>
+                          {' — reliability check: '}
+                          {approval.reliabilityEvidence.signal}
+                          {' (agent version '}
+                          {approval.reliabilityEvidence.agentVersionId}
+                          {')'}
+                          {approval.reliabilityEvidence.appliedReducedRequiredApprovers !==
+                            undefined &&
+                            ` — reduced to ${approval.reliabilityEvidence.appliedReducedRequiredApprovers} required approver${approval.reliabilityEvidence.appliedReducedRequiredApprovers === 1 ? '' : 's'}`}
+                        </>
+                      )}
+                    </>
                   }
                 />
                 <StatusChip status={approval.status} />

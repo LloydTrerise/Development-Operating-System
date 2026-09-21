@@ -298,6 +298,7 @@ export interface ApprovalsTable {
   agent_version: number | null;
   workflow_id: string | null;
   workflow_version: number | null;
+  reliability_evidence: unknown | null;
 }
 
 export interface ApprovalDecisionsTable {

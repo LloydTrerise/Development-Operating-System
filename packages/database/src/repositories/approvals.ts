@@ -36,6 +36,13 @@ function toDomain(row: ApprovalsTable): Approval {
     ...(row.agent_version !== null ? { agentVersion: row.agent_version } : {}),
     ...(row.workflow_id !== null ? { workflowId: row.workflow_id } : {}),
     ...(row.workflow_version !== null ? { workflowVersion: row.workflow_version } : {}),
+    ...(row.reliability_evidence !== null
+      ? {
+          reliabilityEvidence: row.reliability_evidence as NonNullable<
+            Approval['reliabilityEvidence']
+          >,
+        }
+      : {}),
   };
 }
 
@@ -116,6 +123,9 @@ export function createApprovalRepository(db: QueryExecutor): ApprovalRepository 
           agent_version: approval.agentVersion ?? null,
           workflow_id: approval.workflowId ?? null,
           workflow_version: approval.workflowVersion ?? null,
+          reliability_evidence: approval.reliabilityEvidence
+            ? JSON.stringify(approval.reliabilityEvidence)
+            : null,
         })
         .execute();
     },

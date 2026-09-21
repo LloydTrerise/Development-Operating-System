@@ -6,6 +6,7 @@ import type {
   ArtifactVersionRepository,
   PolicyRepository,
   ProjectRepository,
+  WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
   WorkflowTaskRepository,
@@ -13,6 +14,10 @@ import type {
 } from '@devos/domain';
 import { NonRetryableTaskError } from '@devos/domain';
 import { computeScopeHash } from '../approval/request-approval.js';
+import {
+  resolveApprovalReliability,
+  type ArtifactEvidenceReader,
+} from '../approval/resolve-approval-reliability.js';
 
 export interface ApprovalTaskHandlerDeps {
   workflowRuns: WorkflowRunRepository;
@@ -29,6 +34,14 @@ export interface ApprovalTaskHandlerDeps {
    */
   projects?: ProjectRepository;
   policies?: PolicyRepository;
+  /**
+   * DEVOS-199: only required to resolve a node's own `config.reliabilityReduction`
+   * against real captured reliability evidence (DEVOS-198). Optional —
+   * omitted entirely in every existing test/caller that never configures a
+   * `reliabilityReduction`, mirroring this same file's own `projects`/`policies`
+   * optional-dependency pattern.
+   */
+  artifacts?: ArtifactEvidenceReader;
 }
 
 interface ApprovalNodeConfig {
@@ -43,6 +56,19 @@ interface ApprovalNodeConfig {
    * consulted for `requiredApprovers`/`enforceSeparationOfDuties`.
    */
   riskClass?: ToolCapabilityRiskClass;
+  /**
+   * DEVOS-199: an additive, floor-protected reduction of `requiredApprovers`
+   * — applied only when the named agent version's own real reliability
+   * evidence (DEVOS-198) meets `minPassRate` with at least `minSampleSize`
+   * reviews. `requiredApprovers` can never be reduced below 1 by this
+   * mechanism, regardless of `reducedRequiredApprovers`'s own value.
+   */
+  reliabilityReduction?: {
+    agentVersionId: string;
+    minPassRate: number;
+    minSampleSize: number;
+    reducedRequiredApprovers: number;
+  };
 }
 
 /**
@@ -54,7 +80,7 @@ interface ApprovalNodeConfig {
  * fields, not just its `effect`, which `evaluatePolicies`'s own return value
  * never surfaces).
  */
-async function resolveApprovalRequirements(
+async function resolvePolicyTieredRequirements(
   deps: ApprovalTaskHandlerDeps,
   organisationId: OrganisationId,
   approvalType: string,
@@ -96,6 +122,67 @@ async function resolveApprovalRequirements(
   }
 
   return defaults;
+}
+
+/**
+ * DEVOS-199: applies `resolvePolicyTieredRequirements`'s existing
+ * static/policy-tiered resolution first, unchanged, then — as one further,
+ * purely additive step — consults `resolveApprovalReliability` (DEVOS-198)
+ * when the node itself configured a `reliabilityReduction` and an
+ * `artifacts` dependency is available. A `'MET'` signal can only ever
+ * lower `requiredApprovers` (`Math.min` against the already-resolved
+ * value) and never below the unconditional `Math.max(1, ...)` floor;
+ * `'UNMET'`/`'INSUFFICIENT_SAMPLE'`, a missing `reliabilityReduction`, or a
+ * missing `artifacts` dependency all leave `requiredApprovers` completely
+ * untouched from the static/policy-tiered result.
+ */
+async function resolveApprovalRequirements(
+  deps: ApprovalTaskHandlerDeps,
+  organisationId: OrganisationId | undefined,
+  projectId: WorkflowRun['projectId'],
+  approvalType: string,
+  riskClass: ToolCapabilityRiskClass | undefined,
+  reliabilityReduction: ApprovalNodeConfig['reliabilityReduction'],
+): Promise<{
+  requiredApprovers: number;
+  enforceSeparationOfDuties: boolean;
+  requiredRejections: number;
+  reliabilityEvidence?: Approval['reliabilityEvidence'];
+}> {
+  const resolved = organisationId
+    ? await resolvePolicyTieredRequirements(deps, organisationId, approvalType, riskClass)
+    : { requiredApprovers: 1, enforceSeparationOfDuties: false, requiredRejections: 1 };
+
+  if (!reliabilityReduction || !deps.artifacts) return resolved;
+
+  const signal = await resolveApprovalReliability(
+    deps,
+    projectId,
+    reliabilityReduction.agentVersionId,
+    reliabilityReduction.minPassRate,
+    reliabilityReduction.minSampleSize,
+  );
+
+  if (signal !== 'MET') {
+    return {
+      ...resolved,
+      reliabilityEvidence: { agentVersionId: reliabilityReduction.agentVersionId, signal },
+    };
+  }
+
+  const requiredApprovers = Math.max(
+    1,
+    Math.min(resolved.requiredApprovers, reliabilityReduction.reducedRequiredApprovers),
+  );
+  return {
+    ...resolved,
+    requiredApprovers,
+    reliabilityEvidence: {
+      agentVersionId: reliabilityReduction.agentVersionId,
+      signal,
+      appliedReducedRequiredApprovers: requiredApprovers,
+    },
+  };
 }
 
 const SYSTEM_ACTOR_ID = 'devos-worker';
@@ -192,16 +279,20 @@ export async function runApprovalTask(
     const now = new Date().toISOString();
     // DEVOS-146: risk-tiered routing — real defaults unless the node names
     // a riskClass and the project's own organisation has a real published
-    // policy naming stricter requirements for it.
+    // policy naming stricter requirements for it. DEVOS-199: a further,
+    // additive reliability-conditioned reduction, applied after the above,
+    // resolved from `run.projectId` directly so it works whether or not
+    // `deps.projects` is supplied.
     const project = deps.projects ? await deps.projects.getById(run.projectId) : null;
-    const { requiredApprovers, enforceSeparationOfDuties, requiredRejections } = project
-      ? await resolveApprovalRequirements(
-          deps,
-          project.organisationId,
-          approvalType,
-          config?.riskClass,
-        )
-      : { requiredApprovers: 1, enforceSeparationOfDuties: false, requiredRejections: 1 };
+    const { requiredApprovers, enforceSeparationOfDuties, requiredRejections, reliabilityEvidence } =
+      await resolveApprovalRequirements(
+        deps,
+        project?.organisationId,
+        run.projectId,
+        approvalType,
+        config?.riskClass,
+        config?.reliabilityReduction,
+      );
     const created: Approval = {
       id: randomUUID() as Approval['id'],
       projectId: run.projectId,
@@ -215,6 +306,7 @@ export async function runApprovalTask(
       ...(config?.riskClass !== undefined ? { riskClass: config.riskClass } : {}),
       workflowId: version.workflowDefinitionId,
       workflowVersion: version.version,
+      ...(reliabilityEvidence !== undefined ? { reliabilityEvidence } : {}),
       evidenceReference: {
         artifactVersionIds,
         scopeHash: computeScopeHash(artifactVersionIds),
