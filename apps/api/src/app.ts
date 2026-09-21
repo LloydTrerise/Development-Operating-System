@@ -22,6 +22,7 @@ import {
   createAuditRecordRepository,
   createContextManifestRepository,
   createDatabaseClient,
+  createIntegrationRepository,
   createKnowledgeReferenceRepository,
   createKnowledgeSourceRepository,
   createMembershipRepository,
@@ -58,6 +59,7 @@ import type {
   AuditUseCaseDeps,
   CostUseCaseDeps,
   EngineeringIntelligenceUseCaseDeps,
+  IntegrationUseCaseDeps,
   KnowledgeUseCaseDeps,
   OrganisationUseCaseDeps,
   PolicyUseCaseDeps,
@@ -89,6 +91,7 @@ import { createAuditRoutes } from './routes/audit.js';
 import { createCostRoutes } from './routes/cost.js';
 import { createEngineeringIntelligenceRoutes } from './routes/engineering-intelligence.js';
 import { createHealthRoutes } from './routes/health.js';
+import { createIntegrationRoutes } from './routes/integrations.js';
 import { createKnowledgeSourceRoutes } from './routes/knowledge-sources.js';
 import { createMeRoutes } from './routes/me.js';
 import { createOrganisationRoutes } from './routes/organisations.js';
@@ -208,6 +211,7 @@ export interface CreateAppOptions {
   toolInvocationSummaryDeps?: ToolInvocationSummaryUseCaseDeps;
   releaseReadinessDeps?: ReleaseReadinessUseCaseDeps;
   knowledgeDeps?: KnowledgeUseCaseDeps;
+  integrationDeps?: IntegrationUseCaseDeps;
   organisationDeps?: OrganisationUseCaseDeps;
   projectTypeDeps?: ProjectTypeUseCaseDeps;
   policyDeps?: PolicyUseCaseDeps;
@@ -370,6 +374,12 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     auditRecords: auditRecordRepository,
     knowledgeReferences: createKnowledgeReferenceRepository(database.db),
   };
+  const integrationDeps: IntegrationUseCaseDeps = options.integrationDeps ?? {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    integrations: createIntegrationRepository(database.db),
+    auditRecords: auditRecordRepository,
+  };
   const organisationDeps: OrganisationUseCaseDeps = options.organisationDeps ?? {
     organisations: createOrganisationRepository(database.db),
     memberships: projectDeps.memberships,
@@ -435,6 +445,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createToolInvocationSummaryRoutes(API_PREFIX, toolInvocationSummaryDeps),
     ...createReleaseReadinessRoutes(API_PREFIX, releaseReadinessDeps),
     ...createKnowledgeSourceRoutes(API_PREFIX, knowledgeDeps),
+    ...createIntegrationRoutes(API_PREFIX, integrationDeps),
     ...createPolicyRoutes(API_PREFIX, policyDeps),
     ...createApprovalRoutes(API_PREFIX, approvalDeps),
   ];

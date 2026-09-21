@@ -3,6 +3,7 @@ import {
   buildAuthenticatedCloneUrl,
   resolveAuthenticatedCloneUrl,
   resolveGitHubRepositoryTarget,
+  resolveGitLabProjectTarget,
 } from '../src/tasks/github-context.js';
 
 describe('resolveGitHubRepositoryTarget', () => {
@@ -19,6 +20,35 @@ describe('resolveGitHubRepositoryTarget', () => {
     expect(
       resolveGitHubRepositoryTarget({ github: { owner: 'devos-org', repo: 'devos-pilot' } }),
     ).toEqual({ owner: 'devos-org', repo: 'devos-pilot' });
+  });
+});
+
+describe('resolveGitLabProjectTarget', () => {
+  it('returns undefined when configuration.gitlab is absent', () => {
+    expect(resolveGitLabProjectTarget({})).toBeUndefined();
+  });
+
+  it('returns undefined when projectId is missing/blank', () => {
+    expect(resolveGitLabProjectTarget({ gitlab: {} })).toBeUndefined();
+    expect(resolveGitLabProjectTarget({ gitlab: { projectId: '' } })).toBeUndefined();
+  });
+
+  it('returns undefined when host is present but blank', () => {
+    expect(
+      resolveGitLabProjectTarget({ gitlab: { projectId: '123', host: '' } }),
+    ).toBeUndefined();
+  });
+
+  it('returns the typed target with no host when only projectId is configured', () => {
+    expect(resolveGitLabProjectTarget({ gitlab: { projectId: '123' } })).toEqual({
+      projectId: '123',
+    });
+  });
+
+  it('returns the typed target including a configured self-managed host', () => {
+    expect(
+      resolveGitLabProjectTarget({ gitlab: { projectId: '123', host: 'gitlab.example.com' } }),
+    ).toEqual({ projectId: '123', host: 'gitlab.example.com' });
   });
 });
 
@@ -41,6 +71,15 @@ describe('buildAuthenticatedCloneUrl', () => {
   it('leaves a non-https URL unchanged', () => {
     const sshUrl = 'git@github.com:LloydTrerise/devos-pilot-test.git';
     expect(buildAuthenticatedCloneUrl(sshUrl, 'ghp_real_token')).toBe(sshUrl);
+  });
+
+  it('DEVOS-195: embeds the token under a configured username, e.g. GitLab\'s own "oauth2" convention', () => {
+    const url = buildAuthenticatedCloneUrl(
+      'https://gitlab.com/devos-org/devos-pilot.git',
+      'glpat_real_token',
+      'oauth2',
+    );
+    expect(url).toBe('https://oauth2:glpat_real_token@gitlab.com/devos-org/devos-pilot.git');
   });
 });
 

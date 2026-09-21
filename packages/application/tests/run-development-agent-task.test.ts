@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import http, { type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AgentModelAdapter, PromptRepository, SchemaRepository } from '@devos/agents';
@@ -77,6 +79,7 @@ async function buildScenario(
   repositoryPath: string,
   configuration = CONFIGURATION,
   gitIntegrationConfigurationOverrides: Record<string, unknown> = {},
+  gitIntegrationProvider = 'local',
 ) {
   const organisationId = randomUUID() as OrganisationId;
   const now = new Date(0).toISOString();
@@ -180,7 +183,7 @@ async function buildScenario(
     id: randomUUID() as Integration['id'],
     projectId: project.id,
     type: 'Git',
-    provider: 'local',
+    provider: gitIntegrationProvider,
     name: 'Test repository',
     status: 'ACTIVE',
     credentialReference: 'DEVOS057_TEST_CREDENTIAL',
@@ -889,10 +892,56 @@ describe('runDevelopmentAgentTask (real local git repository)', () => {
       }),
     };
 
-    it('throws when a real GitHub target is configured but no credentialResolver is available', async () => {
+    it('DEVOS-194: ignores a configured configuration.github target when the integration\'s own provider field is not "github"', async () => {
+      // Proves the discriminator is genuinely load-bearing, not merely
+      // decorative: today's local-fallback path was previously selected by
+      // configuration.github's absence alone. A Git integration whose
+      // provider is 'local' (this codebase's own established convention,
+      // e.g. tests/e2e/*.test.ts) must fall back to the local provider even
+      // if configuration.github happens to be present.
       const scenario = await buildScenario(repositoryPath, CONFIGURATION, {
         github: { owner: 'devos-org', repo: 'devos-pilot' },
       });
+
+      const deps: DevelopmentAgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions: scenario.agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        storage: createLocalFilesystemStorage(storageDir),
+        publishArtifact: async () => {},
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        knowledgeSources: scenario.knowledgeSources,
+        memberships: scenario.memberships,
+        policies: scenario.policies,
+        toolCapabilities: scenario.toolCapabilities,
+        toolInvocations: scenario.toolInvocationRepository,
+        auditRecords: scenario.auditRecordRepository,
+        // No credentialResolver supplied — if the GitHub path were entered
+        // despite provider being 'local', this would throw exactly like the
+        // next test below. It doesn't: local provider is used instead.
+        pullRequestProvider: createLocalPullRequestProvider(),
+        integrations: scenario.integrations,
+      };
+
+      const output = await runDevelopmentAgentTask(deps, scenario.task);
+      expect(output).toMatchObject({ status: 'SUCCEEDED', artifactType: 'CODE_CHANGE' });
+    }, 30_000);
+
+    it('throws when a real GitHub target is configured but no credentialResolver is available', async () => {
+      const scenario = await buildScenario(
+        repositoryPath,
+        CONFIGURATION,
+        { github: { owner: 'devos-org', repo: 'devos-pilot' } },
+        'github',
+      );
 
       const deps: DevelopmentAgentTaskHandlerDeps = {
         workflowRuns: scenario.workflowRuns,
@@ -926,9 +975,12 @@ describe('runDevelopmentAgentTask (real local git repository)', () => {
     }, 30_000);
 
     it('throws when the configured credential reference cannot be resolved', async () => {
-      const scenario = await buildScenario(repositoryPath, CONFIGURATION, {
-        github: { owner: 'devos-org', repo: 'devos-pilot' },
-      });
+      const scenario = await buildScenario(
+        repositoryPath,
+        CONFIGURATION,
+        { github: { owner: 'devos-org', repo: 'devos-pilot' } },
+        'github',
+      );
       const credentialResolver: CredentialResolver = { resolve: async () => null };
 
       const deps: DevelopmentAgentTaskHandlerDeps = {
@@ -963,9 +1015,12 @@ describe('runDevelopmentAgentTask (real local git repository)', () => {
     }, 30_000);
 
     it('opens the pull request through the real GitHub API when a real target and credential are both configured', async () => {
-      const scenario = await buildScenario(repositoryPath, CONFIGURATION, {
-        github: { owner: 'devos-org', repo: 'devos-pilot' },
-      });
+      const scenario = await buildScenario(
+        repositoryPath,
+        CONFIGURATION,
+        { github: { owner: 'devos-org', repo: 'devos-pilot' } },
+        'github',
+      );
       const credentialResolver: CredentialResolver = { resolve: async () => 'ghp_test_token' };
 
       const fetchImpl = vi
@@ -1023,6 +1078,355 @@ describe('runDevelopmentAgentTask (real local git repository)', () => {
         expect((createCall[1].headers as Record<string, string>).authorization).toBe(
           'Bearer ghp_test_token',
         );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }, 30_000);
+
+    it('DEVOS-195: opens the merge request through the real GitLab API when a real GitLab target and credential are both configured', async () => {
+      const scenario = await buildScenario(
+        repositoryPath,
+        CONFIGURATION,
+        { gitlab: { projectId: 'devos-org/devos-pilot' } },
+        'gitlab',
+      );
+      const credentialResolver: CredentialResolver = { resolve: async () => 'glpat_test_token' };
+
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 })) // open-MR check
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              iid: 99,
+              title: 'Add a STATUS.md file documenting the new status field.',
+              description: 'Add status field documentation',
+              web_url: 'https://gitlab.com/devos-org/devos-pilot/-/merge_requests/99',
+              source_branch: 'devos/add-status-field',
+              target_branch: 'main',
+            }),
+            { status: 201 },
+          ),
+        );
+      vi.stubGlobal('fetch', fetchImpl);
+
+      const deps: DevelopmentAgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions: scenario.agentExecutions,
+        modelAdapter,
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        storage: createLocalFilesystemStorage(storageDir),
+        publishArtifact: async () => {},
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        knowledgeSources: scenario.knowledgeSources,
+        memberships: scenario.memberships,
+        policies: scenario.policies,
+        toolCapabilities: scenario.toolCapabilities,
+        toolInvocations: scenario.toolInvocationRepository,
+        auditRecords: scenario.auditRecordRepository,
+        pullRequestProvider: createLocalPullRequestProvider(),
+        integrations: scenario.integrations,
+        credentialResolver,
+      };
+
+      try {
+        const output = await runDevelopmentAgentTask(deps, scenario.task);
+
+        expect((output as { pullRequestReference?: string }).pullRequestReference).toBe('99');
+        const createCall = fetchImpl.mock.calls.find(
+          ([, init]: [string, RequestInit]) => init?.method === 'POST',
+        ) as [string, RequestInit];
+        expect(createCall[0]).toBe(
+          'https://gitlab.com/api/v4/projects/devos-org%2Fdevos-pilot/merge_requests',
+        );
+        expect((createCall[1].headers as Record<string, string>)['private-token']).toBe(
+          'glpat_test_token',
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }, 30_000);
+  });
+
+  // DEVOS-196: the real end-to-end pilot for Sprint 27 (E27 Integration
+  // Adapter Expansion) — no live GitHub/GitLab account is available in this
+  // environment (confirmed: no credential configured, and this session does
+  // not speculatively probe Vault for stored secrets), so per the user's own
+  // explicit choice this substitutes a real local HTTP server for each
+  // provider's real REST API — genuine TCP/HTTP round trips (not an
+  // in-memory `vi.stubGlobal` mock queue, unlike the two tests directly
+  // above), stateful across calls (a real idempotency check against a real
+  // server, not a scripted response sequence). `fetch` is stubbed only to
+  // rewrite each provider's real base host to the local server's real
+  // ephemeral port — every other part of the real code path (credential
+  // resolution, header construction, request/response bodies, the Tool
+  // Gateway, real git commit/branch operations against a real local
+  // repository) is completely unchanged and unmocked.
+  describe('DEVOS-196: real local HTTP server pilot — GitHub and GitLab side by side', () => {
+    interface FakeProviderServer {
+      server: Server;
+      port: number;
+      requests: { method: string; url: string; headers: http.IncomingHttpHeaders }[];
+    }
+
+    async function startFakeGitHubServer(): Promise<FakeProviderServer> {
+      const requests: FakeProviderServer['requests'] = [];
+      let created: Record<string, unknown> | undefined;
+
+      const server = http.createServer((req, res) => {
+        requests.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers });
+        if (req.method === 'GET' && req.url?.includes('/pulls?state=open')) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(created ? [created] : []));
+          return;
+        }
+        if (req.method === 'POST' && req.url?.endsWith('/pulls')) {
+          let body = '';
+          req.on('data', (chunk: Buffer) => (body += chunk.toString()));
+          req.on('end', () => {
+            const parsed = JSON.parse(body) as { title: string; head: string; base: string; body?: string };
+            created = {
+              number: 314,
+              title: parsed.title,
+              body: parsed.body ?? null,
+              html_url: 'http://127.0.0.1/fake-github/pull/314',
+              head: { ref: parsed.head },
+              base: { ref: parsed.base },
+            };
+            res.writeHead(201, { 'content-type': 'application/json' });
+            res.end(JSON.stringify(created));
+          });
+          return;
+        }
+        res.writeHead(404).end();
+      });
+
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = (server.address() as AddressInfo).port;
+      return { server, port, requests };
+    }
+
+    async function startFakeGitLabServer(): Promise<FakeProviderServer> {
+      const requests: FakeProviderServer['requests'] = [];
+      let created: Record<string, unknown> | undefined;
+
+      const server = http.createServer((req, res) => {
+        requests.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers });
+        if (req.method === 'GET' && req.url?.includes('/merge_requests?state=opened')) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(created ? [created] : []));
+          return;
+        }
+        if (req.method === 'POST' && req.url?.endsWith('/merge_requests')) {
+          let body = '';
+          req.on('data', (chunk: Buffer) => (body += chunk.toString()));
+          req.on('end', () => {
+            const parsed = JSON.parse(body) as {
+              title: string;
+              source_branch: string;
+              target_branch: string;
+              description?: string;
+            };
+            created = {
+              iid: 271,
+              title: parsed.title,
+              description: parsed.description ?? null,
+              web_url: 'http://127.0.0.1/fake-gitlab/merge_requests/271',
+              source_branch: parsed.source_branch,
+              target_branch: parsed.target_branch,
+            };
+            res.writeHead(201, { 'content-type': 'application/json' });
+            res.end(JSON.stringify(created));
+          });
+          return;
+        }
+        res.writeHead(404).end();
+      });
+
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = (server.address() as AddressInfo).port;
+      return { server, port, requests };
+    }
+
+    /** Rewrites each provider's real, hardcoded base host to the real local
+     * fake server's real ephemeral port, then makes a genuine network call
+     * via the real, un-stubbed `fetch` — every other part of the request
+     * (method, path, query, headers, body) reaches the real local server
+     * completely unmodified. */
+    function createForwardingFetch(githubPort: number, gitlabPort: number): typeof fetch {
+      const realFetch = globalThis.fetch.bind(globalThis);
+      return (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(typeof input === 'string' ? input : input.toString());
+        if (url.hostname === 'api.github.com') {
+          url.protocol = 'http:';
+          url.hostname = '127.0.0.1';
+          url.port = String(githubPort);
+        } else if (url.hostname === 'gitlab.com') {
+          url.protocol = 'http:';
+          url.hostname = '127.0.0.1';
+          url.port = String(gitlabPort);
+        }
+        return realFetch(url.toString(), init);
+      }) as typeof fetch;
+    }
+
+    let githubServer: FakeProviderServer;
+    let gitlabServer: FakeProviderServer;
+
+    beforeEach(async () => {
+      githubServer = await startFakeGitHubServer();
+      gitlabServer = await startFakeGitLabServer();
+    });
+
+    afterEach(async () => {
+      await new Promise((resolve) => githubServer.server.close(resolve));
+      await new Promise((resolve) => gitlabServer.server.close(resolve));
+    });
+
+    it('opens a real pull request against a real local HTTP server standing in for the GitHub API', async () => {
+      const scenario = await buildScenario(
+        repositoryPath,
+        CONFIGURATION,
+        { github: { owner: 'devos-org', repo: 'devos-pilot' } },
+        'github',
+      );
+      vi.stubGlobal('fetch', createForwardingFetch(githubServer.port, gitlabServer.port));
+
+      const deps: DevelopmentAgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions: scenario.agentExecutions,
+        modelAdapter: {
+          invoke: async () => ({
+            status: 'SUCCEEDED',
+            result: {
+              summary: 'Add a STATUS.md file documenting the new status field.',
+              branchName: 'devos/add-status-field-196',
+              commitMessage: 'Add status field documentation',
+              files: [{ path: 'STATUS.md', content: 'status: planned\n' }],
+            },
+          }),
+        },
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        storage: createLocalFilesystemStorage(storageDir),
+        publishArtifact: async () => {},
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        knowledgeSources: scenario.knowledgeSources,
+        memberships: scenario.memberships,
+        policies: scenario.policies,
+        toolCapabilities: scenario.toolCapabilities,
+        toolInvocations: scenario.toolInvocationRepository,
+        auditRecords: scenario.auditRecordRepository,
+        pullRequestProvider: createLocalPullRequestProvider(),
+        integrations: scenario.integrations,
+        credentialResolver: { resolve: async () => 'ghp_pilot_token' },
+      };
+
+      try {
+        const output = await runDevelopmentAgentTask(deps, scenario.task);
+        expect((output as { pullRequestReference?: string }).pullRequestReference).toBe('314');
+
+        // Real, independent confirmation via a second real HTTP call to the
+        // real local server — not code inspection or a database row.
+        const confirmResponse = await fetch(
+          `http://127.0.0.1:${githubServer.port}/repos/devos-org/devos-pilot/pulls?state=open&head=devos-org:devos/add-status-field-196&base=main`,
+        );
+        const openPulls = (await confirmResponse.json()) as { number: number }[];
+        expect(openPulls).toHaveLength(1);
+        expect(openPulls[0]?.number).toBe(314);
+
+        const postRequest = githubServer.requests.find((r) => r.method === 'POST');
+        expect(postRequest?.headers.authorization).toBe('Bearer ghp_pilot_token');
+
+        // A repeated call is idempotent against the real, stateful local
+        // server — the real GET finds the existing PR, no second POST.
+        const secondOutput = await runDevelopmentAgentTask(deps, scenario.task);
+        expect((secondOutput as { pullRequestReference?: string }).pullRequestReference).toBe(
+          '314',
+        );
+        expect(githubServer.requests.filter((r) => r.method === 'POST')).toHaveLength(1);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }, 30_000);
+
+    it('opens a real merge request against a real local HTTP server standing in for the GitLab API, side by side with GitHub', async () => {
+      const scenario = await buildScenario(
+        repositoryPath,
+        CONFIGURATION,
+        { gitlab: { projectId: 'devos-org/devos-pilot' } },
+        'gitlab',
+      );
+      vi.stubGlobal('fetch', createForwardingFetch(githubServer.port, gitlabServer.port));
+
+      const deps: DevelopmentAgentTaskHandlerDeps = {
+        workflowRuns: scenario.workflowRuns,
+        workItems: scenario.workItems,
+        agents: scenario.agents,
+        agentVersions: scenario.agentVersions,
+        agentExecutions: scenario.agentExecutions,
+        modelAdapter: {
+          invoke: async () => ({
+            status: 'SUCCEEDED',
+            result: {
+              summary: 'Add a STATUS.md file documenting the new status field.',
+              branchName: 'devos/add-status-field-196b',
+              commitMessage: 'Add status field documentation',
+              files: [{ path: 'STATUS.md', content: 'status: planned\n' }],
+            },
+          }),
+        },
+        prompts,
+        schemas,
+        recordContextManifest: scenario.recordContextManifest,
+        storage: createLocalFilesystemStorage(storageDir),
+        publishArtifact: async () => {},
+        artifacts: scenario.artifacts,
+        artifactVersions: scenario.artifactVersions,
+        projects: scenario.projects,
+        knowledgeSources: scenario.knowledgeSources,
+        memberships: scenario.memberships,
+        policies: scenario.policies,
+        toolCapabilities: scenario.toolCapabilities,
+        toolInvocations: scenario.toolInvocationRepository,
+        auditRecords: scenario.auditRecordRepository,
+        pullRequestProvider: createLocalPullRequestProvider(),
+        integrations: scenario.integrations,
+        credentialResolver: { resolve: async () => 'glpat_pilot_token' },
+      };
+
+      try {
+        const output = await runDevelopmentAgentTask(deps, scenario.task);
+        expect((output as { pullRequestReference?: string }).pullRequestReference).toBe('271');
+
+        const confirmResponse = await fetch(
+          `http://127.0.0.1:${gitlabServer.port}/api/v4/projects/devos-org%2Fdevos-pilot/merge_requests?state=opened&source_branch=devos/add-status-field-196b&target_branch=main`,
+        );
+        const openMergeRequests = (await confirmResponse.json()) as { iid: number }[];
+        expect(openMergeRequests).toHaveLength(1);
+        expect(openMergeRequests[0]?.iid).toBe(271);
+
+        const postRequest = gitlabServer.requests.find((r) => r.method === 'POST');
+        expect(postRequest?.headers['private-token']).toBe('glpat_pilot_token');
+
+        const secondOutput = await runDevelopmentAgentTask(deps, scenario.task);
+        expect((secondOutput as { pullRequestReference?: string }).pullRequestReference).toBe(
+          '271',
+        );
+        expect(gitlabServer.requests.filter((r) => r.method === 'POST')).toHaveLength(1);
       } finally {
         vi.unstubAllGlobals();
       }

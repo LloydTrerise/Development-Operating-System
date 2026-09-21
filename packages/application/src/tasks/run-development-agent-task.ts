@@ -3,6 +3,7 @@ import type { AgentVersionId } from '@devos/contracts';
 import type { Artifact, ArtifactVersion, WorkflowTask } from '@devos/domain';
 import {
   createGitHubPullRequestProvider,
+  createGitLabPullRequestProvider,
   createWorkspace,
   destroyWorkspace,
   runGit,
@@ -11,7 +12,11 @@ import {
 import { retrieveRelevantRepositoryContext } from '@devos/knowledge';
 import { invokeTool } from '@devos/tools';
 import { createGitProviderAdapters } from './git-provider-adapters.js';
-import { buildAuthenticatedCloneUrl, resolveGitHubRepositoryTarget } from './github-context.js';
+import {
+  buildAuthenticatedCloneUrl,
+  resolveGitHubRepositoryTarget,
+  resolveGitLabProjectTarget,
+} from './github-context.js';
 import { createPullRequestProviderAdapter } from './pull-request-provider-adapter.js';
 import { runAgentTask } from './run-agent-task.js';
 import type { DevelopmentAgentTaskHandlerDeps } from './deps.js';
@@ -33,12 +38,17 @@ interface GitHubContext {
 }
 
 /**
- * Resolves the real GitHub context (an authenticated clone URL and a real
- * `PullRequestProvider`) when the project's Git integration configures a
- * real GitHub target, resolving its live PAT through `deps.credentialResolver`
- * (DEVOS-106) once and reusing it for both. Returns `undefined` — not an
- * error — for any project without a real GitHub target configured (every
- * existing test, and any project that hasn't set one up), so the caller
+ * DEVOS-194: resolves the real pull-request-provider context (an
+ * authenticated clone URL and a real `PullRequestProvider`) based on the
+ * Git integration's own `provider` field (`packages/domain/src/integrations/integration.ts`
+ * — already a required, non-empty column on every `Integration` since
+ * Sprint 9, but never read by this function until now; every existing
+ * caller sets it to `'local'`, which — like any value other than
+ * `'github'` — falls through to `undefined` below, reproducing today's
+ * exact prior behaviour byte for byte). Resolves the live credential
+ * through `deps.credentialResolver` (DEVOS-106) once and reuses it for
+ * both the clone URL and the provider. Returns `undefined` — not an error —
+ * for any project without a matching real target configured, so the caller
  * falls back to `deps.pullRequestProvider`/the plain `repositoryPath`
  * unchanged. Resolved fresh per task, not once at worker startup, mirroring
  * `run-release-task.ts`'s identical per-call
@@ -47,35 +57,77 @@ interface GitHubContext {
  * repository. `resolveGitHubRepositoryTarget`/`buildAuthenticatedCloneUrl`
  * live in `github-context.ts`, shared with `run-validation-task.ts`
  * (DEVOS-108).
+ *
+ * DEVOS-195 adds the real `'gitlab'` case alongside `'github'` — the same
+ * credential-resolution shape, a GitLab-conventional `'oauth2'` clone
+ * username (`buildAuthenticatedCloneUrl`'s own new optional parameter), and
+ * `createGitLabPullRequestProvider` behind the same unchanged
+ * `PullRequestProvider` port. Any other `provider` value (including
+ * `'local'`, every existing test's own value) still falls through to
+ * `undefined` unchanged.
  */
-async function resolveGitHubContext(
+async function resolvePullRequestProviderContext(
   deps: DevelopmentAgentTaskHandlerDeps,
-  gitIntegration: { credentialReference: string; configuration: Record<string, unknown> },
+  gitIntegration: {
+    provider: string;
+    credentialReference: string;
+    configuration: Record<string, unknown>;
+  },
   repositoryPath: string,
 ): Promise<GitHubContext | undefined> {
-  const target = resolveGitHubRepositoryTarget(gitIntegration.configuration);
-  if (!target) return undefined;
+  if (gitIntegration.provider === 'github') {
+    const target = resolveGitHubRepositoryTarget(gitIntegration.configuration);
+    if (!target) return undefined;
 
-  if (!deps.credentialResolver) {
-    throw new Error(
-      'Git integration configures a real GitHub target (configuration.github) but no credentialResolver is available to resolve its token.',
-    );
-  }
-  const token = await deps.credentialResolver.resolve(gitIntegration.credentialReference);
-  if (token === null) {
-    throw new Error(
-      `Could not resolve a credential for reference "${gitIntegration.credentialReference}".`,
-    );
+    if (!deps.credentialResolver) {
+      throw new Error(
+        'Git integration configures a real GitHub target (configuration.github) but no credentialResolver is available to resolve its token.',
+      );
+    }
+    const token = await deps.credentialResolver.resolve(gitIntegration.credentialReference);
+    if (token === null) {
+      throw new Error(
+        `Could not resolve a credential for reference "${gitIntegration.credentialReference}".`,
+      );
+    }
+
+    return {
+      cloneUrl: buildAuthenticatedCloneUrl(repositoryPath, token),
+      pullRequestProvider: createGitHubPullRequestProvider({
+        token,
+        owner: target.owner,
+        repo: target.repo,
+      }),
+    };
   }
 
-  return {
-    cloneUrl: buildAuthenticatedCloneUrl(repositoryPath, token),
-    pullRequestProvider: createGitHubPullRequestProvider({
-      token,
-      owner: target.owner,
-      repo: target.repo,
-    }),
-  };
+  if (gitIntegration.provider === 'gitlab') {
+    const target = resolveGitLabProjectTarget(gitIntegration.configuration);
+    if (!target) return undefined;
+
+    if (!deps.credentialResolver) {
+      throw new Error(
+        'Git integration configures a real GitLab target (configuration.gitlab) but no credentialResolver is available to resolve its token.',
+      );
+    }
+    const token = await deps.credentialResolver.resolve(gitIntegration.credentialReference);
+    if (token === null) {
+      throw new Error(
+        `Could not resolve a credential for reference "${gitIntegration.credentialReference}".`,
+      );
+    }
+
+    return {
+      cloneUrl: buildAuthenticatedCloneUrl(repositoryPath, token, 'oauth2'),
+      pullRequestProvider: createGitLabPullRequestProvider({
+        token,
+        projectId: target.projectId,
+        ...(target.host !== undefined ? { host: target.host } : {}),
+      }),
+    };
+  }
+
+  return undefined;
 }
 
 /**
@@ -185,7 +237,7 @@ export async function runDevelopmentAgentTask(
     throw new Error(`Git integration ${gitIntegration.id} has no configured "repositoryPath".`);
   }
 
-  const githubContext = await resolveGitHubContext(deps, gitIntegration, repositoryPath);
+  const githubContext = await resolvePullRequestProviderContext(deps, gitIntegration, repositoryPath);
   const workspace = await createWorkspace(task.id, githubContext?.cloneUrl ?? repositoryPath);
 
   try {

@@ -33,6 +33,32 @@ export function resolveGitHubRepositoryTarget(
   return { owner, repo };
 }
 
+export interface GitLabProjectTarget {
+  projectId: string;
+  host?: string;
+}
+
+/**
+ * DEVOS-195's own real second `PullRequestProvider` target — mirrors
+ * `resolveGitHubRepositoryTarget`'s exact shape (`configuration.gitlab`,
+ * absent/partially-configured returns `undefined`, never an error) for a
+ * real GitLab merge-request target instead. `host` defaults to `gitlab.com`
+ * (self-managed GitLab instances may configure a different one).
+ */
+export function resolveGitLabProjectTarget(
+  configuration: Record<string, unknown>,
+): GitLabProjectTarget | undefined {
+  const gitlab = configuration.gitlab;
+  if (typeof gitlab !== 'object' || gitlab === null) return undefined;
+  const projectId = (gitlab as Record<string, unknown>).projectId;
+  if (typeof projectId !== 'string' || projectId.trim().length === 0) return undefined;
+  const host = (gitlab as Record<string, unknown>).host;
+  if (host !== undefined && (typeof host !== 'string' || host.trim().length === 0)) {
+    return undefined;
+  }
+  return { projectId, ...(host !== undefined ? { host } : {}) };
+}
+
 /**
  * A real repo needs `git clone`/`git push`/`git fetch` themselves to
  * authenticate, not only the PR-creation REST call. Injects the resolved PAT
@@ -49,8 +75,18 @@ export function resolveGitHubRepositoryTarget(
  * the task completes, and by the PAT itself being fine-grained and
  * repo-scoped, not a broad credential. Never logged, and never placed into
  * the plain `repositoryPath` that flows into ToolInvocation/audit records.
+ *
+ * DEVOS-195: `username` defaults to `'x-access-token'` (GitHub's own
+ * convention, preserving every existing call's exact prior URL) but is
+ * overridable — GitLab's own equivalent scripted-access convention uses
+ * `'oauth2'` as the username for a personal/project access token
+ * (`https://oauth2:<token>@gitlab.com/...`).
  */
-export function buildAuthenticatedCloneUrl(repositoryPath: string, token: string): string {
+export function buildAuthenticatedCloneUrl(
+  repositoryPath: string,
+  token: string,
+  username = 'x-access-token',
+): string {
   let parsed: URL;
   try {
     parsed = new URL(repositoryPath);
@@ -58,7 +94,7 @@ export function buildAuthenticatedCloneUrl(repositoryPath: string, token: string
     return repositoryPath;
   }
   if (parsed.protocol !== 'https:') return repositoryPath;
-  parsed.username = 'x-access-token';
+  parsed.username = username;
   parsed.password = token;
   return parsed.toString();
 }

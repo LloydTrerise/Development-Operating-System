@@ -9,6 +9,7 @@ import type {
   AuditUseCaseDeps,
   ApprovalUseCaseDeps,
   CreateProjectWithClones,
+  IntegrationUseCaseDeps,
   KnowledgeUseCaseDeps,
   OrganisationUseCaseDeps,
   PolicyUseCaseDeps,
@@ -38,6 +39,8 @@ import {
   type AuditRecordRepository,
   type ContextManifest,
   type ContextManifestRepository,
+  type Integration,
+  type IntegrationRepository,
   type KnowledgeSource,
   type KnowledgeSourceRepository,
   type ListWorkflowRunsForDefinition,
@@ -474,6 +477,26 @@ function createInMemoryAgentDeps(projectDeps: ProjectUseCaseDeps): AgentUseCaseD
       await agents.create(agent);
       await agentVersions.create(version);
     },
+    auditRecords: projectDeps.auditRecords,
+  };
+}
+
+function createInMemoryIntegrationDeps(projectDeps: ProjectUseCaseDeps): IntegrationUseCaseDeps {
+  const integrationsStore = new Map<string, Integration>();
+
+  const integrations: IntegrationRepository = {
+    getById: async (id) => integrationsStore.get(id) ?? null,
+    listForProject: async (projectId) =>
+      [...integrationsStore.values()].filter((i) => i.projectId === projectId),
+    create: async (integration) => {
+      integrationsStore.set(integration.id, integration);
+    },
+  };
+
+  return {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    integrations,
     auditRecords: projectDeps.auditRecords,
   };
 }
@@ -1675,6 +1698,135 @@ describe('workflow run routes', () => {
     // The run's own stored input carries the correlation id alongside the
     // caller-supplied inputs, not in place of them.
     expect(body.data.input).toEqual({ foo: 'bar', correlationId: suppliedCorrelationId });
+  });
+});
+
+describe('DEVOS-194: integration routes', () => {
+  let server: Server;
+  let baseUrl: string;
+  let projectId: string;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const integrationDeps = createInMemoryIntegrationDeps(projectDeps);
+    const started = await startServer({ projectDeps, integrationDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+
+    const createResponse = await fetch(`${baseUrl}/api/v1/projects`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer alice', 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Integration Project', slug: 'integration-project' }),
+    });
+    projectId = (await createResponse.json()).data.id;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('rejects unauthenticated requests with 401', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/projects/${projectId}/integrations`);
+    expect(response.status).toBe(401);
+  });
+
+  it('creates a real Integration row through the API for the first time', async () => {
+    const response = await authed(`/api/v1/projects/${projectId}/integrations`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'Git',
+        provider: 'github',
+        name: 'Pilot GitHub integration',
+        credentialReference: 'github/devos-pilot-test-pat',
+        configuration: { github: { owner: 'devos-org', repo: 'devos-pilot' } },
+      }),
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.data).toMatchObject({
+      projectId,
+      type: 'Git',
+      provider: 'github',
+      name: 'Pilot GitHub integration',
+      credentialReference: 'github/devos-pilot-test-pat',
+      configuration: { github: { owner: 'devos-org', repo: 'devos-pilot' } },
+      status: 'ACTIVE',
+    });
+  });
+
+  it('rejects a body missing a required field', async () => {
+    const response = await authed(`/api/v1/projects/${projectId}/integrations`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'Git', name: 'Missing provider/credentialReference' }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects a secret-shaped configuration key, mirroring createIntegration\'s own existing guard', async () => {
+    const response = await authed(`/api/v1/projects/${projectId}/integrations`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'Deployment',
+        provider: 'render',
+        name: 'Bad config',
+        credentialReference: 'render/api-key',
+        configuration: { apiToken: 'super-secret' },
+      }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it('lists integrations for a project', async () => {
+    await authed(`/api/v1/projects/${projectId}/integrations`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'Deployment',
+        provider: 'render',
+        name: 'Listed integration',
+        credentialReference: 'render/api-key',
+      }),
+    });
+
+    const response = await authed(`/api/v1/projects/${projectId}/integrations`, 'alice');
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(Array.isArray(body.data)).toBe(true);
+    expect(
+      body.data.some((integration: { name: string }) => integration.name === 'Listed integration'),
+    ).toBe(true);
+  });
+
+  it('denies a non-owner from registering an integration', async () => {
+    const inviteResponse = await authed(`/api/v1/projects/${projectId}/members`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'bob', role: 'MEMBER' }),
+    });
+    expect(inviteResponse.status).toBe(200);
+
+    const response = await authed(`/api/v1/projects/${projectId}/integrations`, 'bob', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'Git',
+        provider: 'github',
+        name: 'Should be denied',
+        credentialReference: 'github/should-be-denied',
+      }),
+    });
+    expect(response.status).toBe(403);
   });
 });
 
