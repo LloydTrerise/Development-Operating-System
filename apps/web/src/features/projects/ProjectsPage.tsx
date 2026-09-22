@@ -1,27 +1,45 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
+  Box,
   Button,
   FormControl,
   InputLabel,
-  List,
-  ListItemButton,
-  ListItemText,
   MenuItem,
+  Paper,
   Select,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
-import { createProject, listProjectTypes, type ProjectType } from '../../api-client.js';
+import FolderIcon from '@mui/icons-material/Folder';
+import {
+  createProject,
+  listProjectTypes,
+  listWorkItems,
+  type Project,
+  type ProjectType,
+} from '../../api-client.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
+import { StatusChip } from '../../components/StatusChip.js';
 import { useOrganisationContext } from '../../organisation-context.js';
 import { useProjectContext } from '../../project-context.js';
 
+/**
+ * DEVOS-225: the mockup's grid-of-cards layout (`Design/DevOS.dc.html` lines
+ * 611-647) on existing real data/logic, using only real, already-available
+ * fields — real `status`, and a real work-item count fetched the same
+ * per-project fan-out `HomePage.tsx`/`WorkflowLibraryPage.tsx` already
+ * established. The mockup's own health line (`p.health`) has no real data
+ * source anywhere in this codebase and is deliberately omitted, not
+ * fabricated — see specs/sprints/sprint-33/README.md's own grounding.
+ */
 export function ProjectsPage() {
   const { projects, selectedProjectId, selectProject, loading, error, refresh } =
     useProjectContext();
   const { organisations, selectedOrganisationId } = useOrganisationContext();
+  const navigate = useNavigate();
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [organisationId, setOrganisationId] = useState(selectedOrganisationId ?? '');
@@ -29,6 +47,7 @@ export function ProjectsPage() {
   const [projectTypeId, setProjectTypeId] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [workItemCounts, setWorkItemCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (!organisationId && selectedOrganisationId) {
@@ -54,6 +73,34 @@ export function ProjectsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (projects.length === 0) {
+      setWorkItemCounts({});
+      return;
+    }
+    let cancelled = false;
+
+    Promise.all(
+      projects.map((project) =>
+        listWorkItems(project.id).then((result) => ({
+          id: project.id,
+          count: result.ok ? result.data.length : null,
+        })),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      const next: Record<string, number> = {};
+      for (const { id, count } of results) {
+        if (count !== null) next[id] = count;
+      }
+      setWorkItemCounts(next);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projects]);
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setSubmitting(true);
@@ -78,6 +125,11 @@ export function ProjectsPage() {
     selectProject(result.data.id);
   }
 
+  function openProject(project: Project) {
+    selectProject(project.id);
+    navigate(`/projects/${project.id}`);
+  }
+
   return (
     <section>
       <Typography variant="h4" component="h2" gutterBottom>
@@ -88,18 +140,99 @@ export function ProjectsPage() {
       {error && <ErrorAlert message={`Failed to load projects: ${error}`} />}
 
       {!loading && !error && (
-        <List dense>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0,1fr))' },
+            gap: 1.5,
+          }}
+        >
           {projects.map((project) => (
-            <ListItemButton
+            <Paper
               key={project.id}
-              selected={project.id === selectedProjectId}
-              onClick={() => selectProject(project.id)}
+              variant="outlined"
+              onClick={() => openProject(project)}
+              sx={{
+                p: 2,
+                cursor: 'pointer',
+                ...(project.id === selectedProjectId ? { borderColor: 'primary.main' } : undefined),
+              }}
             >
-              <ListItemText primary={`${project.name} (${project.slug})`} />
-            </ListItemButton>
+              <Stack direction="row" alignItems="center" spacing={1.5}>
+                <Box
+                  sx={{
+                    display: 'grid',
+                    placeItems: 'center',
+                    width: 32,
+                    height: 32,
+                    borderRadius: 1,
+                    bgcolor: 'action.selected',
+                    color: 'primary.main',
+                  }}
+                >
+                  <FolderIcon fontSize="small" />
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="body1" noWrap>
+                    {project.name}
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ fontFamily: 'monospace' }}
+                  >
+                    {project.slug}
+                  </Typography>
+                </Box>
+                {project.id === selectedProjectId && (
+                  <Box
+                    sx={{
+                      fontSize: 10.5,
+                      px: 1,
+                      py: 0.25,
+                      borderRadius: 999,
+                      bgcolor: 'action.selected',
+                      color: 'primary.main',
+                    }}
+                  >
+                    Current
+                  </Box>
+                )}
+              </Stack>
+              <Stack direction="row" spacing={3} sx={{ mt: 2 }}>
+                <Box>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}
+                  >
+                    Status
+                  </Typography>
+                  <Box sx={{ mt: 0.5 }}>
+                    <StatusChip status={project.status} />
+                  </Box>
+                </Box>
+                <Box>
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}
+                  >
+                    Work items
+                  </Typography>
+                  <Typography variant="body1" sx={{ mt: 0.5 }}>
+                    {workItemCounts[project.id] ?? '—'}
+                  </Typography>
+                </Box>
+              </Stack>
+            </Paper>
           ))}
-          {projects.length === 0 && <ListItemText primary="No projects yet." />}
-        </List>
+          {projects.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              No projects yet.
+            </Typography>
+          )}
+        </Box>
       )}
 
       <Typography variant="h6" component="h3" sx={{ mt: 4 }} gutterBottom>

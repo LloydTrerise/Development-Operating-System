@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEV_PRINCIPAL_ID,
+  addMember,
+  changeMemberRole,
   createOrganisation,
   createOrganisationPolicy,
   createPolicy,
@@ -15,15 +17,19 @@ import {
   listApprovalsForRun,
   listAuditRecordsForProject,
   listAuditRecordsForOrganisation,
+  listMembers,
   listOrganisations,
   listPoliciesForOrganisation,
   listPoliciesForProject,
   listProjectTypes,
   listProjects,
   publishPolicy,
+  removeMember,
   simulatePolicy,
   startRun,
+  startRunFromVersion,
   updateOrganisation,
+  updateProject,
   updateProjectType,
   updateWorkItem,
 } from '../src/api-client.js';
@@ -520,7 +526,12 @@ describe('api client', () => {
   it('DEVOS-213: updates a single work item by patching the real route', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(200, {
-        data: { id: 'work-item-1', title: 'Fix the thing', status: 'IN_PROGRESS', priority: 'MEDIUM' },
+        data: {
+          id: 'work-item-1',
+          title: 'Fix the thing',
+          status: 'IN_PROGRESS',
+          priority: 'MEDIUM',
+        },
         meta: { requestId: 'req-17' },
       }),
     );
@@ -539,7 +550,7 @@ describe('api client', () => {
   // Sprint 31, though the backend `GET /runs/:runId/approvals` route
   // already existed — see specs/sprints/sprint-31/DEVOS-215.md's own
   // grounding.
-  it('DEVOS-215: lists a run\'s own approvals at the real route', async () => {
+  it("DEVOS-215: lists a run's own approvals at the real route", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(200, {
         data: [{ id: 'approval-1', approvalType: 'PLANNING', status: 'PENDING' }],
@@ -553,5 +564,126 @@ describe('api client', () => {
     expect(result.ok).toBe(true);
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/runs/run-1/approvals');
+  });
+
+  // DEVOS-224: `POST /workflow-versions/:workflowVersionId/runs` and its
+  // underlying `startWorkflowRunFromVersion` use case already existed,
+  // unmodified, with zero client wrapper — see
+  // specs/sprints/sprint-33/DEVOS-224.md's own grounding.
+  it('DEVOS-224: starts a run against a specific workflow version at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { id: 'run-1', status: 'PENDING' },
+        meta: { requestId: 'req-19' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await startRunFromVersion('version-1', {
+      workItemId: 'work-item-1',
+      idempotencyKey: 'idem-2',
+    });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/workflow-versions/version-1/runs');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      inputs: {},
+      workItemId: 'work-item-1',
+      idempotencyKey: 'idem-2',
+    });
+  });
+
+  // DEVOS-226: all 4 `/projects/:id/members` routes already existed,
+  // unmodified, with zero client wrapper — see
+  // specs/sprints/sprint-33/DEVOS-226.md's own grounding.
+  it("DEVOS-226: lists a project's members at the real route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'membership-1', projectId: 'project-1', userId: 'user-1', role: 'OWNER' }],
+        meta: { requestId: 'req-20' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listMembers('project-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/members');
+  });
+
+  it('DEVOS-226: adds a member by principal id at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { id: 'membership-2', projectId: 'project-1', userId: 'user-2', role: 'MEMBER' },
+        meta: { requestId: 'req-21' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await addMember('project-1', { userId: 'user-2', role: 'MEMBER' });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/members');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ userId: 'user-2', role: 'MEMBER' });
+  });
+
+  it("DEVOS-226: changes a member's role at the real route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { id: 'membership-2', projectId: 'project-1', userId: 'user-2', role: 'OWNER' },
+        meta: { requestId: 'req-22' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await changeMemberRole('project-1', 'user-2', 'OWNER');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/members/user-2');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ role: 'OWNER' });
+  });
+
+  it('DEVOS-226: removes a member at the real route', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(200, { data: { removed: true }, meta: { requestId: 'req-23' } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await removeMember('project-1', 'user-2');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/members/user-2');
+    expect(init.method).toBe('DELETE');
+  });
+
+  // DEVOS-227: `PATCH /projects/:id` already existed, unmodified, with zero
+  // client wrapper (unlike `updateOrganisation`, which already had one) —
+  // see specs/sprints/sprint-33/DEVOS-227.md's own grounding.
+  it('DEVOS-227: updates a project by patching the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { id: 'project-1', name: 'Renamed', slug: 'renamed', status: 'ACTIVE' },
+        meta: { requestId: 'req-24' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await updateProject('project-1', { name: 'Renamed' });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ name: 'Renamed' });
   });
 });

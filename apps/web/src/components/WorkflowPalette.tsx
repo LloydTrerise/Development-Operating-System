@@ -23,7 +23,15 @@ export const PALETTE_NODE_TYPES = [
 
 export const PALETTE_DRAG_MIME_TYPE = 'application/devos-workflow-node-type';
 
-export function WorkflowPalette() {
+export interface WorkflowPaletteProps {
+  /** 'row' (default) preserves the original wrapped-chip layout used by the
+   * Project Type template editor. 'column' is the Designer restyle's own
+   * narrow-column layout (DEVOS-222) — same chips, same drag behavior,
+   * stacked vertically to fit a fixed-width palette panel. */
+  variant?: 'row' | 'column';
+}
+
+export function WorkflowPalette({ variant = 'row' }: WorkflowPaletteProps) {
   function handleDragStart(event: DragEvent<HTMLDivElement>, nodeType: string) {
     event.dataTransfer.setData(PALETTE_DRAG_MIME_TYPE, nodeType);
     event.dataTransfer.effectAllowed = 'move';
@@ -34,7 +42,12 @@ export function WorkflowPalette() {
       <Typography variant="caption" color="text.secondary" gutterBottom sx={{ display: 'block' }}>
         Drag a node type onto the canvas
       </Typography>
-      <Stack direction="row" flexWrap="wrap" gap={1}>
+      <Stack
+        direction={variant === 'column' ? 'column' : 'row'}
+        flexWrap={variant === 'column' ? 'nowrap' : 'wrap'}
+        alignItems={variant === 'column' ? 'stretch' : undefined}
+        gap={1}
+      >
         {PALETTE_NODE_TYPES.map((type) => (
           <Chip
             key={type}
@@ -42,7 +55,7 @@ export function WorkflowPalette() {
             size="small"
             draggable
             onDragStart={(event) => handleDragStart(event, type)}
-            sx={{ cursor: 'grab' }}
+            sx={{ cursor: 'grab', justifyContent: variant === 'column' ? 'flex-start' : undefined }}
           />
         ))}
       </Stack>

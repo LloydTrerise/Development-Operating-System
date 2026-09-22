@@ -345,6 +345,70 @@ export function createProject(input: {
   return request<Project>('/api/v1/projects', { method: 'POST', body: input });
 }
 
+/** DEVOS-227: `PATCH /projects/:projectId` (`updateProject`,
+ * `apps/api/src/routes/projects.ts`) already existed, unmodified, with zero
+ * client wrapper — mirrors `updateOrganisation`'s own exact shape. The
+ * wrapper itself carries the route's full real body shape; the Settings UI
+ * restricts itself to `name` only, per this sprint's own explicit
+ * "rename only" scope (see specs/sprints/sprint-33/DEVOS-227.md). */
+export function updateProject(
+  projectId: string,
+  changes: { name?: string; description?: string; status?: string; budgetUsd?: number },
+): Promise<ApiResult<Project>> {
+  return request<Project>(`/api/v1/projects/${projectId}`, {
+    method: 'PATCH',
+    body: changes,
+  });
+}
+
+/** Mirrors `apps/api/src/dto/project.ts`'s `toMembershipDto`. */
+export interface Membership {
+  id: string;
+  projectId: string;
+  userId: string;
+  role: 'OWNER' | 'MEMBER';
+  status: string;
+}
+
+/** DEVOS-226: all 4 of these routes (`apps/api/src/routes/projects.ts`)
+ * already existed, unmodified, OWNER-gated, with zero client wrapper — see
+ * specs/sprints/sprint-33/DEVOS-226.md's own grounding. `addMember`'s real
+ * `userId` is a raw principal id; no user-directory/search capability
+ * exists anywhere in this codebase to look one up by name or email. */
+export function listMembers(projectId: string): Promise<ApiResult<Membership[]>> {
+  return request<Membership[]>(`/api/v1/projects/${projectId}/members`);
+}
+
+export function addMember(
+  projectId: string,
+  input: { userId: string; role: 'OWNER' | 'MEMBER' },
+): Promise<ApiResult<Membership>> {
+  return request<Membership>(`/api/v1/projects/${projectId}/members`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function changeMemberRole(
+  projectId: string,
+  userId: string,
+  role: 'OWNER' | 'MEMBER',
+): Promise<ApiResult<Membership>> {
+  return request<Membership>(`/api/v1/projects/${projectId}/members/${userId}`, {
+    method: 'PATCH',
+    body: { role },
+  });
+}
+
+export function removeMember(
+  projectId: string,
+  userId: string,
+): Promise<ApiResult<{ removed: boolean }>> {
+  return request<{ removed: boolean }>(`/api/v1/projects/${projectId}/members/${userId}`, {
+    method: 'DELETE',
+  });
+}
+
 export function listProjectTypes(): Promise<ApiResult<ProjectType[]>> {
   return request<ProjectType[]>('/api/v1/project-types');
 }
@@ -532,6 +596,21 @@ export function getWorkflowVersionByNumber(
   version: number,
 ): Promise<ApiResult<WorkflowVersionDto>> {
   return request<WorkflowVersionDto>(`/api/v1/workflows/${workflowId}/versions/${version}`);
+}
+
+/** DEVOS-224: the real `POST /workflow-versions/:workflowVersionId/runs`
+ * route (`apps/api/src/routes/workflow-runs.ts`) and its underlying
+ * `startWorkflowRunFromVersion` use case already existed, unmodified, with
+ * zero client wrapper — mirrors `startRun`'s exact shape, the sibling route
+ * that instead always runs a workflow's *active* version. */
+export function startRunFromVersion(
+  workflowVersionId: string,
+  input: { workItemId: string; inputs?: Record<string, unknown>; idempotencyKey: string },
+): Promise<ApiResult<WorkflowRun>> {
+  return request<WorkflowRun>(`/api/v1/workflow-versions/${workflowVersionId}/runs`, {
+    method: 'POST',
+    body: { inputs: {}, ...input },
+  });
 }
 
 /** Creates the next draft version of an already-published workflow — the

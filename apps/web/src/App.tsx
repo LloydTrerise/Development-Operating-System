@@ -29,6 +29,7 @@ import { GovernancePage } from './features/governance/GovernancePage.js';
 import { KnowledgeSourcesPage } from './features/knowledge/KnowledgeSourcesPage.js';
 import { OrganisationsPage } from './features/organisations/OrganisationsPage.js';
 import { ProjectTypesPage } from './features/project-types/ProjectTypesPage.js';
+import { ProjectDetailPage } from './features/projects/ProjectDetailPage.js';
 import { ProjectsPage } from './features/projects/ProjectsPage.js';
 import { RunsPage } from './features/runs/RunsPage.js';
 import { WorkItemDetailPage } from './features/work-items/WorkItemDetailPage.js';
@@ -347,6 +348,9 @@ export function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/organisations" element={<OrganisationsPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
+          {/* DEVOS-225/226/227: the `/{area}/:id` convention's real Projects
+              detail page — identity, membership panel, rename settings. */}
+          <Route path="/projects/:id" element={<ProjectDetailPage />} />
           <Route path="/project-types" element={<ProjectTypesPage />} />
           <Route path="/work-items" element={<WorkItemsPage />} />
           {/* DEVOS-206 scaffolding proof of concept for the /{area}/:id convention; replaced with real content by Sprint 31's DEVOS-213. */}

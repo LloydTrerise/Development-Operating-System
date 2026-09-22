@@ -8,6 +8,7 @@ import {
   IconButton,
   InputLabel,
   MenuItem,
+  Paper,
   Select,
   Stack,
   Table,
@@ -28,16 +29,42 @@ import {
   listWorkflowRunsForDefinition,
   listWorkflowVersions,
   listWorkflows,
+  listWorkItems,
+  startRunFromVersion,
   type Project,
   type ProjectType,
   type WorkflowDefinitionSummary,
   type WorkflowRun,
   type WorkflowVersionDto,
+  type WorkItem,
 } from '../../api-client.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
 import { StatusChip } from '../../components/StatusChip.js';
 import { useProjectContext } from '../../project-context.js';
+
+/** DEVOS-223: the same local panel-header convention `GovernancePage.tsx`'s
+ * own DEVOS-219 restyle already established (a title + right-aligned meta
+ * caption, bordered below) — restyle-only, no behavior change. */
+function PanelHeader({ title, meta }: { title: string; meta?: string }) {
+  return (
+    <Stack
+      direction="row"
+      alignItems="center"
+      spacing={1}
+      sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}
+    >
+      <Typography variant="subtitle1" sx={{ flex: 1 }}>
+        {title}
+      </Typography>
+      {meta && (
+        <Typography variant="caption" color="text.secondary">
+          {meta}
+        </Typography>
+      )}
+    </Stack>
+  );
+}
 
 interface LibraryRow {
   project: Project;
@@ -101,6 +128,15 @@ export function WorkflowLibraryPage() {
   const [cloneTargetProjectId, setCloneTargetProjectId] = useState<Record<string, string>>({});
   const [cloneBusyId, setCloneBusyId] = useState<string | null>(null);
   const [cloneError, setCloneError] = useState<string | null>(null);
+
+  // DEVOS-224: "Run this version" — per-version-history-row state for the
+  // real `startRunFromVersion` action.
+  const [workItemsByProject, setWorkItemsByProject] = useState<Record<string, WorkItem[]>>({});
+  const [openRunVersionId, setOpenRunVersionId] = useState<string | null>(null);
+  const [runWorkItemId, setRunWorkItemId] = useState<Record<string, string>>({});
+  const [runBusyId, setRunBusyId] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [runSuccessId, setRunSuccessId] = useState<string | null>(null);
 
   useEffect(() => {
     listProjectTypes().then((result) => {
@@ -244,13 +280,42 @@ export function WorkflowLibraryPage() {
     setRefreshToken((token) => token + 1);
   }
 
+  async function toggleRunPicker(row: LibraryRow, version: WorkflowVersionDto) {
+    setRunError(null);
+    setRunSuccessId(null);
+    if (openRunVersionId === version.id) {
+      setOpenRunVersionId(null);
+      return;
+    }
+    setOpenRunVersionId(version.id);
+    if (!workItemsByProject[row.project.id]) {
+      const result = await listWorkItems(row.project.id);
+      if (result.ok) {
+        setWorkItemsByProject((current) => ({ ...current, [row.project.id]: result.data }));
+      }
+    }
+  }
+
+  async function handleRunVersion(version: WorkflowVersionDto) {
+    const workItemId = runWorkItemId[version.id];
+    if (!workItemId) return;
+    setRunBusyId(version.id);
+    setRunError(null);
+    const result = await startRunFromVersion(version.id, {
+      workItemId,
+      idempotencyKey: `web-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    });
+    setRunBusyId(null);
+    if (!result.ok) {
+      setRunError(result.error.message);
+      return;
+    }
+    setRunSuccessId(version.id);
+  }
+
   return (
     <Stack spacing={2}>
       <Typography variant="h5">Workflow Library</Typography>
-      <Typography variant="body2" color="text.secondary">
-        Every real workflow across your projects, with its real status, version count, and run
-        health.
-      </Typography>
 
       <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
         <TextField
@@ -312,128 +377,195 @@ export function WorkflowLibraryPage() {
       {loading && <LoadingState label="Loading workflow library…" />}
       {error && <ErrorAlert message={`Failed to load workflows: ${error}`} />}
       {cloneError && <ErrorAlert message={`Clone failed: ${cloneError}`} />}
+      {runError && <ErrorAlert message={`Failed to start run: ${runError}`} />}
 
       {!loading && !error && (
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell />
-              <TableCell>Name</TableCell>
-              <TableCell>Project</TableCell>
-              <TableCell>Type</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Versions</TableCell>
-              <TableCell>Run health</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {filteredRows.map((row) => {
-              const health = runHealth[row.definition.id];
-              const isExpanded = expandedId === row.definition.id;
-              return (
-                <Fragment key={row.definition.id}>
-                  <TableRow>
-                    <TableCell>
-                      <IconButton size="small" onClick={() => toggleExpanded(row.definition)}>
-                        {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                      </IconButton>
-                    </TableCell>
-                    <TableCell>
-                      {row.definition.name} <code>({row.definition.key})</code>
-                    </TableCell>
-                    <TableCell>{row.project.name}</TableCell>
-                    <TableCell>
-                      {projectTypeNameById.get(row.project.projectTypeId) ??
-                        row.project.projectTypeId}
-                    </TableCell>
-                    <TableCell>
-                      {row.definition.latestVersionStatus ? (
-                        <StatusChip status={row.definition.latestVersionStatus} />
-                      ) : (
-                        '—'
-                      )}
-                    </TableCell>
-                    <TableCell>{row.definition.versionCount ?? '—'}</TableCell>
-                    <TableCell>
-                      {health
-                        ? `${health.succeeded} succeeded / ${health.failed} failed / ${health.inProgress} in progress`
-                        : '—'}
-                    </TableCell>
-                    <TableCell>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Button size="small" onClick={() => openInEditor(row.project)}>
-                          Open editor
-                        </Button>
-                        <FormControl size="small" sx={{ minWidth: 140 }}>
-                          <Select<string>
-                            value={cloneTargetProjectId[row.definition.id] ?? row.project.id}
-                            onChange={(event) =>
-                              setCloneTargetProjectId((current) => ({
-                                ...current,
-                                [row.definition.id]: event.target.value,
-                              }))
-                            }
-                          >
-                            {projects.map((project) => (
-                              <MenuItem key={project.id} value={project.id}>
-                                {project.name}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          disabled={cloneBusyId === row.definition.id}
-                          onClick={() => handleClone(row)}
-                        >
-                          Clone into new draft
-                        </Button>
-                      </Stack>
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell colSpan={8} sx={{ py: 0, border: isExpanded ? undefined : 0 }}>
-                      <Collapse in={isExpanded} unmountOnExit>
-                        <Box sx={{ py: 1 }}>
-                          <Typography variant="subtitle2">Version history</Typography>
-                          {(versionsByDefinition[row.definition.id] ?? [])
-                            .slice()
-                            .sort((a, b) => b.version - a.version)
-                            .map((version) => (
-                              <Typography key={version.id} variant="body2">
-                                v{version.version} — <StatusChip status={version.status} /> —{' '}
-                                created {version.createdAt}
-                                {version.publishedAt ? ` — published ${version.publishedAt}` : ''}
-                              </Typography>
-                            ))}
-                          {(versionsByDefinition[row.definition.id] ?? []).length === 0 && (
-                            <Typography variant="body2" color="text.secondary">
-                              No versions yet.
-                            </Typography>
-                          )}
-                          <Typography variant="caption" color="text.secondary">
-                            Open the workflow editor to compare any two versions in detail.
-                          </Typography>
-                        </Box>
-                      </Collapse>
-                    </TableCell>
-                  </TableRow>
-                </Fragment>
-              );
-            })}
-            {filteredRows.length === 0 && (
+        <Paper variant="outlined">
+          <PanelHeader
+            title="Every workflow"
+            meta={`${filteredRows.length} of ${rows.length} shown`}
+          />
+          <Table size="small">
+            <TableHead>
               <TableRow>
-                <TableCell colSpan={8}>
-                  <Typography variant="body2" color="text.secondary">
-                    No workflows match the current filters.
-                  </Typography>
-                </TableCell>
+                <TableCell />
+                <TableCell>Name</TableCell>
+                <TableCell>Project</TableCell>
+                <TableCell>Type</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Versions</TableCell>
+                <TableCell>Run health</TableCell>
+                <TableCell>Actions</TableCell>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {filteredRows.map((row) => {
+                const health = runHealth[row.definition.id];
+                const isExpanded = expandedId === row.definition.id;
+                return (
+                  <Fragment key={row.definition.id}>
+                    <TableRow>
+                      <TableCell>
+                        <IconButton size="small" onClick={() => toggleExpanded(row.definition)}>
+                          {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                        </IconButton>
+                      </TableCell>
+                      <TableCell>
+                        {row.definition.name} <code>({row.definition.key})</code>
+                      </TableCell>
+                      <TableCell>{row.project.name}</TableCell>
+                      <TableCell>
+                        {projectTypeNameById.get(row.project.projectTypeId) ??
+                          row.project.projectTypeId}
+                      </TableCell>
+                      <TableCell>
+                        {row.definition.latestVersionStatus ? (
+                          <StatusChip status={row.definition.latestVersionStatus} />
+                        ) : (
+                          '—'
+                        )}
+                      </TableCell>
+                      <TableCell>{row.definition.versionCount ?? '—'}</TableCell>
+                      <TableCell>
+                        {health
+                          ? `${health.succeeded} succeeded / ${health.failed} failed / ${health.inProgress} in progress`
+                          : '—'}
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Button size="small" onClick={() => openInEditor(row.project)}>
+                            Open editor
+                          </Button>
+                          <FormControl size="small" sx={{ minWidth: 140 }}>
+                            <Select<string>
+                              value={cloneTargetProjectId[row.definition.id] ?? row.project.id}
+                              onChange={(event) =>
+                                setCloneTargetProjectId((current) => ({
+                                  ...current,
+                                  [row.definition.id]: event.target.value,
+                                }))
+                              }
+                            >
+                              {projects.map((project) => (
+                                <MenuItem key={project.id} value={project.id}>
+                                  {project.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            disabled={cloneBusyId === row.definition.id}
+                            onClick={() => handleClone(row)}
+                          >
+                            Clone into new draft
+                          </Button>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell colSpan={8} sx={{ py: 0, border: isExpanded ? undefined : 0 }}>
+                        <Collapse in={isExpanded} unmountOnExit>
+                          <Box sx={{ py: 1 }}>
+                            <Typography variant="subtitle2">Version history</Typography>
+                            {(versionsByDefinition[row.definition.id] ?? [])
+                              .slice()
+                              .sort((a, b) => b.version - a.version)
+                              .map((version) => (
+                                <Box key={version.id} sx={{ mb: 0.5 }}>
+                                  <Stack direction="row" spacing={1} alignItems="center">
+                                    <Typography variant="body2" component="div">
+                                      v{version.version} — <StatusChip status={version.status} /> —
+                                      created {version.createdAt}
+                                      {version.publishedAt
+                                        ? ` — published ${version.publishedAt}`
+                                        : ''}
+                                    </Typography>
+                                    <Button
+                                      size="small"
+                                      onClick={() => toggleRunPicker(row, version)}
+                                    >
+                                      Run this version
+                                    </Button>
+                                  </Stack>
+                                  {openRunVersionId === version.id && (
+                                    <Stack
+                                      direction="row"
+                                      spacing={1}
+                                      alignItems="center"
+                                      sx={{ mt: 0.5, ml: 2 }}
+                                    >
+                                      <FormControl size="small" sx={{ minWidth: 220 }}>
+                                        <InputLabel id={`run-work-item-${version.id}`}>
+                                          Work item
+                                        </InputLabel>
+                                        <Select<string>
+                                          labelId={`run-work-item-${version.id}`}
+                                          label="Work item"
+                                          value={runWorkItemId[version.id] ?? ''}
+                                          onChange={(event) =>
+                                            setRunWorkItemId((current) => ({
+                                              ...current,
+                                              [version.id]: event.target.value,
+                                            }))
+                                          }
+                                        >
+                                          {(workItemsByProject[row.project.id] ?? []).map(
+                                            (workItem) => (
+                                              <MenuItem key={workItem.id} value={workItem.id}>
+                                                {workItem.title}
+                                              </MenuItem>
+                                            ),
+                                          )}
+                                        </Select>
+                                      </FormControl>
+                                      <Button
+                                        size="small"
+                                        variant="outlined"
+                                        disabled={
+                                          runBusyId === version.id || !runWorkItemId[version.id]
+                                        }
+                                        onClick={() => handleRunVersion(version)}
+                                      >
+                                        Start run
+                                      </Button>
+                                      {runSuccessId === version.id && (
+                                        <Typography variant="caption" color="success.main">
+                                          Run started against v{version.version}. See the Runs page.
+                                        </Typography>
+                                      )}
+                                    </Stack>
+                                  )}
+                                </Box>
+                              ))}
+                            {(versionsByDefinition[row.definition.id] ?? []).length === 0 && (
+                              <Typography variant="body2" color="text.secondary">
+                                No versions yet.
+                              </Typography>
+                            )}
+                            <Typography variant="caption" color="text.secondary">
+                              Open the workflow editor to compare any two versions in detail.
+                            </Typography>
+                          </Box>
+                        </Collapse>
+                      </TableCell>
+                    </TableRow>
+                  </Fragment>
+                );
+              })}
+              {filteredRows.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={8}>
+                    <Typography variant="body2" color="text.secondary">
+                      No workflows match the current filters.
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </Paper>
       )}
     </Stack>
   );

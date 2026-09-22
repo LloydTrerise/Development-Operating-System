@@ -124,16 +124,37 @@ function CanvasInner({
 
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      const updatedFlowNodes = applyNodeChanges(changes, flowNodes);
+      // React Flow reports every internal change through this callback, not
+      // just user drags — `dimensions` (its own post-mount measurement
+      // pass), `select`, `remove`, etc. Reacting to any of those by writing
+      // a brand-new `nodes` array back into `draft` recreates every node
+      // object on the next render (`toFlowNodes` below has no stable
+      // identity across calls), which React Flow then treats as genuinely
+      // new nodes needing to be measured again — an infinite loop that
+      // leaves every node permanently stuck at React Flow's own
+      // pre-measurement `visibility: hidden` state and never lets
+      // `useWorkflowGraphValidation`'s debounce settle. Only a real
+      // `position` change (a user drag, or the drop-driven initial
+      // placement) is a genuine edit to `draft.nodes[].config.canvasPosition`.
+      const positionChanges = changes.filter((change) => change.type === 'position');
+      if (positionChanges.length === 0) return;
+
+      const updatedFlowNodes = applyNodeChanges(positionChanges, flowNodes);
       const positionById = new Map(updatedFlowNodes.map((node) => [node.id, node.position]));
-      onNodesReposition(
-        nodes.map((node, index) => {
-          const flowId = node.id.length > 0 ? node.id : `__unnamed-${index}`;
-          const position = positionById.get(flowId);
-          if (!position) return node;
-          return { ...node, config: { ...node.config, canvasPosition: position } };
-        }),
-      );
+
+      let changed = false;
+      const repositioned = nodes.map((node, index) => {
+        const flowId = node.id.length > 0 ? node.id : `__unnamed-${index}`;
+        const position = positionById.get(flowId);
+        const current = readCanvasPosition(node);
+        if (!position || (current && current.x === position.x && current.y === position.y)) {
+          return node;
+        }
+        changed = true;
+        return { ...node, config: { ...node.config, canvasPosition: position } };
+      });
+
+      if (changed) onNodesReposition(repositioned);
     },
     [flowNodes, nodes, onNodesReposition],
   );

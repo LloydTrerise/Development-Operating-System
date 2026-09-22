@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  Box,
   Button,
   FormControl,
   InputLabel,
@@ -8,6 +9,7 @@ import {
   ListItemButton,
   ListItemText,
   MenuItem,
+  Paper,
   Select,
   Stack,
   Typography,
@@ -25,13 +27,17 @@ import {
 } from '../../api-client.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
+import { StatusChip } from '../../components/StatusChip.js';
 import { WorkflowCanvas } from '../../components/WorkflowCanvas.js';
 import { WorkflowNodeInspector } from '../../components/WorkflowNodeInspector.js';
 import { WorkflowPalette } from '../../components/WorkflowPalette.js';
 import { WorkflowPathPreview } from '../../components/WorkflowPathPreview.js';
 import { WorkflowVersionDiffView } from '../../components/WorkflowVersionDiffView.js';
 import { useProjectContext } from '../../project-context.js';
-import { useWorkflowGraphValidation, type ValidatableGraph } from '../../workflow-graph-validation.js';
+import {
+  useWorkflowGraphValidation,
+  type ValidatableGraph,
+} from '../../workflow-graph-validation.js';
 
 /**
  * DEVOS-136 (Sprint 14): the other half of `specs/architecture/organisations-and-project-types.md`
@@ -208,29 +214,38 @@ export function WorkflowsPage() {
       {error && <ErrorAlert message={`Failed to load workflows: ${error}`} />}
 
       {!loading && !error && (
-        <List dense sx={{ maxWidth: 360 }}>
-          {definitions.map((definition) => (
-            <ListItemButton
-              key={definition.id}
-              selected={selectedWorkflowId === definition.id}
-              onClick={() => setSelectedWorkflowId(definition.id)}
-            >
-              <ListItemText primary={`${definition.name} (${definition.key})`} />
-            </ListItemButton>
-          ))}
-          {definitions.length === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
-              No workflows in this project yet.
-            </Typography>
-          )}
-        </List>
+        <Paper variant="outlined" sx={{ maxWidth: 360 }}>
+          <List dense disablePadding>
+            {definitions.map((definition) => (
+              <ListItemButton
+                key={definition.id}
+                selected={selectedWorkflowId === definition.id}
+                onClick={() => setSelectedWorkflowId(definition.id)}
+              >
+                <ListItemText
+                  primary={definition.name}
+                  secondary={definition.key}
+                  slotProps={{ secondary: { sx: { fontFamily: 'monospace', fontSize: 11 } } }}
+                />
+              </ListItemButton>
+            ))}
+            {definitions.length === 0 && (
+              <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
+                No workflows in this project yet.
+              </Typography>
+            )}
+          </List>
+        </Paper>
       )}
 
       {selectedWorkflowId && latestVersion && (
         <Stack spacing={2}>
-          <Typography variant="subtitle1">
-            Version {latestVersion.version} — {latestVersion.status}
-          </Typography>
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+              Version {latestVersion.version}
+            </Typography>
+            <StatusChip status={latestVersion.status} />
+          </Stack>
 
           {versions.length > 1 && (
             <Stack spacing={1}>
@@ -309,38 +324,79 @@ export function WorkflowsPage() {
 
           {draft && (
             <>
-              <WorkflowPalette />
-              <WorkflowCanvas
-                nodes={draft.nodes}
-                edges={draft.edges}
-                onNodesReposition={(nodes) => setDraft({ ...draft, nodes })}
-                onNodeCreate={(node) => setDraft({ ...draft, nodes: [...draft.nodes, node] })}
-                onEdgeCreate={(edge) => setDraft({ ...draft, edges: [...draft.edges, edge] })}
-                selectedNodeId={selectedNodeId}
-                onNodeSelect={setSelectedNodeId}
-              />
-              {(() => {
-                const selectedIndex = draft.nodes.findIndex((node) => node.id === selectedNodeId);
-                if (selectedIndex === -1) return null;
-                const selectedNode = draft.nodes[selectedIndex]!;
-                return (
-                  <WorkflowNodeInspector
-                    node={selectedNode}
-                    otherNodeIds={draft.nodes
-                      .map((node) => node.id)
-                      .filter((id) => id !== selectedNode.id && id.length > 0)}
-                    agentKeys={agentKeys}
-                    onChange={(changes) =>
-                      setDraft({
-                        ...draft,
-                        nodes: draft.nodes.map((node, i) =>
-                          i === selectedIndex ? { ...node, ...changes } : node,
-                        ),
-                      })
-                    }
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', md: '200px minmax(0,1fr) 320px' },
+                  gap: 2,
+                  alignItems: 'start',
+                }}
+              >
+                <Paper variant="outlined" sx={{ p: 1.5 }}>
+                  <Typography
+                    variant="overline"
+                    color="text.secondary"
+                    sx={{ display: 'block', mb: 1 }}
+                  >
+                    Node palette
+                  </Typography>
+                  <WorkflowPalette variant="column" />
+                </Paper>
+
+                <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
+                  <WorkflowCanvas
+                    nodes={draft.nodes}
+                    edges={draft.edges}
+                    onNodesReposition={(nodes) => setDraft({ ...draft, nodes })}
+                    onNodeCreate={(node) => setDraft({ ...draft, nodes: [...draft.nodes, node] })}
+                    onEdgeCreate={(edge) => setDraft({ ...draft, edges: [...draft.edges, edge] })}
+                    selectedNodeId={selectedNodeId}
+                    onNodeSelect={setSelectedNodeId}
                   />
-                );
-              })()}
+                </Paper>
+
+                <Box sx={{ minHeight: 200 }}>
+                  <Typography
+                    variant="overline"
+                    color="text.secondary"
+                    sx={{ display: 'block', mb: 1 }}
+                  >
+                    Selected node
+                  </Typography>
+                  {(() => {
+                    const selectedIndex = draft.nodes.findIndex(
+                      (node) => node.id === selectedNodeId,
+                    );
+                    if (selectedIndex === -1) {
+                      return (
+                        <Paper variant="outlined" sx={{ p: 1.5 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            Select a node on the canvas to edit its properties.
+                          </Typography>
+                        </Paper>
+                      );
+                    }
+                    const selectedNode = draft.nodes[selectedIndex]!;
+                    return (
+                      <WorkflowNodeInspector
+                        node={selectedNode}
+                        otherNodeIds={draft.nodes
+                          .map((node) => node.id)
+                          .filter((id) => id !== selectedNode.id && id.length > 0)}
+                        agentKeys={agentKeys}
+                        onChange={(changes) =>
+                          setDraft({
+                            ...draft,
+                            nodes: draft.nodes.map((node, i) =>
+                              i === selectedIndex ? { ...node, ...changes } : node,
+                            ),
+                          })
+                        }
+                      />
+                    );
+                  })()}
+                </Box>
+              </Box>
 
               {validationIssues.length > 0 && (
                 <ErrorAlert
