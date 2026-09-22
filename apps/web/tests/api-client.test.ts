@@ -7,6 +7,7 @@ import {
   createOrganisationPolicy,
   createPolicy,
   createArtifact,
+  createIntegration,
   createProjectTypeAgent,
   createProjectTypeWorkflow,
   getAgent,
@@ -23,6 +24,7 @@ import {
   listArtifactVersions,
   listAuditRecordsForProject,
   listAuditRecordsForOrganisation,
+  listIntegrations,
   listMembers,
   listOrganisations,
   listPoliciesForOrganisation,
@@ -847,5 +849,63 @@ describe('api client', () => {
     expect(result.ok).toBe(true);
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/artifacts/artifact-1/provenance');
+  });
+
+  // DEVOS-240: `GET /projects/:projectId/integrations` already existed
+  // (DEVOS-194), unmodified, with zero client wrapper.
+  it("DEVOS-240: lists a project's integrations at the real route", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { data: [], meta: { requestId: 'req-31' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listIntegrations('project-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/integrations');
+  });
+
+  // DEVOS-240: `POST /projects/:projectId/integrations` already existed
+  // (DEVOS-194), unmodified, with zero client wrapper.
+  it('DEVOS-240: creates an integration at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'integration-1',
+          projectId: 'project-1',
+          type: 'Git',
+          provider: 'github',
+          name: 'Pilot GitHub integration',
+          status: 'ACTIVE',
+          credentialReference: 'github/devos-pilot-test-pat',
+          configuration: { github: { owner: 'devos-org', repo: 'devos-pilot' } },
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+        meta: { requestId: 'req-32' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createIntegration('project-1', {
+      type: 'Git',
+      provider: 'github',
+      name: 'Pilot GitHub integration',
+      credentialReference: 'github/devos-pilot-test-pat',
+      configuration: { github: { owner: 'devos-org', repo: 'devos-pilot' } },
+    });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/integrations');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      type: 'Git',
+      provider: 'github',
+      name: 'Pilot GitHub integration',
+      credentialReference: 'github/devos-pilot-test-pat',
+      configuration: { github: { owner: 'devos-org', repo: 'devos-pilot' } },
+    });
   });
 });

@@ -162,8 +162,16 @@ function EmptyRow({ label }: { label: string }) {
 
 export function HomePage() {
   const { selectedProjectId } = useProjectContext();
-  const { workItemCount, artifactCount, pendingApprovals, activeRuns, recentActivity, loading, error } =
-    useHomeDashboardData(selectedProjectId);
+  const {
+    workItemCount,
+    artifactCount,
+    activeIntegrationCount,
+    pendingApprovals,
+    activeRuns,
+    recentActivity,
+    loading,
+    error,
+  } = useHomeDashboardData(selectedProjectId);
 
   return (
     <Box>
@@ -187,7 +195,7 @@ export function HomePage() {
               <Box
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gridTemplateColumns: 'repeat(5, 1fr)',
                   gap: 1.5,
                 }}
               >
@@ -195,6 +203,7 @@ export function HomePage() {
                 <KpiTile label="Runs In Progress" value={activeRuns.length} to="/runs" />
                 <KpiTile label="Pending Approvals" value={pendingApprovals.length} to="/approvals" />
                 <KpiTile label="Artifacts" value={artifactCount} />
+                <KpiTile label="Integrations" value={activeIntegrationCount} to="/integrations" />
               </Box>
 
               <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.55fr) minmax(0, 1fr)', gap: 1.5 }}>

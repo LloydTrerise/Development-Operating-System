@@ -29,6 +29,7 @@ import { CostPage } from './features/cost/CostPage.js';
 import { HomePage } from './features/home/HomePage.js';
 import { EngineeringIntelligencePage } from './features/engineering-intelligence/EngineeringIntelligencePage.js';
 import { GovernancePage } from './features/governance/GovernancePage.js';
+import { IntegrationsPage } from './features/integrations/IntegrationsPage.js';
 import { KnowledgeSourceDetailPage } from './features/knowledge/KnowledgeSourceDetailPage.js';
 import { KnowledgeSourcesPage } from './features/knowledge/KnowledgeSourcesPage.js';
 import { OrganisationsPage } from './features/organisations/OrganisationsPage.js';
@@ -58,10 +59,8 @@ const DRAWER_WIDTH = 220;
  * Types under Platform (a platform-level template catalog, not a single
  * workflow run), Workflow Library under Workflows (filling the mockup's
  * "Definitions" slot), Cost/Engineering Intelligence under Platform as
- * their own entries. Integrations remains reserved, deliberately empty
- * (populated for real in Sprint 36) — no placeholder link, only the
- * heading, until its route actually exists. Artifacts is populated for
- * real by Sprint 35's DEVOS-235.
+ * their own entries. Artifacts is populated for real by Sprint 35's
+ * DEVOS-235; Integrations is populated for real by Sprint 36's DEVOS-241.
  */
 const NAV_GROUPS = [
   {
@@ -102,7 +101,7 @@ const NAV_GROUPS = [
     ],
   },
   { label: 'Artifacts', items: [{ to: '/artifacts', label: 'Artifacts' }] },
-  { label: 'Integrations', items: [] },
+  { label: 'Integrations', items: [{ to: '/integrations', label: 'Integrations' }] },
 ] as const;
 
 function OrganisationSelector() {
@@ -376,6 +375,9 @@ export function App() {
           <Route path="/artifacts" element={<ArtifactLibraryPage />} />
           {/* DEVOS-236: the `/{area}/:id` convention's real Artifact Viewer. */}
           <Route path="/artifacts/:id" element={<ArtifactViewerPage />} />
+          {/* DEVOS-241: list + register only, no `/integrations/:id` route —
+              no backend GET-by-id route exists to back one. */}
+          <Route path="/integrations" element={<IntegrationsPage />} />
         </Routes>
       </Box>
     </Box>

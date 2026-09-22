@@ -834,6 +834,46 @@ export function getReleaseReadiness(projectId: string): Promise<ApiResult<Releas
   return request<ReleaseReadiness>(`/api/v1/projects/${projectId}/release-readiness`);
 }
 
+/** DEVOS-240: mirrors `toIntegrationDto` (`apps/api/src/dto/integration.ts`)
+ * exactly. `credentialReference` is a reference *name*, never the secret
+ * value it points to (DEVOS-083's own precedent). */
+export interface Integration {
+  id: string;
+  projectId: string;
+  type: string;
+  provider: string;
+  name: string;
+  status: string;
+  credentialReference: string;
+  configuration: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** DEVOS-240: closes the previously-unwrapped `GET /projects/:projectId/integrations`
+ * route (DEVOS-194, existing, unmodified). */
+export function listIntegrations(projectId: string): Promise<ApiResult<Integration[]>> {
+  return request<Integration[]>(`/api/v1/projects/${projectId}/integrations`);
+}
+
+/** DEVOS-240: closes the previously-unwrapped `POST /projects/:projectId/integrations`
+ * route (DEVOS-194, existing, unmodified). `OWNER`-gated server-side. */
+export function createIntegration(
+  projectId: string,
+  input: {
+    type: string;
+    provider: string;
+    name: string;
+    credentialReference: string;
+    configuration?: Record<string, unknown>;
+  },
+): Promise<ApiResult<Integration>> {
+  return request<Integration>(`/api/v1/projects/${projectId}/integrations`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
 export const RUN_TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 
 export interface Approval {

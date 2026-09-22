@@ -3,6 +3,7 @@ import {
   listApprovalsForProject,
   listArtifacts,
   listAuditRecordsForProject,
+  listIntegrations,
   listWorkItems,
   listWorkflowRunsForDefinition,
   listWorkflows,
@@ -19,6 +20,10 @@ export interface ActiveRun extends WorkflowRun {
 export interface HomeDashboardData {
   workItemCount: number;
   artifactCount: number;
+  /** DEVOS-242: count of `ACTIVE`-status integrations — the one real
+   * "health" signal that exists (no connectivity check anywhere in this
+   * codebase). Tolerant of a failed fetch, like every other tile source. */
+  activeIntegrationCount: number;
   pendingApprovals: Approval[];
   activeRuns: ActiveRun[];
   recentActivity: AuditRecord[];
@@ -39,6 +44,7 @@ const RECENT_ACTIVITY_LIMIT = 10;
 export function useHomeDashboardData(projectId: string | null): HomeDashboardData {
   const [workItemCount, setWorkItemCount] = useState(0);
   const [artifactCount, setArtifactCount] = useState(0);
+  const [activeIntegrationCount, setActiveIntegrationCount] = useState(0);
   const [pendingApprovals, setPendingApprovals] = useState<Approval[]>([]);
   const [activeRuns, setActiveRuns] = useState<ActiveRun[]>([]);
   const [recentActivity, setRecentActivity] = useState<AuditRecord[]>([]);
@@ -49,6 +55,7 @@ export function useHomeDashboardData(projectId: string | null): HomeDashboardDat
     if (!projectId) {
       setWorkItemCount(0);
       setArtifactCount(0);
+      setActiveIntegrationCount(0);
       setPendingApprovals([]);
       setActiveRuns([]);
       setRecentActivity([]);
@@ -65,7 +72,15 @@ export function useHomeDashboardData(projectId: string | null): HomeDashboardDat
       listArtifacts(projectId),
       listAuditRecordsForProject(projectId),
       listWorkflows(projectId),
-    ]).then(async ([workItemsResult, approvalsResult, artifactsResult, auditResult, workflowsResult]) => {
+      listIntegrations(projectId),
+    ]).then(async ([
+      workItemsResult,
+      approvalsResult,
+      artifactsResult,
+      auditResult,
+      workflowsResult,
+      integrationsResult,
+    ]) => {
       if (cancelled) return;
 
       if (!workItemsResult.ok) {
@@ -81,6 +96,12 @@ export function useHomeDashboardData(projectId: string | null): HomeDashboardDat
 
       if (artifactsResult.ok) {
         setArtifactCount(artifactsResult.data.length);
+      }
+
+      if (integrationsResult.ok) {
+        setActiveIntegrationCount(
+          integrationsResult.data.filter((integration) => integration.status === 'ACTIVE').length,
+        );
       }
 
       if (auditResult.ok) {
@@ -114,5 +135,14 @@ export function useHomeDashboardData(projectId: string | null): HomeDashboardDat
     };
   }, [projectId]);
 
-  return { workItemCount, artifactCount, pendingApprovals, activeRuns, recentActivity, loading, error };
+  return {
+    workItemCount,
+    artifactCount,
+    activeIntegrationCount,
+    pendingApprovals,
+    activeRuns,
+    recentActivity,
+    loading,
+    error,
+  };
 }
