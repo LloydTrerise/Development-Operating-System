@@ -30,7 +30,9 @@ Populate the epic's other still-empty reserved nav group: a real Integrations pa
 
 ## Out of scope
 
-Any new backend route, use case, or domain field (no `GET /integrations/:id`, no update/disable/delete, no real connectivity "Test connection", no credential-expiry tracking, no scopes/capabilities listing). A detail/viewer page for a single integration (no route to back it). Client-side enforcement of `type`/`provider` as a closed enum (the backend itself imposes none — the form discloses real values as guidance, not validation). Fixing the now-stale non-clickable Artifacts KPI tile (a real, disclosed, adjacent gap, not named in this sprint's own scope). Any change to `createIntegration`/`listIntegrationsForProject` semantics.
+Any new backend route, use case, or domain field (no `GET /integrations/:id`, no update/disable/delete, no real connectivity "Test connection", no credential-expiry tracking, no scopes/capabilities listing). A detail/viewer page for a single integration (no route to back it). Client-side enforcement of `type`/`provider` as a closed enum (the backend itself imposes none — the form discloses real values as guidance, not validation). Any change to `createIntegration`/`listIntegrationsForProject` semantics.
+
+**Addendum:** the now-stale non-clickable Artifacts KPI tile was initially found during this sprint and left as a disclosed, out-of-scope gap (not named in DEVOS-242's own acceptance text). Per explicit user instruction after the sprint's first completion report ("fix both remaining issues"), it was fixed — see DEVOS-242.md's own addendum.
 
 ## Task index
 

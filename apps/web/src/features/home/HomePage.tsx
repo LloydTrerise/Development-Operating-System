@@ -202,7 +202,7 @@ export function HomePage() {
                 <KpiTile label="Work Items" value={workItemCount} to="/work-items" />
                 <KpiTile label="Runs In Progress" value={activeRuns.length} to="/runs" />
                 <KpiTile label="Pending Approvals" value={pendingApprovals.length} to="/approvals" />
-                <KpiTile label="Artifacts" value={artifactCount} />
+                <KpiTile label="Artifacts" value={artifactCount} to="/artifacts" />
                 <KpiTile label="Integrations" value={activeIntegrationCount} to="/integrations" />
               </Box>
 

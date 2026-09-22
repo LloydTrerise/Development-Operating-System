@@ -14,8 +14,12 @@ Now that Integrations exists, Sprint 30's deliberately-omitted health tile (DEVO
 
 ## Out of scope
 
-Any deeper health breakdown (per-integration status, last-checked time, connectivity validation) — none of it is backed by real data. Fixing the adjacent, already-disclosed, stale non-clickable Artifacts tile (out of this story's own named scope).
+Any deeper health breakdown (per-integration status, last-checked time, connectivity validation) — none of it is backed by real data.
+
+## Addendum — the adjacent stale Artifacts tile was fixed too
+
+DEVOS-243's own completion report disclosed a real, adjacent gap found while implementing this story: the Home dashboard's Artifacts KPI tile had been non-clickable since Sprint 30, with its own inline comment explaining that no Artifact Library page existed yet — but Sprint 35 built one. Not named in this story's original scope, so not fixed in the first pass. Per explicit user instruction after the sprint's first completion report ("fix both remaining issues"), it was fixed: `HomePage.tsx`'s Artifacts `KpiTile` gained `to="/artifacts"`, one line, matching every other tile's own convention exactly. Live-reverified: real `cursor: pointer` computed style, real navigation to `/artifacts` on click, zero console errors.
 
 ## Validation
 
-`pnpm --filter @devos/web typecheck lint build`; live dev-server verification: the tile's count matches a direct check of the real project's integrations (`ACTIVE` rows only), and clicking it navigates to `/integrations`.
+`pnpm --filter @devos/web typecheck lint build`; live dev-server verification: the tile's count matches a direct check of the real project's integrations (`ACTIVE` rows only), and clicking it navigates to `/integrations`. Re-verified after the Artifacts-tile addendum: full monorepo `pnpm turbo run typecheck lint test build --filter='!@devos/e2e-tests'` 76/76 green; full real `tests/e2e` suite 27/27 files, 52/52 tests green — both re-run clean after the addendum.
