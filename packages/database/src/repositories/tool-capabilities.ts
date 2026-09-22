@@ -69,5 +69,9 @@ export function createToolCapabilityRepository(db: QueryExecutor): ToolCapabilit
         })
         .execute();
     },
+
+    async updateStatus(id, status) {
+      await db.updateTable('tool_capabilities').set({ status }).where('id', '=', id).execute();
+    },
   };
 }

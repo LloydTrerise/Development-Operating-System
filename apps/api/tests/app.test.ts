@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -16,7 +17,9 @@ import type {
   ProjectTypeUseCaseDeps,
   ProjectUseCaseDeps,
   ReleaseReadinessUseCaseDeps,
+  SystemHealthUseCaseDeps,
   ToolInvocationSummaryUseCaseDeps,
+  ToolUseCaseDeps,
   WorkItemUseCaseDeps,
   WorkflowUseCaseDeps,
 } from '@devos/application';
@@ -195,6 +198,10 @@ function createInMemoryProjectDeps(): ProjectUseCaseDeps {
       [...memberships.values()].filter((m) => m.principalId === principalId),
     listForProject: async (projectId) =>
       [...memberships.values()].filter((m) => m.projectId === projectId),
+    listForOrganisation: async (organisationId) =>
+      [...memberships.values()].filter(
+        (m) => m.organisationId === organisationId && m.projectId === null,
+      ),
     create: async (membership) => {
       memberships.set(membership.id, membership);
     },
@@ -263,7 +270,11 @@ function createInMemoryOrganisationDeps(projectDeps: ProjectUseCaseDeps): Organi
     },
   };
 
-  return { organisations: organisationRepository, memberships: projectDeps.memberships };
+  return {
+    organisations: organisationRepository,
+    memberships: projectDeps.memberships,
+    auditRecords: projectDeps.auditRecords,
+  };
 }
 
 function createInMemoryProjectTypeDeps(): ProjectTypeUseCaseDeps {
@@ -498,6 +509,47 @@ function createInMemoryIntegrationDeps(projectDeps: ProjectUseCaseDeps): Integra
     memberships: projectDeps.memberships,
     integrations,
     auditRecords: projectDeps.auditRecords,
+  };
+}
+
+function createInMemoryToolDeps(projectDeps: ProjectUseCaseDeps): ToolUseCaseDeps {
+  const capabilitiesStore = new Map<string, ToolCapability>();
+
+  const toolCapabilities: ToolCapabilityRepository = {
+    getById: async (id) => capabilitiesStore.get(id) ?? null,
+    getByProjectAndKey: async (projectId, key) =>
+      [...capabilitiesStore.values()].find((c) => c.projectId === projectId && c.key === key) ??
+      null,
+    listForProject: async (projectId) =>
+      [...capabilitiesStore.values()].filter((c) => c.projectId === projectId),
+    create: async (capability) => {
+      capabilitiesStore.set(capability.id, capability);
+    },
+    updateStatus: async (id, status) => {
+      const existing = capabilitiesStore.get(id);
+      if (!existing) return;
+      capabilitiesStore.set(id, { ...existing, status });
+    },
+  };
+
+  return {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    toolCapabilities,
+    auditRecords: projectDeps.auditRecords,
+  };
+}
+
+function createInMemorySystemHealthDeps(
+  projectDeps: ProjectUseCaseDeps,
+  integrationDeps: IntegrationUseCaseDeps,
+  toolDeps: ToolUseCaseDeps,
+): SystemHealthUseCaseDeps {
+  return {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    integrations: integrationDeps.integrations,
+    toolCapabilities: toolDeps.toolCapabilities,
   };
 }
 
@@ -1772,7 +1824,7 @@ describe('DEVOS-194: integration routes', () => {
     expect(response.status).toBe(400);
   });
 
-  it('rejects a secret-shaped configuration key, mirroring createIntegration\'s own existing guard', async () => {
+  it("rejects a secret-shaped configuration key, mirroring createIntegration's own existing guard", async () => {
     const response = await authed(`/api/v1/projects/${projectId}/integrations`, 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -2552,7 +2604,7 @@ describe('DEVOS-084: tenant isolation — policies, approvals, knowledge sources
   // application layer (packages/application/tests/approvals.test.ts), but
   // had no route-level HTTP test — found during Sprint 31's own conversion
   // grounding (specs/sprints/sprint-31/DEVOS-216.md).
-  it('DEVOS-216: lists only the given run\'s own approvals at the route level, and denies a non-member', async () => {
+  it("DEVOS-216: lists only the given run's own approvals at the route level, and denies a non-member", async () => {
     const now = new Date().toISOString();
     const runId = 'devos-216-run' as Approval['workflowRunId'];
     const otherRunId = 'devos-216-other-run' as Approval['workflowRunId'];
@@ -2850,6 +2902,83 @@ describe('organisation routes', () => {
     expect(projectResponse.status).toBe(200);
     const project = (await projectResponse.json()).data;
     expect(project.organisationId).toBe(organisation.id);
+  });
+
+  it('DEVOS-254: allows the org-level OWNER to add/list/change-role/remove an org member', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Member Org', slug: 'member-org' }),
+    });
+    const organisation = (await orgResponse.json()).data;
+
+    const addResponse = await authed(`/api/v1/organisations/${organisation.id}/members`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'bob', role: 'MEMBER' }),
+    });
+    expect(addResponse.status).toBe(200);
+    expect((await addResponse.json()).data).toMatchObject({
+      projectId: null,
+      userId: 'bob',
+      role: 'MEMBER',
+    });
+
+    const listResponse = await authed(`/api/v1/organisations/${organisation.id}/members`, 'alice');
+    const members = (await listResponse.json()).data;
+    expect(members.some((m: { userId: string }) => m.userId === 'bob')).toBe(true);
+
+    const roleResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/members/bob`,
+      'alice',
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'OWNER' }),
+      },
+    );
+    expect(roleResponse.status).toBe(200);
+    expect((await roleResponse.json()).data.role).toBe('OWNER');
+
+    const removeResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/members/bob`,
+      'alice',
+      { method: 'DELETE' },
+    );
+    expect(removeResponse.status).toBe(200);
+  });
+
+  it('DEVOS-254: denies a non-OWNER from adding an org member and prevents removing the last OWNER', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'carol', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Guarded Org', slug: 'guarded-org' }),
+    });
+    const organisation = (await orgResponse.json()).data;
+
+    await authed(`/api/v1/organisations/${organisation.id}/members`, 'carol', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'dave', role: 'MEMBER' }),
+    });
+
+    const deniedResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/members`,
+      'dave',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'erin', role: 'MEMBER' }),
+      },
+    );
+    expect(deniedResponse.status).toBe(403);
+
+    const lastOwnerResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/members/carol`,
+      'carol',
+      { method: 'DELETE' },
+    );
+    expect(lastOwnerResponse.status).toBe(400);
   });
 });
 
@@ -3217,6 +3346,183 @@ describe('DEVOS-147: cross-project compliance reporting', () => {
     const organisation = (await orgResponse.json()).data;
 
     const response = await authed(`/api/v1/organisations/${organisation.id}/audit`, 'mallory');
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('tool capability routes (DEVOS-256)', () => {
+  let server: Server;
+  let baseUrl: string;
+  let projectDeps: ProjectUseCaseDeps;
+  let toolDeps: ToolUseCaseDeps;
+
+  beforeAll(async () => {
+    projectDeps = createInMemoryProjectDeps();
+    toolDeps = createInMemoryToolDeps(projectDeps);
+    const started = await startServer({ projectDeps, toolDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  async function createProjectAndCapability(owner: string) {
+    const projectResponse = await authed('/api/v1/projects', owner, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Tool Project', slug: `tool-project-${Math.random()}` }),
+    });
+    const project = (await projectResponse.json()).data;
+    const capability: ToolCapability = {
+      id: randomUUID() as ToolCapability['id'],
+      projectId: project.id,
+      key: 'repo-read',
+      name: 'Read Repository File',
+      riskClass: 'R0',
+      inputSchema: {},
+      outputSchema: {},
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+    };
+    await toolDeps.toolCapabilities.create(capability);
+    return { project, capability };
+  }
+
+  it("lists a project's capabilities and toggles one to DISABLED and back", async () => {
+    const { project, capability } = await createProjectAndCapability('alice');
+
+    const listResponse = await authed(`/api/v1/projects/${project.id}/tool-capabilities`, 'alice');
+    expect(listResponse.status).toBe(200);
+    const listed = (await listResponse.json()).data;
+    expect(listed).toContainEqual(expect.objectContaining({ id: capability.id, status: 'ACTIVE' }));
+
+    const disableResponse = await authed(
+      `/api/v1/projects/${project.id}/tool-capabilities/${capability.id}`,
+      'alice',
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'DISABLED' }),
+      },
+    );
+    expect(disableResponse.status).toBe(200);
+    expect((await disableResponse.json()).data.status).toBe('DISABLED');
+
+    const reenableResponse = await authed(
+      `/api/v1/projects/${project.id}/tool-capabilities/${capability.id}`,
+      'alice',
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'ACTIVE' }),
+      },
+    );
+    expect(reenableResponse.status).toBe(200);
+    expect((await reenableResponse.json()).data.status).toBe('ACTIVE');
+  });
+
+  it('denies a non-OWNER from toggling capability status', async () => {
+    const { project, capability } = await createProjectAndCapability('bob');
+    await authed(`/api/v1/projects/${project.id}/members`, 'bob', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'erin', role: 'MEMBER' }),
+    });
+
+    const response = await authed(
+      `/api/v1/projects/${project.id}/tool-capabilities/${capability.id}`,
+      'erin',
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'DISABLED' }),
+      },
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it('rejects an invalid status value', async () => {
+    const { project, capability } = await createProjectAndCapability('carol');
+
+    const response = await authed(
+      `/api/v1/projects/${project.id}/tool-capabilities/${capability.id}`,
+      'carol',
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'BOGUS' }),
+      },
+    );
+    expect(response.status).toBe(400);
+  });
+});
+
+describe('system health route (DEVOS-258)', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const integrationDeps = createInMemoryIntegrationDeps(projectDeps);
+    const toolDeps = createInMemoryToolDeps(projectDeps);
+    const systemHealthDeps = createInMemorySystemHealthDeps(projectDeps, integrationDeps, toolDeps);
+    const started = await startServer({ projectDeps, integrationDeps, toolDeps, systemHealthDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('aggregates real integration/capability counts plus database status', async () => {
+    const projectResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Health Project', slug: `health-project-${Math.random()}` }),
+    });
+    const project = projectResponse.status === 200 ? (await projectResponse.json()).data : null;
+    expect(project).not.toBeNull();
+
+    const response = await authed(`/api/v1/projects/${project.id}/system-health`, 'alice');
+    expect(response.status).toBe(200);
+    const body = (await response.json()).data;
+    expect(body).toMatchObject({
+      projectId: project.id,
+      database: 'ok',
+      integrations: { total: 0, active: 0 },
+      capabilities: { total: 0, active: 0 },
+    });
+  });
+
+  it('404s a non-member', async () => {
+    const projectResponse = await authed('/api/v1/projects', 'bob', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Private Health Project',
+        slug: `private-health-${Math.random()}`,
+      }),
+    });
+    const project = (await projectResponse.json()).data;
+
+    const response = await authed(`/api/v1/projects/${project.id}/system-health`, 'mallory');
     expect(response.status).toBe(404);
   });
 });

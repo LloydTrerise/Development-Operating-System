@@ -366,10 +366,13 @@ export function updateProject(
   });
 }
 
-/** Mirrors `apps/api/src/dto/project.ts`'s `toMembershipDto`. */
+/** Mirrors `apps/api/src/dto/project.ts`'s `toMembershipDto`. `projectId` is
+ * `string | null` (widened for DEVOS-255) — `null` for an org-level
+ * membership (`GET/POST /organisations/:id/members`), a real, correct shape
+ * that just had no caller before this sprint. */
 export interface Membership {
   id: string;
-  projectId: string;
+  projectId: string | null;
   userId: string;
   role: 'OWNER' | 'MEMBER';
   status: string;
@@ -412,6 +415,46 @@ export function removeMember(
   return request<{ removed: boolean }>(`/api/v1/projects/${projectId}/members/${userId}`, {
     method: 'DELETE',
   });
+}
+
+/** DEVOS-255: organisation-scoped equivalents of the four wrappers above,
+ * against `GET/POST /organisations/:id/members`, `PATCH/DELETE
+ * /organisations/:id/members/:userId` (DEVOS-254, new). */
+export function listOrganisationMembers(organisationId: string): Promise<ApiResult<Membership[]>> {
+  return request<Membership[]>(`/api/v1/organisations/${organisationId}/members`);
+}
+
+export function addOrganisationMember(
+  organisationId: string,
+  input: { userId: string; role: 'OWNER' | 'MEMBER' },
+): Promise<ApiResult<Membership>> {
+  return request<Membership>(`/api/v1/organisations/${organisationId}/members`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function changeOrganisationMemberRole(
+  organisationId: string,
+  userId: string,
+  role: 'OWNER' | 'MEMBER',
+): Promise<ApiResult<Membership>> {
+  return request<Membership>(`/api/v1/organisations/${organisationId}/members/${userId}`, {
+    method: 'PATCH',
+    body: { role },
+  });
+}
+
+export function removeOrganisationMember(
+  organisationId: string,
+  userId: string,
+): Promise<ApiResult<{ removed: boolean }>> {
+  return request<{ removed: boolean }>(
+    `/api/v1/organisations/${organisationId}/members/${userId}`,
+    {
+      method: 'DELETE',
+    },
+  );
 }
 
 export function listProjectTypes(): Promise<ApiResult<ProjectType[]>> {
@@ -921,6 +964,56 @@ export function createIntegration(
     method: 'POST',
     body: input,
   });
+}
+
+/** DEVOS-257: mirrors `apps/api/src/dto/tool-capability.ts`'s `toToolCapabilityDto`
+ * — omits the two JSONB schema blobs, which no UI story in this sprint
+ * needs to render. */
+export interface ToolCapability {
+  id: string;
+  projectId: string;
+  key: string;
+  name: string;
+  riskClass: string;
+  status: 'ACTIVE' | 'DISABLED';
+  createdAt: string;
+}
+
+/** DEVOS-256: the first-ever wrapper for `GET /projects/:id/tool-capabilities`
+ * (new — reuses the already-written, already-tested `listCapabilitiesForProject`
+ * unchanged). */
+export function listToolCapabilities(projectId: string): Promise<ApiResult<ToolCapability[]>> {
+  return request<ToolCapability[]>(`/api/v1/projects/${projectId}/tool-capabilities`);
+}
+
+/** DEVOS-256: `PATCH /projects/:id/tool-capabilities/:capabilityId` (new) —
+ * the missing toggle path; `invoke-tool.ts`'s enforcement of a `DISABLED`
+ * capability already existed. */
+export function setToolCapabilityStatus(
+  projectId: string,
+  capabilityId: string,
+  status: 'ACTIVE' | 'DISABLED',
+): Promise<ApiResult<ToolCapability>> {
+  return request<ToolCapability>(
+    `/api/v1/projects/${projectId}/tool-capabilities/${capabilityId}`,
+    { method: 'PATCH', body: { status } },
+  );
+}
+
+/** DEVOS-259: mirrors the route's own merged shape (DEVOS-258) — real
+ * integration/capability counts plus the one signal with genuine ok/error
+ * semantics, database connectivity. No fabricated "ok/degraded" verdict is
+ * derived from a `DISABLED` capability — that's a deliberate admin action,
+ * not a fault. */
+export interface SystemHealth {
+  projectId: string;
+  database: 'ok' | 'error';
+  integrations: { total: number; active: number };
+  capabilities: { total: number; active: number };
+}
+
+export function getProjectSystemHealth(projectId: string): Promise<ApiResult<SystemHealth>> {
+  return request<SystemHealth>(`/api/v1/projects/${projectId}/system-health`);
 }
 
 export const RUN_TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);

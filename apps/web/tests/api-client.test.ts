@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEV_PRINCIPAL_ID,
   addMember,
+  addOrganisationMember,
   changeMemberRole,
+  changeOrganisationMemberRole,
   createOrganisation,
   createOrganisationPolicy,
   createPolicy,
@@ -19,6 +21,7 @@ import {
   getOrganisation,
   getOrganisationCostReport,
   getProjectCostSummary,
+  getProjectSystemHealth,
   getWorkItem,
   installAgentVersion,
   installKnowledgeSource,
@@ -28,6 +31,7 @@ import {
   listAuditRecordsForOrganisation,
   listIntegrations,
   listMembers,
+  listOrganisationMembers,
   listOrganisations,
   listPoliciesForOrganisation,
   listPoliciesForProject,
@@ -35,8 +39,11 @@ import {
   listProjects,
   listSharedAgentVersions,
   listSharedKnowledgeSources,
+  listToolCapabilities,
   publishPolicy,
   removeMember,
+  removeOrganisationMember,
+  setToolCapabilityStatus,
   shareAgentVersion,
   simulatePolicy,
   startRun,
@@ -973,7 +980,11 @@ describe('api client', () => {
           agentId: 'agent-1',
           version: 1,
           status: 'PUBLISHED',
-          configuration: { role: 'DEVELOPMENT', provider: 'anthropic', modelRef: 'claude-sonnet-5' },
+          configuration: {
+            role: 'DEVELOPMENT',
+            provider: 'anthropic',
+            modelRef: 'claude-sonnet-5',
+          },
           createdBy: 'seed-user',
           createdAt: '2026-01-01T00:00:00.000Z',
           sharedAcrossOrganisation: true,
@@ -1025,7 +1036,11 @@ describe('api client', () => {
             agentId: 'agent-2',
             version: 1,
             status: 'PUBLISHED',
-            configuration: { role: 'DEVELOPMENT', provider: 'anthropic', modelRef: 'claude-sonnet-5' },
+            configuration: {
+              role: 'DEVELOPMENT',
+              provider: 'anthropic',
+              modelRef: 'claude-sonnet-5',
+            },
             createdBy: 'seed-user',
             createdAt: '2026-01-01T00:00:00.000Z',
             sharedAcrossOrganisation: false,
@@ -1043,5 +1058,150 @@ describe('api client', () => {
     expect(url).toContain('/api/v1/organisations/org-1/shared-agents/agent-version-1/install');
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual({ targetProjectId: 'project-2' });
+  });
+
+  // DEVOS-254/255: the four organisation-scoped equivalents of the
+  // project-scoped members routes DEVOS-226 already wrapped.
+  it("DEVOS-255: lists an organisation's members at the real route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'membership-1', projectId: null, userId: 'user-1', role: 'OWNER' }],
+        meta: { requestId: 'req-36' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listOrganisationMembers('org-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/members');
+  });
+
+  it('DEVOS-255: adds an organisation member by principal id at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { id: 'membership-2', projectId: null, userId: 'user-2', role: 'MEMBER' },
+        meta: { requestId: 'req-37' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await addOrganisationMember('org-1', { userId: 'user-2', role: 'MEMBER' });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/members');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ userId: 'user-2', role: 'MEMBER' });
+  });
+
+  it("DEVOS-255: changes an organisation member's role at the real route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { id: 'membership-2', projectId: null, userId: 'user-2', role: 'OWNER' },
+        meta: { requestId: 'req-38' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await changeOrganisationMemberRole('org-1', 'user-2', 'OWNER');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/members/user-2');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ role: 'OWNER' });
+  });
+
+  it('DEVOS-255: removes an organisation member at the real route', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(200, { data: { removed: true }, meta: { requestId: 'req-39' } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await removeOrganisationMember('org-1', 'user-2');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/members/user-2');
+    expect(init.method).toBe('DELETE');
+  });
+
+  // DEVOS-256/257: the first-ever wrappers for the new tool-capability routes.
+  it("DEVOS-257: lists a project's tool capabilities at the real route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [
+          {
+            id: 'capability-1',
+            projectId: 'project-1',
+            key: 'repo-read',
+            name: 'Read Repository File',
+            riskClass: 'R0',
+            status: 'ACTIVE',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        meta: { requestId: 'req-40' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listToolCapabilities('project-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/tool-capabilities');
+  });
+
+  it('DEVOS-257: toggles a tool capability status at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'capability-1',
+          projectId: 'project-1',
+          key: 'repo-read',
+          name: 'Read Repository File',
+          riskClass: 'R0',
+          status: 'DISABLED',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        meta: { requestId: 'req-41' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await setToolCapabilityStatus('project-1', 'capability-1', 'DISABLED');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/tool-capabilities/capability-1');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ status: 'DISABLED' });
+  });
+
+  // DEVOS-258/259: the first-ever wrapper for the new system-health route.
+  it("DEVOS-259: fetches a project's aggregated system health at the real route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          projectId: 'project-1',
+          database: 'ok',
+          integrations: { total: 4, active: 3 },
+          capabilities: { total: 12, active: 12 },
+        },
+        meta: { requestId: 'req-42' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getProjectSystemHealth('project-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/system-health');
   });
 });

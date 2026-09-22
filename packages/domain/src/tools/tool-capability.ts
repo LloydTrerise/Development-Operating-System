@@ -37,4 +37,13 @@ export interface ToolCapabilityRepository {
   getByProjectAndKey: (projectId: ProjectId, key: string) => Promise<ToolCapability | null>;
   listForProject: (projectId: ProjectId) => Promise<ToolCapability[]>;
   create: (capability: ToolCapability) => Promise<void>;
+  /** DEVOS-256: the missing toggle path — enforcement of a `DISABLED`
+   * capability already existed (`invoke-tool.ts`); only the ability to
+   * transition into it did not. No `updatedAt` column exists on this
+   * table, unlike `Membership`, so none is touched here. Optional, matching
+   * this codebase's established "additive repository method" convention
+   * (see `MembershipRepository.listForOrganisation`) — the ~10 other
+   * `ToolCapabilityRepository` fakes across this codebase never exercise
+   * status toggling and are unaffected. */
+  updateStatus?: (id: ToolCapabilityId, status: ToolCapabilityStatus) => Promise<void>;
 }

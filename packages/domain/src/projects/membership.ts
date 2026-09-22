@@ -22,6 +22,15 @@ export interface MembershipRepository {
   ) => Promise<Membership | null>;
   listForPrincipal: (principalId: string) => Promise<Membership[]>;
   listForProject: (projectId: ProjectId) => Promise<Membership[]>;
+  /** DEVOS-254: org-level (`projectId: null`) memberships only — the rows
+   * organisation-scoped membership management actually manages, not every
+   * project-level membership within the organisation too. Optional,
+   * matching this codebase's established "additive repository method, real
+   * implementation only where needed" convention (e.g.
+   * `AgentExecutionRepository.sumEstimatedCostUsdForProject`) — every one
+   * of the ~20 other `MembershipRepository` fakes across this codebase
+   * never exercises organisation-scoped membership and is unaffected. */
+  listForOrganisation?: (organisationId: OrganisationId) => Promise<Membership[]>;
   create: (membership: Membership) => Promise<void>;
   updateRole: (id: MembershipId, role: MembershipRole, updatedAt: string) => Promise<void>;
   remove: (id: MembershipId) => Promise<void>;

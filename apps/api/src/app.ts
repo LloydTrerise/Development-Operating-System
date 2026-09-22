@@ -66,7 +66,9 @@ import type {
   ProjectTypeUseCaseDeps,
   ProjectUseCaseDeps,
   ReleaseReadinessUseCaseDeps,
+  SystemHealthUseCaseDeps,
   ToolInvocationSummaryUseCaseDeps,
+  ToolUseCaseDeps,
   WorkItemUseCaseDeps,
   WorkflowUseCaseDeps,
 } from '@devos/application';
@@ -99,6 +101,8 @@ import { createPolicyRoutes } from './routes/policies.js';
 import { createProjectTypeRoutes } from './routes/project-types.js';
 import { createProjectRoutes } from './routes/projects.js';
 import { createReleaseReadinessRoutes } from './routes/release-readiness.js';
+import { createSystemHealthRoutes } from './routes/system-health.js';
+import { createToolCapabilityRoutes } from './routes/tool-capabilities.js';
 import { createToolInvocationSummaryRoutes } from './routes/tool-invocation-summaries.js';
 import { createWorkItemRoutes } from './routes/work-items.js';
 import { createWorkflowRoutes } from './routes/workflows.js';
@@ -216,6 +220,8 @@ export interface CreateAppOptions {
   projectTypeDeps?: ProjectTypeUseCaseDeps;
   policyDeps?: PolicyUseCaseDeps;
   approvalDeps?: ApprovalUseCaseDeps;
+  toolDeps?: ToolUseCaseDeps;
+  systemHealthDeps?: SystemHealthUseCaseDeps;
   /** DEVOS-091: overridable so tests can exercise a real 429 without firing 60+ requests. */
   mutationRateLimiter?: RateLimiter;
   /** DEVOS-135: overridable the same way `database` itself is — a real
@@ -383,6 +389,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   const organisationDeps: OrganisationUseCaseDeps = options.organisationDeps ?? {
     organisations: createOrganisationRepository(database.db),
     memberships: projectDeps.memberships,
+    auditRecords: auditRecordRepository,
   };
   const projectTypeDeps: ProjectTypeUseCaseDeps = options.projectTypeDeps ?? {
     projectTypes: projectTypeRepository,
@@ -413,6 +420,20 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     workflowTasks: workflowDeps.workflowTasks,
     createDraft: workflowDeps.createDraft,
     startRun: workflowDeps.startRun,
+  };
+  const toolDeps: ToolUseCaseDeps = options.toolDeps ?? {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    // DEVOS-256: the same `ToolCapabilityRepository` instance
+    // `toolInvocationSummaryDeps` already constructs.
+    toolCapabilities: toolInvocationSummaryDeps.toolCapabilities,
+    auditRecords: auditRecordRepository,
+  };
+  const systemHealthDeps: SystemHealthUseCaseDeps = options.systemHealthDeps ?? {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    integrations: integrationDeps.integrations,
+    toolCapabilities: toolDeps.toolCapabilities,
   };
 
   const routes: Route[] = [
@@ -448,6 +469,8 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createIntegrationRoutes(API_PREFIX, integrationDeps),
     ...createPolicyRoutes(API_PREFIX, policyDeps),
     ...createApprovalRoutes(API_PREFIX, approvalDeps),
+    ...createToolCapabilityRoutes(API_PREFIX, toolDeps),
+    ...createSystemHealthRoutes(API_PREFIX, systemHealthDeps, database),
   ];
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {

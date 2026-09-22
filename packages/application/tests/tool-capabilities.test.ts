@@ -18,11 +18,12 @@ import {
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createProject } from '../src/projects/create-project.js';
 import type { CreateProjectWithClones } from '../src/projects/deps.js';
-import { NotFoundError, ValidationError } from '../src/errors.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
 import { getCapabilityForPrincipal } from '../src/tools/get-capability.js';
 import { listCapabilitiesForProject } from '../src/tools/list-capabilities.js';
 import { registerAllCapabilities } from '../src/tools/register-all-capabilities.js';
 import { registerCapability } from '../src/tools/register-capability.js';
+import { setToolCapabilityStatus } from '../src/tools/set-tool-capability-status.js';
 
 function createInMemoryDeps() {
   const projects = new Map<string, Project>();
@@ -74,6 +75,11 @@ function createInMemoryDeps() {
       [...capabilities.values()].filter((c) => c.projectId === projectId),
     create: async (capability) => {
       capabilities.set(capability.id, capability);
+    },
+    updateStatus: async (id, status) => {
+      const existing = capabilities.get(id);
+      if (!existing) return;
+      capabilities.set(id, { ...existing, status });
     },
   };
 
@@ -234,5 +240,101 @@ describe('tool capability use cases', () => {
 
     const second = await registerAllCapabilities(deps, 'alice', projectId);
     expect(second.map((c) => c.id).sort()).toEqual(first.map((c) => c.id).sort());
+  });
+
+  describe('setToolCapabilityStatus (DEVOS-256)', () => {
+    it('lets an OWNER disable and re-enable a capability, and audits each change', async () => {
+      const capability = await registerCapability(deps, 'alice', projectId, VALID_INPUT);
+
+      const disabled = await setToolCapabilityStatus(
+        deps,
+        'alice',
+        projectId,
+        capability.id,
+        'DISABLED',
+      );
+      expect(disabled.status).toBe('DISABLED');
+      const stored = await deps.toolCapabilities.getById(capability.id);
+      expect(stored?.status).toBe('DISABLED');
+
+      const reenabled = await setToolCapabilityStatus(
+        deps,
+        'alice',
+        projectId,
+        capability.id,
+        'ACTIVE',
+      );
+      expect(reenabled.status).toBe('ACTIVE');
+
+      const audit = await deps.auditRecords.listForProject(projectId);
+      const statusChanges = audit.filter((r) => r.action === 'tool_capability.status_changed');
+      expect(statusChanges).toHaveLength(2);
+      expect(statusChanges[0]?.metadata).toMatchObject({
+        previousStatus: 'ACTIVE',
+        status: 'DISABLED',
+      });
+      expect(statusChanges[1]?.metadata).toMatchObject({
+        previousStatus: 'DISABLED',
+        status: 'ACTIVE',
+      });
+    });
+
+    it('is a no-op audit-wise when the status does not actually change', async () => {
+      const capability = await registerCapability(deps, 'alice', projectId, VALID_INPUT);
+
+      await setToolCapabilityStatus(deps, 'alice', projectId, capability.id, 'ACTIVE');
+
+      const audit = await deps.auditRecords.listForProject(projectId);
+      expect(audit.filter((r) => r.action === 'tool_capability.status_changed')).toHaveLength(0);
+    });
+
+    it('denies a project MEMBER (non-OWNER) from toggling capability status', async () => {
+      const capability = await registerCapability(deps, 'alice', projectId, VALID_INPUT);
+      await deps.memberships.create({
+        id: randomUUID() as Membership['id'],
+        organisationId,
+        projectId,
+        principalId: 'erin',
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      await expect(
+        setToolCapabilityStatus(deps, 'erin', projectId, capability.id, 'DISABLED'),
+      ).rejects.toThrow(ForbiddenError);
+    });
+
+    it('404s a non-member, and a capability that belongs to a different project', async () => {
+      const capability = await registerCapability(deps, 'alice', projectId, VALID_INPUT);
+
+      await expect(
+        setToolCapabilityStatus(deps, 'mallory', projectId, capability.id, 'DISABLED'),
+      ).rejects.toThrow(NotFoundError);
+
+      const otherProject = await createProject(deps, 'bob', {
+        organisationId,
+        name: 'Other Project',
+        slug: 'other-project',
+      });
+      await expect(
+        setToolCapabilityStatus(deps, 'bob', otherProject.id, capability.id, 'DISABLED'),
+      ).rejects.toThrow(NotFoundError);
+    });
+
+    it('rejects an invalid status value', async () => {
+      const capability = await registerCapability(deps, 'alice', projectId, VALID_INPUT);
+
+      await expect(
+        setToolCapabilityStatus(
+          deps,
+          'alice',
+          projectId,
+          capability.id,
+          'BOGUS' as unknown as 'ACTIVE',
+        ),
+      ).rejects.toThrow(ValidationError);
+    });
   });
 });

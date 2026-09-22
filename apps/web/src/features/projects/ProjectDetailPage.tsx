@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import {
   Box,
   Button,
+  Chip,
   FormControl,
   IconButton,
   InputLabel,
@@ -10,6 +11,7 @@ import {
   Paper,
   Select,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material';
@@ -18,9 +20,12 @@ import {
   addMember,
   changeMemberRole,
   listMembers,
+  listToolCapabilities,
   removeMember,
+  setToolCapabilityStatus,
   updateProject,
   type Membership,
+  type ToolCapability,
 } from '../../api-client.js';
 import { DetailPageLayout } from '../../components/DetailPageLayout.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
@@ -69,6 +74,12 @@ export function ProjectDetailPage() {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsSavedAt, setSettingsSavedAt] = useState<number | null>(null);
 
+  const [capabilities, setCapabilities] = useState<ToolCapability[]>([]);
+  const [capabilitiesLoading, setCapabilitiesLoading] = useState(false);
+  const [capabilitiesError, setCapabilitiesError] = useState<string | null>(null);
+  const [capabilityActionError, setCapabilityActionError] = useState<string | null>(null);
+  const [capabilityBusyId, setCapabilityBusyId] = useState<string | null>(null);
+
   useEffect(() => {
     if (project) setSettingsName(project.name);
   }, [project]);
@@ -90,6 +101,38 @@ export function ProjectDetailPage() {
   useEffect(() => {
     refreshMembers();
   }, [id]);
+
+  function refreshCapabilities() {
+    if (!id) return;
+    setCapabilitiesLoading(true);
+    listToolCapabilities(id).then((result) => {
+      setCapabilitiesLoading(false);
+      if (!result.ok) {
+        setCapabilitiesError(result.error.message);
+        return;
+      }
+      setCapabilitiesError(null);
+      setCapabilities(result.data);
+    });
+  }
+
+  useEffect(() => {
+    refreshCapabilities();
+  }, [id]);
+
+  async function handleToggleCapability(capability: ToolCapability) {
+    if (!id) return;
+    setCapabilityBusyId(capability.id);
+    setCapabilityActionError(null);
+    const nextStatus = capability.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+    const result = await setToolCapabilityStatus(id, capability.id, nextStatus);
+    setCapabilityBusyId(null);
+    if (!result.ok) {
+      setCapabilityActionError(result.error.message);
+      return;
+    }
+    refreshCapabilities();
+  }
 
   async function handleAddMember(event: FormEvent) {
     event.preventDefault();
@@ -325,6 +368,52 @@ export function ProjectDetailPage() {
                 <ErrorAlert message={settingsError} />
               </Box>
             )}
+          </Paper>
+
+          <Paper variant="outlined">
+            <PanelHeader title="Tool Capabilities" />
+            <Box sx={{ p: 2 }}>
+              {capabilitiesLoading && <LoadingState label="Loading capabilities…" />}
+              {capabilitiesError && (
+                <ErrorAlert message={`Failed to load capabilities: ${capabilitiesError}`} />
+              )}
+              {capabilityActionError && <ErrorAlert message={capabilityActionError} />}
+
+              {!capabilitiesLoading && !capabilitiesError && (
+                <Stack spacing={1}>
+                  {capabilities.map((capability) => (
+                    <Stack
+                      key={capability.id}
+                      direction="row"
+                      alignItems="center"
+                      spacing={2}
+                      sx={{ py: 0.5, borderBottom: 1, borderColor: 'divider' }}
+                    >
+                      <Typography variant="body2" sx={{ flex: 1, fontFamily: 'monospace' }}>
+                        {capability.key}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+                        {capability.name}
+                      </Typography>
+                      <Chip label={capability.riskClass} size="small" variant="outlined" />
+                      <StatusChip status={capability.status} />
+                      <Switch
+                        size="small"
+                        checked={capability.status === 'ACTIVE'}
+                        disabled={capabilityBusyId === capability.id}
+                        onChange={() => handleToggleCapability(capability)}
+                        slotProps={{ input: { 'aria-label': `Toggle ${capability.key}` } }}
+                      />
+                    </Stack>
+                  ))}
+                  {capabilities.length === 0 && (
+                    <Typography variant="body2" color="text.secondary">
+                      No tool capabilities registered for this project.
+                    </Typography>
+                  )}
+                </Stack>
+              )}
+            </Box>
           </Paper>
         </Stack>
       )}

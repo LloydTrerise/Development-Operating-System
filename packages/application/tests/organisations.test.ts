@@ -1,16 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import type { OrganisationId } from '@devos/contracts';
 import type {
+  AuditRecord,
+  AuditRecordRepository,
   Membership,
   MembershipRepository,
   Organisation,
   OrganisationRepository,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { addOrganisationMember } from '../src/organisations/add-member.js';
+import { changeOrganisationMemberRole } from '../src/organisations/change-member-role.js';
 import { createOrganisation } from '../src/organisations/create-organisation.js';
 import type { OrganisationUseCaseDeps } from '../src/organisations/deps.js';
 import { getOrganisationForPrincipal } from '../src/organisations/get-organisation.js';
+import { listOrganisationMembers } from '../src/organisations/list-members.js';
 import { listOrganisationsForPrincipal } from '../src/organisations/list-organisations-for-principal.js';
+import { removeOrganisationMember } from '../src/organisations/remove-member.js';
 import { updateOrganisation } from '../src/organisations/update-organisation.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
 
@@ -41,6 +47,10 @@ function createInMemoryDeps(): OrganisationUseCaseDeps {
       [...memberships.values()].filter((m) => m.principalId === principalId),
     listForProject: async (projectId) =>
       [...memberships.values()].filter((m) => m.projectId === projectId),
+    listForOrganisation: async (organisationId) =>
+      [...memberships.values()].filter(
+        (m) => m.organisationId === organisationId && m.projectId === null,
+      ),
     create: async (membership) => {
       memberships.set(membership.id, membership);
     },
@@ -54,7 +64,17 @@ function createInMemoryDeps(): OrganisationUseCaseDeps {
     },
   };
 
-  return { organisations: organisationRepository, memberships: membershipRepository };
+  const auditRecordsStore: AuditRecord[] = [];
+  const auditRecords: AuditRecordRepository = {
+    create: async (record) => {
+      auditRecordsStore.push(record);
+    },
+    listForProject: async (projectId) => auditRecordsStore.filter((r) => r.projectId === projectId),
+    listForOrganisation: async (organisationId) =>
+      auditRecordsStore.filter((r) => r.organisationId === organisationId),
+  };
+
+  return { organisations: organisationRepository, memberships: membershipRepository, auditRecords };
 }
 
 describe('organisation use cases', () => {
@@ -161,5 +181,94 @@ describe('organisation use cases', () => {
     await expect(
       updateOrganisation(deps, 'dave', acme.id, { name: 'Should fail' }),
     ).rejects.toThrow(ForbiddenError);
+  });
+
+  describe('organisation-level membership (DEVOS-254)', () => {
+    it('lets an OWNER add an org-level member, and denies a non-OWNER', async () => {
+      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+
+      const membership = await addOrganisationMember(deps, 'alice', acme.id, {
+        principalId: 'bob',
+        role: 'MEMBER',
+      });
+      expect(membership).toMatchObject({
+        organisationId: acme.id,
+        projectId: null,
+        role: 'MEMBER',
+      });
+
+      const members = await listOrganisationMembers(deps, 'alice', acme.id);
+      expect(members.map((m) => m.principalId)).toContain('bob');
+
+      await expect(
+        addOrganisationMember(deps, 'bob', acme.id, { principalId: 'carol', role: 'MEMBER' }),
+      ).rejects.toThrow(ForbiddenError);
+
+      const audit = await deps.auditRecords.listForOrganisation(acme.id);
+      expect(audit).toContainEqual(expect.objectContaining({ action: 'membership.added' }));
+    });
+
+    it('rejects adding a principal who is already an org-level member', async () => {
+      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      await addOrganisationMember(deps, 'alice', acme.id, { principalId: 'bob', role: 'MEMBER' });
+
+      await expect(
+        addOrganisationMember(deps, 'alice', acme.id, { principalId: 'bob', role: 'OWNER' }),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('changes an org-level member role and audits it', async () => {
+      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const bob = await addOrganisationMember(deps, 'alice', acme.id, {
+        principalId: 'bob',
+        role: 'MEMBER',
+      });
+
+      const updated = await changeOrganisationMemberRole(deps, 'alice', acme.id, bob.id, 'OWNER');
+      expect(updated.role).toBe('OWNER');
+
+      const audit = await deps.auditRecords.listForOrganisation(acme.id);
+      expect(audit).toContainEqual(expect.objectContaining({ action: 'membership.role_changed' }));
+    });
+
+    it('removes an org-level member and audits it', async () => {
+      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const bob = await addOrganisationMember(deps, 'alice', acme.id, {
+        principalId: 'bob',
+        role: 'MEMBER',
+      });
+
+      await removeOrganisationMember(deps, 'alice', acme.id, bob.id);
+
+      const members = await listOrganisationMembers(deps, 'alice', acme.id);
+      expect(members.map((m) => m.principalId)).not.toContain('bob');
+
+      const audit = await deps.auditRecords.listForOrganisation(acme.id);
+      expect(audit).toContainEqual(expect.objectContaining({ action: 'membership.removed' }));
+    });
+
+    it('refuses to remove or demote the last org-level OWNER', async () => {
+      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const members = await listOrganisationMembers(deps, 'alice', acme.id);
+      const owner = members.find((m) => m.principalId === 'alice')!;
+
+      await expect(removeOrganisationMember(deps, 'alice', acme.id, owner.id)).rejects.toThrow(
+        ValidationError,
+      );
+      await expect(
+        changeOrganisationMemberRole(deps, 'alice', acme.id, owner.id, 'MEMBER'),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('allows demoting an OWNER when another org-level OWNER still exists', async () => {
+      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const bob = await addOrganisationMember(deps, 'alice', acme.id, {
+        principalId: 'bob',
+        role: 'OWNER',
+      });
+
+      const updated = await changeOrganisationMemberRole(deps, 'alice', acme.id, bob.id, 'MEMBER');
+      expect(updated.role).toBe('MEMBER');
+    });
   });
 });

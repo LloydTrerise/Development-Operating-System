@@ -1,21 +1,13 @@
 import { useNavigate } from 'react-router-dom';
-import { Box, Card, Stack, Typography } from '@mui/material';
+import { Box, Card, Chip, Stack, Typography } from '@mui/material';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
 import { StatusChip } from '../../components/StatusChip.js';
 import { useProjectContext } from '../../project-context.js';
 import { useHomeDashboardData, type ActiveRun } from './use-home-dashboard-data.js';
-import type { Approval, AuditRecord } from '../../api-client.js';
+import type { Approval, AuditRecord, SystemHealth } from '../../api-client.js';
 
-function KpiTile({
-  label,
-  value,
-  to,
-}: {
-  label: string;
-  value: number;
-  to?: string;
-}) {
+function KpiTile({ label, value, to }: { label: string; value: number; to?: string }) {
   const navigate = useNavigate();
   return (
     <Card
@@ -28,6 +20,41 @@ function KpiTile({
       </Typography>
       <Typography variant="h4" component="div" sx={{ mt: 0.5 }}>
         {value}
+      </Typography>
+    </Card>
+  );
+}
+
+/**
+ * DEVOS-259: not a reuse of `KpiTile` (numeric-only) — system health is a
+ * status plus a real integration/capability breakdown, not a single count.
+ * The chip is driven by `database` (DEVOS-258's own one signal with
+ * genuine binary fault semantics); the breakdown text deliberately makes
+ * no "ok/degraded" judgement about a `DISABLED` capability, which is a
+ * real admin action (DEVOS-256), not a fault.
+ */
+function SystemHealthTile({ health, to }: { health: SystemHealth | null; to?: string }) {
+  const navigate = useNavigate();
+  return (
+    <Card
+      variant="outlined"
+      onClick={to ? () => navigate(to) : undefined}
+      sx={{ p: 2, cursor: to ? 'pointer' : 'default' }}
+    >
+      <Typography variant="overline" color="text.secondary">
+        System Health
+      </Typography>
+      <Box sx={{ mt: 0.5 }}>
+        <Chip
+          label={health ? (health.database === 'ok' ? 'OK' : 'DEGRADED') : '—'}
+          color={health ? (health.database === 'ok' ? 'success' : 'error') : 'default'}
+          size="small"
+        />
+      </Box>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+        {health
+          ? `${health.integrations.active}/${health.integrations.total} integrations · ${health.capabilities.active}/${health.capabilities.total} capabilities`
+          : 'No data'}
       </Typography>
     </Card>
   );
@@ -166,6 +193,7 @@ export function HomePage() {
     workItemCount,
     artifactCount,
     activeIntegrationCount,
+    systemHealth,
     pendingApprovals,
     activeRuns,
     recentActivity,
@@ -195,18 +223,29 @@ export function HomePage() {
               <Box
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(5, 1fr)',
+                  gridTemplateColumns: 'repeat(6, 1fr)',
                   gap: 1.5,
                 }}
               >
                 <KpiTile label="Work Items" value={workItemCount} to="/work-items" />
                 <KpiTile label="Runs In Progress" value={activeRuns.length} to="/runs" />
-                <KpiTile label="Pending Approvals" value={pendingApprovals.length} to="/approvals" />
+                <KpiTile
+                  label="Pending Approvals"
+                  value={pendingApprovals.length}
+                  to="/approvals"
+                />
                 <KpiTile label="Artifacts" value={artifactCount} to="/artifacts" />
                 <KpiTile label="Integrations" value={activeIntegrationCount} to="/integrations" />
+                <SystemHealthTile health={systemHealth} to="/integrations" />
               </Box>
 
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.55fr) minmax(0, 1fr)', gap: 1.5 }}>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0, 1.55fr) minmax(0, 1fr)',
+                  gap: 1.5,
+                }}
+              >
                 <Stack spacing={1.5}>
                   <SectionCard
                     title="Needs attention"
@@ -218,7 +257,9 @@ export function HomePage() {
                     ) : (
                       pendingApprovals
                         .slice(0, HOME_LIST_LIMIT)
-                        .map((approval) => <NeedsAttentionRow key={approval.id} approval={approval} />)
+                        .map((approval) => (
+                          <NeedsAttentionRow key={approval.id} approval={approval} />
+                        ))
                     )}
                   </SectionCard>
 

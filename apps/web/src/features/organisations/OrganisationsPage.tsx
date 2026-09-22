@@ -1,29 +1,211 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
   Box,
   Button,
   Collapse,
+  FormControl,
   IconButton,
   List,
   ListItemButton,
   ListItemText,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
+import PeopleIcon from '@mui/icons-material/People';
 import SettingsIcon from '@mui/icons-material/Settings';
-import { createOrganisation, updateOrganisation } from '../../api-client.js';
+import {
+  addOrganisationMember,
+  changeOrganisationMemberRole,
+  createOrganisation,
+  listOrganisationMembers,
+  removeOrganisationMember,
+  updateOrganisation,
+  type Membership,
+} from '../../api-client.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
 import { StatusChip } from '../../components/StatusChip.js';
 import { useOrganisationContext } from '../../organisation-context.js';
+
+const ROLES = ['OWNER', 'MEMBER'] as const;
 
 function PanelHeader({ title }: { title: string }) {
   return (
     <Typography variant="subtitle1" sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
       {title}
     </Typography>
+  );
+}
+
+/**
+ * DEVOS-255: reuses `ProjectDetailPage.tsx`'s Members panel interactions
+ * (DEVOS-226) — list, add by principal ID, change role, remove — but as a
+ * second inline-expand toggle on `OrganisationRow`, matching that row's own
+ * existing Settings-toggle pattern (DEVOS-227) rather than a route-based
+ * detail page, since `OrganisationsPage.tsx` has no `/organisations/:id`
+ * route (deliberately deferred — see this file's own DEVOS-227 grounding).
+ */
+function MembersPanel({ organisationId }: { organisationId: string }) {
+  const [members, setMembers] = useState<Membership[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
+
+  const [newUserId, setNewUserId] = useState('');
+  const [newRole, setNewRole] = useState<(typeof ROLES)[number]>('MEMBER');
+  const [adding, setAdding] = useState(false);
+
+  function refresh() {
+    setLoading(true);
+    listOrganisationMembers(organisationId).then((result) => {
+      setLoading(false);
+      if (!result.ok) {
+        setListError(result.error.message);
+        return;
+      }
+      setListError(null);
+      setMembers(result.data);
+    });
+  }
+
+  useEffect(() => {
+    refresh();
+  }, [organisationId]);
+
+  async function handleAdd(event: FormEvent) {
+    event.preventDefault();
+    if (!newUserId.trim()) return;
+    setAdding(true);
+    setActionError(null);
+    const result = await addOrganisationMember(organisationId, {
+      userId: newUserId.trim(),
+      role: newRole,
+    });
+    setAdding(false);
+    if (!result.ok) {
+      setActionError(result.error.message);
+      return;
+    }
+    setNewUserId('');
+    refresh();
+  }
+
+  async function handleChangeRole(userId: string, role: (typeof ROLES)[number]) {
+    setBusyUserId(userId);
+    setActionError(null);
+    const result = await changeOrganisationMemberRole(organisationId, userId, role);
+    setBusyUserId(null);
+    if (!result.ok) {
+      setActionError(result.error.message);
+      return;
+    }
+    refresh();
+  }
+
+  async function handleRemove(userId: string) {
+    setBusyUserId(userId);
+    setActionError(null);
+    const result = await removeOrganisationMember(organisationId, userId);
+    setBusyUserId(null);
+    if (!result.ok) {
+      setActionError(result.error.message);
+      return;
+    }
+    refresh();
+  }
+
+  return (
+    <Box sx={{ pl: 2, pb: 1.5, pt: 0.5, pr: 2 }}>
+      {loading && <LoadingState label="Loading members…" />}
+      {listError && <ErrorAlert message={`Failed to load members: ${listError}`} />}
+      {actionError && <ErrorAlert message={actionError} />}
+
+      {!loading && !listError && (
+        <Stack spacing={0.5} sx={{ mb: 1.5 }}>
+          {members.map((member) => (
+            <Stack
+              key={member.id}
+              direction="row"
+              alignItems="center"
+              spacing={2}
+              sx={{ py: 0.5, borderBottom: 1, borderColor: 'divider' }}
+            >
+              <Typography variant="body2" sx={{ flex: 1, fontFamily: 'monospace' }}>
+                {member.userId}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {member.status}
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: 110 }}>
+                <Select<string>
+                  value={member.role}
+                  disabled={busyUserId === member.userId}
+                  onChange={(event) =>
+                    handleChangeRole(member.userId, event.target.value as (typeof ROLES)[number])
+                  }
+                >
+                  {ROLES.map((role) => (
+                    <MenuItem key={role} value={role}>
+                      {role}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <IconButton
+                aria-label={`Remove ${member.userId}`}
+                size="small"
+                disabled={busyUserId === member.userId}
+                onClick={() => handleRemove(member.userId)}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Stack>
+          ))}
+          {members.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              No organisation-level members yet.
+            </Typography>
+          )}
+        </Stack>
+      )}
+
+      <Stack component="form" direction="row" spacing={1} alignItems="center" onSubmit={handleAdd}>
+        <TextField
+          label="Principal ID"
+          size="small"
+          value={newUserId}
+          onChange={(event) => setNewUserId(event.target.value)}
+          helperText="No user directory exists — add by exact principal id."
+          sx={{ minWidth: 260 }}
+        />
+        <FormControl size="small" sx={{ minWidth: 110 }}>
+          <Select<string>
+            value={newRole}
+            onChange={(event) => setNewRole(event.target.value as (typeof ROLES)[number])}
+          >
+            {ROLES.map((role) => (
+              <MenuItem key={role} value={role}>
+                {role}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <Button
+          type="submit"
+          variant="outlined"
+          size="small"
+          disabled={adding || !newUserId.trim()}
+        >
+          {adding ? 'Adding…' : 'Add member'}
+        </Button>
+      </Stack>
+    </Box>
   );
 }
 
@@ -57,6 +239,7 @@ function OrganisationRow({
   onSaved: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
   const [name, setName] = useState(currentName);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +267,16 @@ function OrganisationRow({
         <ListItemText primary={`${currentName} (${slug})`} sx={{ flex: 1 }} />
         <StatusChip status={status} />
         <IconButton
+          aria-label={`Members of ${currentName}`}
+          size="small"
+          onClick={(event) => {
+            event.stopPropagation();
+            setMembersOpen((current) => !current);
+          }}
+        >
+          <PeopleIcon fontSize="small" />
+        </IconButton>
+        <IconButton
           aria-label={`Settings for ${currentName}`}
           size="small"
           onClick={(event) => {
@@ -94,6 +287,9 @@ function OrganisationRow({
           <SettingsIcon fontSize="small" />
         </IconButton>
       </ListItemButton>
+      <Collapse in={membersOpen} unmountOnExit>
+        <MembersPanel organisationId={organisationId} />
+      </Collapse>
       <Collapse in={open} unmountOnExit>
         <Box
           component="form"

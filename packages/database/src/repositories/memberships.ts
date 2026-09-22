@@ -55,6 +55,16 @@ export function createMembershipRepository(db: QueryExecutor): MembershipReposit
       return rows.map(toDomain);
     },
 
+    async listForOrganisation(organisationId) {
+      const rows = await db
+        .selectFrom('memberships')
+        .selectAll()
+        .where('organisation_id', '=', organisationId)
+        .where('project_id', 'is', null)
+        .execute();
+      return rows.map(toDomain);
+    },
+
     async create(membership) {
       await db
         .insertInto('memberships')

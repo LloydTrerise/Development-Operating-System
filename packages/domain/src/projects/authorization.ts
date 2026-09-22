@@ -39,3 +39,10 @@ export function canPublishAgent(role: MembershipRole): boolean {
 export function canPublishWorkflow(role: MembershipRole): boolean {
   return role === 'OWNER';
 }
+
+/** DEVOS-256: enabling/disabling a tool capability is a consequential,
+ * project-wide action (it changes what every agent/workflow in the project
+ * may invoke) — same OWNER-only bar as every other action in this file. */
+export function canManageToolCapabilities(role: MembershipRole): boolean {
+  return role === 'OWNER';
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  getProjectSystemHealth,
   listApprovalsForProject,
   listArtifacts,
   listAuditRecordsForProject,
@@ -10,6 +11,7 @@ import {
   RUN_TERMINAL_STATUSES,
   type Approval,
   type AuditRecord,
+  type SystemHealth,
   type WorkflowRun,
 } from '../../api-client.js';
 
@@ -24,6 +26,10 @@ export interface HomeDashboardData {
    * "health" signal that exists (no connectivity check anywhere in this
    * codebase). Tolerant of a failed fetch, like every other tile source. */
   activeIntegrationCount: number;
+  /** DEVOS-259: real aggregated integration/capability counts plus
+   * database connectivity (DEVOS-258). `null` while loading or on a failed
+   * fetch — tolerant, like every other tile source. */
+  systemHealth: SystemHealth | null;
   pendingApprovals: Approval[];
   activeRuns: ActiveRun[];
   recentActivity: AuditRecord[];
@@ -45,6 +51,7 @@ export function useHomeDashboardData(projectId: string | null): HomeDashboardDat
   const [workItemCount, setWorkItemCount] = useState(0);
   const [artifactCount, setArtifactCount] = useState(0);
   const [activeIntegrationCount, setActiveIntegrationCount] = useState(0);
+  const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<Approval[]>([]);
   const [activeRuns, setActiveRuns] = useState<ActiveRun[]>([]);
   const [recentActivity, setRecentActivity] = useState<AuditRecord[]>([]);
@@ -56,6 +63,7 @@ export function useHomeDashboardData(projectId: string | null): HomeDashboardDat
       setWorkItemCount(0);
       setArtifactCount(0);
       setActiveIntegrationCount(0);
+      setSystemHealth(null);
       setPendingApprovals([]);
       setActiveRuns([]);
       setRecentActivity([]);
@@ -73,62 +81,72 @@ export function useHomeDashboardData(projectId: string | null): HomeDashboardDat
       listAuditRecordsForProject(projectId),
       listWorkflows(projectId),
       listIntegrations(projectId),
-    ]).then(async ([
-      workItemsResult,
-      approvalsResult,
-      artifactsResult,
-      auditResult,
-      workflowsResult,
-      integrationsResult,
-    ]) => {
-      if (cancelled) return;
-
-      if (!workItemsResult.ok) {
-        setError(workItemsResult.error.message);
-        setLoading(false);
-        return;
-      }
-      setWorkItemCount(workItemsResult.data.length);
-
-      if (approvalsResult.ok) {
-        setPendingApprovals(approvalsResult.data.filter((approval) => approval.status === 'PENDING'));
-      }
-
-      if (artifactsResult.ok) {
-        setArtifactCount(artifactsResult.data.length);
-      }
-
-      if (integrationsResult.ok) {
-        setActiveIntegrationCount(
-          integrationsResult.data.filter((integration) => integration.status === 'ACTIVE').length,
-        );
-      }
-
-      if (auditResult.ok) {
-        const sorted = [...auditResult.data].sort(
-          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-        );
-        setRecentActivity(sorted.slice(0, RECENT_ACTIVITY_LIMIT));
-      }
-
-      if (workflowsResult.ok) {
-        const runsByDefinition = await Promise.all(
-          workflowsResult.data.map(async (workflow) => {
-            const result = await listWorkflowRunsForDefinition(workflow.id);
-            if (!result.ok) return [];
-            return result.data.map((run): ActiveRun => ({ ...run, workflowName: workflow.name }));
-          }),
-        );
+      getProjectSystemHealth(projectId),
+    ]).then(
+      async ([
+        workItemsResult,
+        approvalsResult,
+        artifactsResult,
+        auditResult,
+        workflowsResult,
+        integrationsResult,
+        systemHealthResult,
+      ]) => {
         if (cancelled) return;
-        const inProgress = runsByDefinition
-          .flat()
-          .filter((run) => !RUN_TERMINAL_STATUSES.has(run.status))
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setActiveRuns(inProgress);
-      }
 
-      setLoading(false);
-    });
+        if (!workItemsResult.ok) {
+          setError(workItemsResult.error.message);
+          setLoading(false);
+          return;
+        }
+        setWorkItemCount(workItemsResult.data.length);
+
+        if (approvalsResult.ok) {
+          setPendingApprovals(
+            approvalsResult.data.filter((approval) => approval.status === 'PENDING'),
+          );
+        }
+
+        if (artifactsResult.ok) {
+          setArtifactCount(artifactsResult.data.length);
+        }
+
+        if (integrationsResult.ok) {
+          setActiveIntegrationCount(
+            integrationsResult.data.filter((integration) => integration.status === 'ACTIVE').length,
+          );
+        }
+
+        if (systemHealthResult.ok) {
+          setSystemHealth(systemHealthResult.data);
+        }
+
+        if (auditResult.ok) {
+          const sorted = [...auditResult.data].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          );
+          setRecentActivity(sorted.slice(0, RECENT_ACTIVITY_LIMIT));
+        }
+
+        if (workflowsResult.ok) {
+          const runsByDefinition = await Promise.all(
+            workflowsResult.data.map(async (workflow) => {
+              const result = await listWorkflowRunsForDefinition(workflow.id);
+              if (!result.ok) return [];
+              return result.data.map((run): ActiveRun => ({ ...run, workflowName: workflow.name }));
+            }),
+          );
+          if (cancelled) return;
+          const inProgress = runsByDefinition
+            .flat()
+            .filter((run) => !RUN_TERMINAL_STATUSES.has(run.status))
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setActiveRuns(inProgress);
+        }
+
+        setLoading(false);
+      },
+    );
 
     return () => {
       cancelled = true;
@@ -139,6 +157,7 @@ export function useHomeDashboardData(projectId: string | null): HomeDashboardDat
     workItemCount,
     artifactCount,
     activeIntegrationCount,
+    systemHealth,
     pendingApprovals,
     activeRuns,
     recentActivity,
