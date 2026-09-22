@@ -22,16 +22,16 @@ import {
   updateDraftWorkflow,
   type WorkflowDefinitionSummary,
   type WorkflowVersionDto,
-} from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { LoadingState } from '../components/LoadingState.js';
-import { WorkflowCanvas } from '../components/WorkflowCanvas.js';
-import { WorkflowNodeInspector } from '../components/WorkflowNodeInspector.js';
-import { WorkflowPalette } from '../components/WorkflowPalette.js';
-import { WorkflowPathPreview } from '../components/WorkflowPathPreview.js';
-import { WorkflowVersionDiffView } from '../components/WorkflowVersionDiffView.js';
-import { useProjectContext } from '../project-context.js';
-import { useWorkflowGraphValidation, type ValidatableGraph } from '../workflow-graph-validation.js';
+} from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { LoadingState } from '../../components/LoadingState.js';
+import { WorkflowCanvas } from '../../components/WorkflowCanvas.js';
+import { WorkflowNodeInspector } from '../../components/WorkflowNodeInspector.js';
+import { WorkflowPalette } from '../../components/WorkflowPalette.js';
+import { WorkflowPathPreview } from '../../components/WorkflowPathPreview.js';
+import { WorkflowVersionDiffView } from '../../components/WorkflowVersionDiffView.js';
+import { useProjectContext } from '../../project-context.js';
+import { useWorkflowGraphValidation, type ValidatableGraph } from '../../workflow-graph-validation.js';
 
 /**
  * DEVOS-136 (Sprint 14): the other half of `specs/architecture/organisations-and-project-types.md`

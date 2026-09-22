@@ -33,11 +33,11 @@ import {
   type WorkflowDefinitionSummary,
   type WorkflowRun,
   type WorkflowVersionDto,
-} from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { LoadingState } from '../components/LoadingState.js';
-import { StatusChip } from '../components/StatusChip.js';
-import { useProjectContext } from '../project-context.js';
+} from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { LoadingState } from '../../components/LoadingState.js';
+import { StatusChip } from '../../components/StatusChip.js';
+import { useProjectContext } from '../../project-context.js';
 
 interface LibraryRow {
   project: Project;

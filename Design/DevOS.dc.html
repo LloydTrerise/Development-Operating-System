@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="nocturne.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+<style>
+  :root {
+    --color-surface-2: #2b2e3d;
+    --color-surface-3: #33364a;
+    --color-hairline: #3f424d;
+    --color-accent-ui: var(--color-accent);
+    --color-accent-soft: #2b2741;
+    --st-ok: oklch(0.80 0.115 152);
+    --st-run: oklch(0.80 0.115 245);
+    --st-warn: oklch(0.84 0.125 78);
+    --st-fail: oklch(0.79 0.145 25);
+    --st-ok-bg: oklch(0.70 0.115 152 / 0.14);
+    --st-run-bg: oklch(0.70 0.115 245 / 0.14);
+    --st-warn-bg: oklch(0.74 0.125 78 / 0.14);
+    --st-fail-bg: oklch(0.68 0.145 25 / 0.14);
+    --st-idle: var(--color-neutral-400);
+    --st-idle-bg: rgba(147,151,171,0.14);
+    --text-muted: var(--color-neutral-400);
+    --text-dim: var(--color-neutral-400);
+    --color-accent-on-soft: var(--color-accent-300);
+    --st-on-solid: var(--color-neutral-900);
+  }
+  [data-mode="light"] {
+    --color-bg: #e9ecf7;
+    --color-surface: #f8f9fe;
+    --color-surface-2: #f3f5fe;
+    --color-surface-3: #e4e7f5;
+    --color-hairline: #cfd3e5;
+    --color-text: #292b31;
+    --color-divider: color-mix(in srgb, #292b31 16%, transparent);
+    --color-accent-ui: #5d5294;
+    --color-accent-soft: #e7e5fe;
+    --st-ok: oklch(0.48 0.115 152);
+    --st-run: oklch(0.48 0.115 245);
+    --st-warn: oklch(0.46 0.125 68);
+    --st-fail: oklch(0.50 0.165 25);
+    --st-ok-bg: oklch(0.48 0.115 152 / 0.12);
+    --st-run-bg: oklch(0.48 0.115 245 / 0.12);
+    --st-warn-bg: oklch(0.52 0.125 68 / 0.12);
+    --st-fail-bg: oklch(0.50 0.165 25 / 0.12);
+    --st-idle: #595d6c;
+    --st-idle-bg: rgba(89,93,108,0.10);
+    --text-muted: var(--color-neutral-800);
+    --text-dim: var(--color-neutral-700);
+    --color-accent-on-soft: var(--color-accent-800);
+    --st-on-solid: var(--color-neutral-100);
+    --shadow-sm: 0 0 0 1px #cfd3e5;
+    --shadow-md: 0 0 0 1px #cfd3e5, 0 6px 18px rgba(41,43,49,0.10);
+    --shadow-lg: 0 0 0 1px #b2b6ca, 0 16px 40px rgba(41,43,49,0.16);
+  }
+  body { margin: 0; background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); }
+  a { color: var(--color-accent-ui); text-decoration: none; }
+  a:hover { color: var(--color-accent); text-decoration: underline; }
+  * { scrollbar-width: thin; scrollbar-color: var(--color-hairline) transparent; }
+  @keyframes devos-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }
+</style>
+</helmet>
+
+<div data-mode="{{ mode }}" style="display:flex; flexDirection:column; height:100vh; minHeight:100vh; background:var(--color-bg); color:var(--color-text); fontFamily:var(--font-body); fontSize:13.5px; overflow:hidden">
+
+  <header style="display:flex; alignItems:center; gap:14px; height:52px; flex:none; padding:0 14px; background:var(--color-surface); borderBottom:1px solid var(--color-hairline)">
+    <div style="display:flex; alignItems:center; gap:8px; width:204px; flex:none">
+      <span style="display:grid; placeItems:center; width:22px; height:22px; borderRadius:6px; border:1px solid var(--color-accent-ui); color:var(--color-accent-ui); fontSize:12px"><i class="ph-fill ph-cube"></i></span>
+      <span style="fontFamily:var(--font-heading); fontWeight:500; fontSize:15px; letterSpacing:-0.01em">DevOS</span>
+    </div>
+
+    <button style="display:flex; alignItems:center; gap:7px; height:30px; padding:0 10px; background:var(--color-surface-2); color:var(--color-text); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); fontFamily:inherit; fontSize:12.5px; cursor:pointer" style-hover="background:var(--color-surface-3)">
+      <i class="ph ph-folder-open" style="fontSize:14px; color:var(--color-accent-ui)"></i>
+      <span>DevOS POC</span>
+      <i class="ph ph-caret-up-down" style="fontSize:12px; opacity:0.6"></i>
+    </button>
+
+    <div style="display:flex; alignItems:center; gap:8px; flex:1; minWidth:200px; maxWidth:420px; height:30px; padding:0 10px; background:var(--color-surface-2); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); color:var(--text-dim); fontSize:12.5px; cursor:text" style-hover="border-color:var(--text-dim)">
+      <i class="ph ph-magnifying-glass" style="fontSize:14px"></i>
+      <span style="flex:1; minWidth:0; whiteSpace:nowrap; overflow:hidden; textOverflow:ellipsis">Search work, runs, artifacts, agents…</span>
+      <kbd style="fontFamily:var(--font-body); fontSize:10.5px; padding:1px 5px; borderRadius:4px; border:1px solid var(--color-hairline)">⌘K</kbd>
+    </div>
+
+    <div style="flex:1"></div>
+
+    <div style="display:flex; alignItems:center; gap:6px; height:26px; padding:0 9px; borderRadius:99px; background:var(--st-run-bg); color:var(--st-run); fontSize:11.5px">
+      <i class="ph-fill ph-circle" style="fontSize:8px; animation:devos-pulse 1.8s ease-in-out infinite"></i>
+      <span>Agent running</span>
+    </div>
+
+    <button onClick="{{ toggleMode }}" style="display:grid; placeItems:center; width:30px; height:30px; background:transparent; color:var(--color-text); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); cursor:pointer; fontSize:14px" style-hover="background:var(--color-surface-2)" aria-label="Toggle colour mode"><i class="ph ph-circle-half-tilt"></i></button>
+
+    <button style="position:relative; display:grid; placeItems:center; width:30px; height:30px; background:transparent; color:var(--color-text); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); cursor:pointer; fontSize:14px" style-hover="background:var(--color-surface-2)" aria-label="Notifications">
+      <i class="ph ph-bell"></i>
+      <span style="position:absolute; top:-3px; right:-3px; minWidth:15px; height:15px; padding:0 4px; borderRadius:99px; background:var(--st-fail); color:var(--st-on-solid); fontWeight:600; fontSize:11px; lineHeight:15px; textAlign:center">3</span>
+    </button>
+
+    <div style="display:flex; alignItems:center; gap:8px; paddingLeft:6px; borderLeft:1px solid var(--color-hairline)">
+      <span style="display:grid; placeItems:center; width:26px; height:26px; borderRadius:99px; background:var(--color-accent-soft); color:var(--color-accent-on-soft); fontSize:11px; fontWeight:500">RA</span>
+      <span style="fontSize:12px; color:var(--text-muted)">R. Aldridge</span>
+    </div>
+  </header>
+
+  <div style="display:flex; flex:1; minHeight:0">
+
+    <nav style="width:204px; flex:none; display:flex; flexDirection:column; background:var(--color-surface); borderRight:1px solid var(--color-hairline); overflow:auto">
+      <div style="padding:10px 8px 14px">
+        <sc-for list="{{ navGroups }}" as="group" hint-placeholder-count="5">
+          <div style="marginBottom:12px">
+            <div style="padding:4px 10px 5px; fontSize:11px; letterSpacing:0.11em; textTransform:uppercase; color:var(--text-dim)">{{ group.label }}</div>
+            <sc-for list="{{ group.items }}" as="item" hint-placeholder-count="3">
+              <a href="{{ item.href }}" onClick="{{ item.go }}" aria-current="{{ item.current }}" style="display:flex; alignItems:center; gap:9px; height:30px; padding:0 10px; borderRadius:var(--radius-sm); color:var(--color-text); fontSize:12.5px; cursor:pointer; textDecoration:none; background:{{ item.bg }}; boxShadow:{{ item.ring }}" style-hover="background:color-mix(in srgb, var(--color-text) 7%, transparent); text-decoration:none">
+                <i class="{{ item.icon }}" style="fontSize:15px; width:16px; opacity:0.85"></i>
+                <span style="flex:1">{{ item.label }}</span>
+                <sc-if value="{{ item.badge }}" hint-placeholder-val="{{ false }}">
+                  <span style="minWidth:17px; height:17px; padding:0 5px; borderRadius:99px; background:var(--st-warn); color:var(--st-on-solid); fontWeight:600; fontSize:10.5px; lineHeight:17px; textAlign:center">{{ item.badge }}</span>
+                </sc-if>
+              </a>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+      <div style="flex:1"></div>
+      <div style="padding:10px; borderTop:1px solid var(--color-hairline)">
+        <div style="display:flex; alignItems:center; gap:7px; fontSize:11px; color:var(--text-muted)">
+          <i class="ph-fill ph-circle" style="fontSize:7px; color:var(--st-ok)"></i>
+          <span>Control plane healthy</span>
+        </div>
+        <div style="fontSize:11px; marginTop:3px; color:var(--text-dim)">2 of 4 integrations degraded</div>
+      </div>
+    </nav>
+
+    <main style="flex:1; minWidth:0; display:flex; flexDirection:column; overflow:hidden">
+
+      <div style="display:flex; alignItems:center; gap:10px; height:38px; flex:none; padding:0 18px; borderBottom:1px solid var(--color-hairline); background:var(--color-bg); fontSize:12px; color:var(--text-muted)">
+        <sc-for list="{{ crumbs }}" as="c" hint-placeholder-count="3">
+          <span style="display:flex; alignItems:center; gap:10px">
+            <span style="color:{{ c.color }}">{{ c.label }}</span>
+            <sc-if value="{{ c.sep }}" hint-placeholder-val="{{ true }}"><i class="ph ph-caret-right" style="fontSize:10.5px; opacity:0.5"></i></sc-if>
+          </span>
+        </sc-for>
+        <div style="flex:1"></div>
+        <span style="fontSize:11px">Updated 4s ago · live</span>
+      </div>
+
+      <div style="flex:1; overflow:auto; padding:18px">
+
+        <!-- ── HOME ────────────────────────────────────────────── -->
+        <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+          <div style="maxWidth:1180px">
+            <div style="display:flex; alignItems:flex-end; gap:16px; marginBottom:16px">
+              <div>
+                <h1 style="margin:0; fontSize:24px; fontWeight:500; letterSpacing:-0.015em">DevOS POC</h1>
+                <p style="margin:3px 0 0; fontSize:12.5px; color:var(--text-muted)">3 changes in flight · 1 decision waiting on you</p>
+              </div>
+              <div style="flex:1"></div>
+              <div style="display:flex; gap:8px">
+                <button style="display:flex; alignItems:center; gap:7px; height:32px; padding:0 12px; background:transparent; color:var(--color-accent-ui); border:1px solid var(--color-accent-ui); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12.5px; cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-accent) 12%, transparent)"><i class="ph ph-play"></i>Start workflow</button>
+                <button style="display:flex; alignItems:center; gap:7px; height:32px; padding:0 12px; background:transparent; color:var(--color-text); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12.5px; cursor:pointer" style-hover="background:var(--color-surface-2)"><i class="ph ph-plus"></i>New work item</button>
+              </div>
+            </div>
+
+            <div style="display:grid; gridTemplateColumns:repeat(4, 1fr); gap:12px; marginBottom:14px">
+              <sc-for list="{{ pulse }}" as="k" hint-placeholder-count="4">
+                <div style="padding:12px 14px; background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm)">
+                  <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim)">{{ k.label }}</div>
+                  <div style="display:flex; alignItems:baseline; gap:7px; marginTop:6px">
+                    <span style="fontFamily:var(--font-heading); fontWeight:500; fontSize:25px; letterSpacing:-0.02em">{{ k.value }}</span>
+                    <span style="fontSize:11.5px; color:{{ k.deltaColor }}">{{ k.delta }}</span>
+                  </div>
+                  <div style="fontSize:11px; marginTop:2px; color:var(--text-dim)">{{ k.note }}</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="display:grid; gridTemplateColumns:minmax(0,1.55fr) minmax(0,1fr); gap:14px">
+              <div style="display:flex; flexDirection:column; gap:14px">
+
+                <section style="background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm)">
+                  <div style="display:flex; alignItems:center; gap:9px; padding:11px 14px; borderBottom:1px solid var(--color-hairline)">
+                    <i class="ph-fill ph-warning-diamond" style="fontSize:14px; color:var(--st-warn)"></i>
+                    <h2 style="margin:0; fontSize:13px; fontWeight:500; flex:1">Needs attention</h2>
+                    <span style="fontSize:11px; color:var(--text-dim)">4 items</span>
+                  </div>
+                  <sc-for list="{{ attention }}" as="a" hint-placeholder-count="4">
+                    <div style="display:flex; alignItems:center; gap:11px; padding:10px 14px; borderTop:1px solid color-mix(in srgb, var(--color-text) 7%, transparent); cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+                      <span style="display:grid; placeItems:center; width:26px; height:26px; flex:none; borderRadius:var(--radius-sm); background:{{ a.tintBg }}; color:{{ a.tint }}; fontSize:14px"><i class="{{ a.icon }}"></i></span>
+                      <div style="flex:1; minWidth:0">
+                        <div style="fontSize:12.5px">{{ a.title }}</div>
+                        <div style="fontSize:11px; marginTop:1px; color:var(--text-dim)">{{ a.meta }}</div>
+                      </div>
+                      <span style="fontSize:10.5px; padding:2px 8px; borderRadius:99px; background:{{ a.tintBg }}; color:{{ a.tint }}">{{ a.tag }}</span>
+                      <span style="fontSize:11px; color:var(--text-dim); minWidth:52px; textAlign:right">{{ a.age }}</span>
+                    </div>
+                  </sc-for>
+                </section>
+
+                <section style="background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm)">
+                  <div style="display:flex; alignItems:center; gap:9px; padding:11px 14px; borderBottom:1px solid var(--color-hairline)">
+                    <i class="ph ph-flow-arrow" style="fontSize:14px; color:var(--color-accent-ui)"></i>
+                    <h2 style="margin:0; fontSize:13px; fontWeight:500; flex:1">Active work</h2>
+                    <a href="#runs" onClick="{{ goRuns }}" style="fontSize:11.5px">All runs</a>
+                  </div>
+                  <sc-for list="{{ activeRuns }}" as="r" hint-placeholder-count="3">
+                    <div style="padding:12px 14px; borderTop:1px solid color-mix(in srgb, var(--color-text) 7%, transparent); cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+                      <div style="display:flex; alignItems:center; gap:9px">
+                        <span style="fontSize:12.5px; flex:1">{{ r.title }}</span>
+                        <span style="display:inline-flex; alignItems:center; gap:5px; fontSize:10.5px; padding:2px 8px; borderRadius:99px; background:{{ r.tintBg }}; color:{{ r.tint }}"><i class="{{ r.icon }}" style="fontSize:9px"></i>{{ r.status }}</span>
+                        <span style="fontSize:11px; color:var(--text-dim)">{{ r.elapsed }}</span>
+                      </div>
+                      <div style="display:flex; alignItems:center; gap:3px; marginTop:9px">
+                        <sc-for list="{{ r.stages }}" as="s" hint-placeholder-count="10">
+                          <span title="{{ s.name }}" style="flex:1; height:4px; borderRadius:2px; background:{{ s.color }}"></span>
+                        </sc-for>
+                      </div>
+                      <div style="display:flex; alignItems:center; gap:6px; marginTop:6px; fontSize:11px; color:var(--text-dim)">
+                        <span>{{ r.workflow }}</span><span style="opacity:0.5">·</span><span>now: {{ r.current }}</span>
+                      </div>
+                    </div>
+                  </sc-for>
+                </section>
+              </div>
+
+              <div style="display:flex; flexDirection:column; gap:14px">
+                <section style="background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm)">
+                  <div style="display:flex; alignItems:center; gap:9px; padding:11px 14px; borderBottom:1px solid var(--color-hairline)">
+                    <i class="ph ph-clock-counter-clockwise" style="fontSize:14px; color:var(--color-accent-ui)"></i>
+                    <h2 style="margin:0; fontSize:13px; fontWeight:500">Recent activity</h2>
+                  </div>
+                  <div style="padding:12px 14px">
+                    <sc-for list="{{ activity }}" as="e" hint-placeholder-count="6">
+                      <div style="display:flex; gap:10px">
+                        <div style="display:flex; flexDirection:column; alignItems:center; width:14px; flex:none">
+                          <i class="{{ e.icon }}" style="fontSize:12px; color:{{ e.tint }}; marginTop:2px"></i>
+                          <span style="flex:1; width:1px; background:var(--color-hairline); marginTop:4px"></span>
+                        </div>
+                        <div style="paddingBottom:13px; minWidth:0">
+                          <div style="fontSize:12px; textWrap:pretty">{{ e.text }}</div>
+                          <div style="fontSize:10.5px; marginTop:2px; color:var(--text-dim)">{{ e.meta }}</div>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </section>
+
+                <section style="background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm)">
+                  <div style="display:flex; alignItems:center; gap:9px; padding:11px 14px; borderBottom:1px solid var(--color-hairline)">
+                    <i class="ph ph-plugs-connected" style="fontSize:14px; color:var(--color-accent-ui)"></i>
+                    <h2 style="margin:0; fontSize:13px; fontWeight:500; flex:1">System health</h2>
+                  </div>
+                  <sc-for list="{{ health }}" as="h" hint-placeholder-count="4">
+                    <div style="display:flex; alignItems:center; gap:10px; padding:9px 14px; borderTop:1px solid color-mix(in srgb, var(--color-text) 7%, transparent)">
+                      <i class="{{ h.icon }}" style="fontSize:14px; opacity:0.8; width:16px"></i>
+                      <span style="flex:1; fontSize:12px">{{ h.name }}</span>
+                      <span style="display:inline-flex; alignItems:center; gap:5px; fontSize:10.5px; color:{{ h.tint }}"><i class="ph-fill ph-circle" style="fontSize:7px"></i>{{ h.state }}</span>
+                    </div>
+                  </sc-for>
+                </section>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ── RUNS: split pane ────────────────────────────────── -->
+        <sc-if value="{{ isRuns }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex; flexDirection:column; gap:12px; height:100%; minHeight:0">
+
+            <div style="flex:none; padding:14px 16px; background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm)">
+              <div style="display:flex; alignItems:center; gap:12px">
+                <div style="minWidth:0">
+                  <div style="display:flex; alignItems:center; gap:9px">
+                    <h1 style="margin:0; fontSize:18px; fontWeight:500; letterSpacing:-0.01em">Add release readiness gate</h1>
+                    <span style="display:inline-flex; alignItems:center; gap:5px; fontSize:11px; padding:3px 9px; borderRadius:99px; background:var(--st-run-bg); color:var(--st-run)"><i class="ph-fill ph-circle" style="fontSize:8px; animation:devos-pulse 1.8s ease-in-out infinite"></i>RUNNING</span>
+                  </div>
+                  <div style="display:flex; alignItems:center; gap:8px; marginTop:5px; fontSize:11.5px; color:var(--text-muted)">
+                    <span>Development Path v4</span><span style="opacity:0.5">·</span>
+                    <span>started by R. Aldridge</span><span style="opacity:0.5">·</span>
+                    <span>elapsed 6m 12s</span><span style="opacity:0.5">·</span>
+                    <code style="fontFamily:monospace; fontSize:11px">3f2b91c4</code>
+                  </div>
+                </div>
+                <div style="flex:1"></div>
+                <div style="display:flex; gap:7px">
+                  <button style="display:flex; alignItems:center; gap:6px; height:30px; padding:0 11px; background:transparent; color:var(--color-text); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12px; cursor:pointer" style-hover="background:var(--color-surface-2)"><i class="ph ph-pause"></i>Pause</button>
+                  <button style="display:flex; alignItems:center; gap:6px; height:30px; padding:0 11px; background:transparent; color:var(--color-text); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12px; cursor:pointer" style-hover="background:var(--color-surface-2)"><i class="ph ph-arrow-counter-clockwise"></i>Retry task</button>
+                  <button style="display:flex; alignItems:center; gap:6px; height:30px; padding:0 11px; background:transparent; color:var(--st-fail); border:1px solid color-mix(in srgb, var(--st-fail) 55%, transparent); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12px; cursor:pointer" style-hover="background:var(--st-fail-bg)"><i class="ph ph-x-circle"></i>Cancel run</button>
+                </div>
+              </div>
+
+              <div style="display:flex; alignItems:flex-start; gap:0; marginTop:16px; overflowX:auto">
+                <sc-for list="{{ pipeline }}" as="s" hint-placeholder-count="10">
+                  <div style="display:flex; alignItems:flex-start; flex:1; minWidth:0">
+                    <div style="display:flex; flexDirection:column; alignItems:center; gap:6px; flex:none; width:100%">
+                      <div style="display:flex; alignItems:center; width:100%">
+                        <span style="flex:1; height:1px; background:{{ s.leftLine }}"></span>
+                        <span title="{{ s.state }}" style="display:grid; placeItems:center; width:22px; height:22px; flex:none; borderRadius:99px; background:{{ s.dotBg }}; color:{{ s.dotFg }}; boxShadow:{{ s.dotRing }}; fontSize:11px"><i class="{{ s.icon }}"></i></span>
+                        <span style="flex:1; height:1px; background:{{ s.rightLine }}"></span>
+                      </div>
+                      <div style="fontSize:10.5px; textAlign:center; color:{{ s.labelColor }}; lineHeight:1.25">{{ s.name }}</div>
+                      <div style="fontSize:11px; textAlign:center; color:var(--text-dim)">{{ s.note }}</div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="display:grid; gridTemplateColumns:minmax(300px, 360px) minmax(0,1fr); gap:12px; flex:1; minHeight:0">
+
+              <section style="display:flex; flexDirection:column; minHeight:0; background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm); overflow:hidden">
+                <div style="display:flex; alignItems:center; gap:9px; padding:10px 13px; borderBottom:1px solid var(--color-hairline); flex:none">
+                  <h2 style="margin:0; fontSize:12.5px; fontWeight:500; flex:1">Tasks</h2>
+                  <span style="fontSize:10.5px; color:var(--text-dim)">9 total · 1 running</span>
+                </div>
+                <div style="flex:1; overflow:auto">
+                  <sc-for list="{{ taskList }}" as="t" hint-placeholder-count="9">
+                    <div onClick="{{ t.select }}" style="display:flex; gap:10px; padding:10px 13px; borderTop:1px solid color-mix(in srgb, var(--color-text) 7%, transparent); cursor:pointer; background:{{ t.bg }}; boxShadow:{{ t.ring }}" style-hover="background:color-mix(in srgb, var(--color-text) 5%, transparent)">
+                      <span style="display:grid; placeItems:center; width:20px; height:20px; flex:none; marginTop:1px; borderRadius:99px; background:{{ t.tintBg }}; color:{{ t.tint }}; fontSize:10px"><i class="{{ t.icon }}"></i></span>
+                      <div style="flex:1; minWidth:0">
+                        <div style="display:flex; alignItems:baseline; gap:7px">
+                          <span style="fontSize:12.5px; flex:1; whiteSpace:nowrap; overflow:hidden; textOverflow:ellipsis">{{ t.name }}</span>
+                          <span style="fontSize:10.5px; color:var(--text-dim)">{{ t.duration }}</span>
+                        </div>
+                        <div style="display:flex; alignItems:center; gap:6px; marginTop:2px; fontSize:10.5px; color:var(--text-dim)">
+                          <span>{{ t.kind }}</span>
+                          <sc-if value="{{ t.agent }}" hint-placeholder-val="{{ true }}"><span style="opacity:0.5">·</span><span>{{ t.agent }}</span></sc-if>
+                        </div>
+                        <sc-if value="{{ t.flag }}" hint-placeholder-val="{{ false }}">
+                          <div style="display:inline-flex; alignItems:center; gap:5px; marginTop:5px; fontSize:10.5px; padding:2px 7px; borderRadius:99px; background:{{ t.tintBg }}; color:{{ t.tint }}"><i class="{{ t.flagIcon }}" style="fontSize:9px"></i>{{ t.flag }}</div>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </section>
+
+              <section style="display:flex; flexDirection:column; minHeight:0; background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm); overflow:hidden">
+                <div style="display:flex; alignItems:center; gap:10px; padding:11px 15px; borderBottom:1px solid var(--color-hairline); flex:none">
+                  <div style="minWidth:0">
+                    <div style="display:flex; alignItems:center; gap:8px">
+                      <h2 style="margin:0; fontSize:14px; fontWeight:500">automated_validation</h2>
+                      <span style="display:inline-flex; alignItems:center; gap:5px; fontSize:10.5px; padding:2px 8px; borderRadius:99px; background:var(--st-run-bg); color:var(--st-run)"><i class="ph-fill ph-circle" style="fontSize:8px; animation:devos-pulse 1.8s ease-in-out infinite"></i>RUNNING</span>
+                      <span style="fontSize:10.5px; padding:2px 8px; borderRadius:99px; background:var(--st-idle-bg); color:var(--st-idle)">attempt 2 of 3</span>
+                    </div>
+                    <div style="fontSize:11.5px; marginTop:4px; color:var(--text-muted)">TASK · started 14:18:02 · elapsed 1m 47s</div>
+                  </div>
+                  <div style="flex:1"></div>
+                  <button style="display:flex; alignItems:center; gap:6px; height:28px; padding:0 10px; background:transparent; color:var(--color-accent-ui); border:1px solid var(--color-accent-ui); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:11.5px; cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-accent) 12%, transparent)"><i class="ph ph-link-simple"></i>Copy deep link</button>
+                </div>
+
+                <div style="flex:none; display:flex; gap:2px; padding:0 15px; borderBottom:1px solid var(--color-hairline)">
+                  <sc-for list="{{ detailTabs }}" as="tab" hint-placeholder-count="5">
+                    <span style="padding:8px 11px; fontSize:12px; cursor:pointer; color:{{ tab.color }}; boxShadow:{{ tab.underline }}">{{ tab.label }}</span>
+                  </sc-for>
+                </div>
+
+                <div style="flex:1; overflow:auto; padding:15px">
+                  <div style="display:grid; gridTemplateColumns:minmax(0,1fr) minmax(0,1fr); gap:14px">
+
+                    <div style="gridColumn:1 / -1; padding:11px 13px; borderRadius:var(--radius-md); background:var(--st-warn-bg); display:flex; gap:11px; alignItems:flex-start">
+                      <i class="ph-fill ph-warning" style="fontSize:15px; color:var(--st-warn); marginTop:1px"></i>
+                      <div>
+                        <div style="fontSize:12.5px; color:var(--color-text)">First attempt failed on a transient CI timeout. DevOS retried automatically under <code style="fontFamily:monospace; fontSize:11.5px">retry.transient_ci</code>.</div>
+                        <div style="fontSize:11px; marginTop:3px; color:var(--text-muted)">Transient failure · no external state changed · retry 2 of 3 in progress</div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim); marginBottom:7px">Purpose</div>
+                      <p style="margin:0; fontSize:12.5px; lineHeight:1.5; textWrap:pretty">Run the build and the full test suite against the branch produced by the development task, and record the result as test evidence for the release gate.</p>
+                    </div>
+
+                    <div>
+                      <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim); marginBottom:7px">Inputs</div>
+                      <sc-for list="{{ taskInputs }}" as="i" hint-placeholder-count="3">
+                        <div style="display:flex; alignItems:center; gap:8px; padding:5px 0; borderBottom:1px solid color-mix(in srgb, var(--color-text) 7%, transparent)">
+                          <i class="{{ i.icon }}" style="fontSize:13px; opacity:0.7; width:15px"></i>
+                          <span style="flex:1; fontSize:12px">{{ i.name }}</span>
+                          <span style="fontSize:10.5px; padding:1px 7px; borderRadius:99px; background:var(--st-idle-bg); color:var(--st-idle)">{{ i.kind }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+
+                    <div style="gridColumn:1 / -1">
+                      <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim); marginBottom:7px">Tool activity</div>
+                      <div style="borderRadius:var(--radius-md); overflow:hidden; boxShadow:0 0 0 1px var(--color-hairline)">
+                        <div style="display:grid; gridTemplateColumns:1.5fr 1.4fr 0.7fr 0.9fr 0.8fr 1fr; gap:10px; padding:7px 12px; background:var(--color-surface-2); fontSize:11px; letterSpacing:0.08em; textTransform:uppercase; color:var(--text-dim)">
+                          <span>Capability</span><span>Target</span><span>Risk</span><span>Approval</span><span>Duration</span><span>Provider ref</span>
+                        </div>
+                        <sc-for list="{{ toolActivity }}" as="t" hint-placeholder-count="4">
+                          <div style="display:grid; gridTemplateColumns:1.5fr 1.4fr 0.7fr 0.9fr 0.8fr 1fr; gap:10px; padding:9px 12px; borderTop:1px solid color-mix(in srgb, var(--color-text) 7%, transparent); fontSize:11.5px; alignItems:center" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+                            <span style="display:flex; alignItems:center; gap:7px; minWidth:0"><i class="{{ t.icon }}" style="fontSize:12px; color:{{ t.tint }}"></i><code style="fontFamily:monospace; fontSize:11px; whiteSpace:nowrap; overflow:hidden; textOverflow:ellipsis">{{ t.key }}</code></span>
+                            <span style="color:var(--text-muted); whiteSpace:nowrap; overflow:hidden; textOverflow:ellipsis">{{ t.target }}</span>
+                            <span style="fontSize:10.5px; padding:1px 7px; borderRadius:99px; background:{{ t.riskBg }}; color:{{ t.riskFg }}; justifySelf:start">{{ t.risk }}</span>
+                            <span style="fontSize:11px; color:var(--text-muted)">{{ t.approval }}</span>
+                            <span style="fontSize:11px; color:var(--text-muted)">{{ t.duration }}</span>
+                            <span style="display:flex; alignItems:center; gap:5px; minWidth:0"><span style="fontSize:11px; color:{{ t.tint }}; whiteSpace:nowrap; overflow:hidden; textOverflow:ellipsis">{{ t.ref }}</span></span>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim); marginBottom:7px">Validation</div>
+                      <sc-for list="{{ validation }}" as="v" hint-placeholder-count="4">
+                        <div style="display:flex; alignItems:center; gap:9px; padding:6px 0">
+                          <i class="{{ v.icon }}" style="fontSize:13px; color:{{ v.tint }}"></i>
+                          <span style="flex:1; fontSize:12px">{{ v.name }}</span>
+                          <span style="fontSize:11px; color:var(--text-muted)">{{ v.result }}</span>
+                        </div>
+                      </sc-for>
+                    </div>
+
+                    <div>
+                      <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim); marginBottom:7px">Policy</div>
+                      <div style="padding:11px 13px; borderRadius:var(--radius-md); background:var(--color-surface-2)">
+                        <sc-for list="{{ policyRows }}" as="p" hint-placeholder-count="3">
+                          <div style="display:flex; alignItems:center; gap:9px; padding:4px 0">
+                            <i class="{{ p.icon }}" style="fontSize:12px; color:{{ p.tint }}"></i>
+                            <code style="flex:1; fontFamily:monospace; fontSize:11px">{{ p.key }}</code>
+                            <span style="fontSize:10.5px; color:{{ p.tint }}">{{ p.outcome }}</span>
+                          </div>
+                        </sc-for>
+                        <div style="fontSize:11px; marginTop:7px; paddingTop:7px; borderTop:1px solid var(--color-hairline); color:var(--text-muted)">Deployment stays blocked until RELEASE_APPROVAL is granted by a reviewer outside the requesting agent.</div>
+                      </div>
+                    </div>
+
+                    <div style="gridColumn:1 / -1">
+                      <div style="display:flex; alignItems:center; gap:9px; marginBottom:7px">
+                        <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim)">Output</div>
+                        <span style="fontSize:10.5px; padding:1px 7px; borderRadius:99px; background:var(--st-idle-bg); color:var(--st-idle)">structured</span>
+                        <div style="flex:1"></div>
+                        <span style="fontSize:11px; color:var(--color-accent-ui); cursor:pointer">Show raw JSON</span>
+                      </div>
+                      <div style="display:grid; gridTemplateColumns:repeat(4, 1fr); gap:10px">
+                        <sc-for list="{{ outputStats }}" as="o" hint-placeholder-count="4">
+                          <div style="padding:10px 12px; borderRadius:var(--radius-md); background:var(--color-surface-2)">
+                            <div style="fontSize:10.5px; color:var(--text-dim)">{{ o.label }}</div>
+                            <div style="fontFamily:var(--font-heading); fontWeight:500; fontSize:17px; marginTop:3px; color:{{ o.tint }}">{{ o.value }}</div>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ── APPROVALS ───────────────────────────────────────── -->
+        <sc-if value="{{ isApprovals }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid; gridTemplateColumns:minmax(300px, 350px) minmax(0,1fr); gap:12px; height:100%; minHeight:0">
+
+            <section style="display:flex; flexDirection:column; minHeight:0; background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm); overflow:hidden">
+              <div style="flex:none; padding:12px 13px; borderBottom:1px solid var(--color-hairline)">
+                <h1 style="margin:0 0 9px; fontSize:15px; fontWeight:500">Approval centre</h1>
+                <div style="display:inline-flex; borderRadius:var(--radius-md); overflow:hidden; boxShadow:0 0 0 1px var(--color-hairline)">
+                  <sc-for list="{{ approvalFilters }}" as="f" hint-placeholder-count="3">
+                    <span style="padding:5px 11px; fontSize:11.5px; cursor:pointer; background:{{ f.bg }}; color:{{ f.color }}">{{ f.label }}</span>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="flex:1; overflow:auto">
+                <sc-for list="{{ approvalList }}" as="a" hint-placeholder-count="5">
+                  <div style="padding:11px 13px; borderTop:1px solid color-mix(in srgb, var(--color-text) 7%, transparent); cursor:pointer; background:{{ a.bg }}; boxShadow:{{ a.ring }}" style-hover="background:color-mix(in srgb, var(--color-text) 5%, transparent)">
+                    <div style="display:flex; alignItems:center; gap:8px">
+                      <span style="fontSize:10.5px; padding:2px 7px; borderRadius:99px; background:{{ a.riskBg }}; color:{{ a.riskFg }}">{{ a.risk }}</span>
+                      <span style="fontSize:12.5px; flex:1">{{ a.type }}</span>
+                      <span style="fontSize:10.5px; color:var(--text-dim)">{{ a.age }}</span>
+                    </div>
+                    <div style="fontSize:11.5px; marginTop:4px; color:var(--text-muted)">{{ a.subject }}</div>
+                    <div style="display:flex; alignItems:center; gap:6px; marginTop:5px; fontSize:10.5px; color:var(--text-dim)">
+                      <i class="{{ a.icon }}" style="fontSize:11px"></i><span>{{ a.requester }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </section>
+
+            <section style="display:flex; flexDirection:column; minHeight:0; background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm); overflow:hidden">
+              <div style="flex:none; padding:14px 16px; borderBottom:1px solid var(--color-hairline)">
+                <div style="display:flex; alignItems:center; gap:9px">
+                  <h2 style="margin:0; fontSize:16px; fontWeight:500">Release to production</h2>
+                  <span style="fontSize:10.5px; padding:2px 9px; borderRadius:99px; background:var(--st-fail-bg); color:var(--st-fail)">R3 · high risk</span>
+                  <span style="fontSize:10.5px; padding:2px 9px; borderRadius:99px; background:var(--st-warn-bg); color:var(--st-warn)">Awaiting your decision</span>
+                </div>
+                <div style="fontSize:11.5px; marginTop:5px; color:var(--text-muted)">Requested by Release Agent v2 on behalf of run <code style="fontFamily:monospace; fontSize:11px">3f2b91c4</code> · 14:26:41</div>
+              </div>
+
+              <div style="flex:1; overflow:auto; padding:16px">
+                <div style="padding:13px 15px; borderRadius:var(--radius-md); background:var(--color-accent-soft); marginBottom:16px">
+                  <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--color-accent-on-soft); marginBottom:6px">What will happen if you approve</div>
+                  <p style="margin:0; fontSize:13px; lineHeight:1.5; textWrap:pretty">Deploy build <code style="fontFamily:monospace; fontSize:12px">8821</code> from <code style="fontFamily:monospace; fontSize:12px">devos/devos@4f1c9ab</code> to <strong>production</strong>, then run the post-release health check. No further human gate follows this one.</p>
+                </div>
+
+                <div style="display:grid; gridTemplateColumns:repeat(3, 1fr); gap:12px; marginBottom:16px">
+                  <sc-for list="{{ approvalTarget }}" as="t" hint-placeholder-count="3">
+                    <div style="padding:11px 13px; borderRadius:var(--radius-md); background:var(--color-surface-2)">
+                      <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim)">{{ t.label }}</div>
+                      <div style="display:flex; alignItems:center; gap:7px; marginTop:6px">
+                        <i class="{{ t.icon }}" style="fontSize:14px; color:{{ t.tint }}"></i>
+                        <span style="fontSize:13px">{{ t.value }}</span>
+                      </div>
+                      <div style="fontSize:10.5px; marginTop:3px; color:var(--text-dim)">{{ t.note }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+
+                <div style="display:grid; gridTemplateColumns:minmax(0,1.2fr) minmax(0,1fr); gap:16px">
+                  <div>
+                    <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim); marginBottom:8px">Evidence</div>
+                    <sc-for list="{{ evidence }}" as="e" hint-placeholder-count="4">
+                      <div style="display:flex; alignItems:center; gap:10px; padding:9px 11px; marginBottom:7px; borderRadius:var(--radius-md); boxShadow:0 0 0 1px var(--color-hairline); cursor:pointer" style-hover="background:var(--color-surface-2)">
+                        <span style="display:grid; placeItems:center; width:24px; height:24px; flex:none; borderRadius:var(--radius-sm); background:{{ e.tintBg }}; color:{{ e.tint }}; fontSize:13px"><i class="{{ e.icon }}"></i></span>
+                        <div style="flex:1; minWidth:0">
+                          <div style="fontSize:12.5px">{{ e.name }}</div>
+                          <div style="fontSize:10.5px; color:var(--text-dim)">{{ e.meta }}</div>
+                        </div>
+                        <span style="fontSize:10.5px; color:{{ e.tint }}">{{ e.verdict }}</span>
+                        <i class="ph ph-arrow-square-out" style="fontSize:13px; opacity:0.45"></i>
+                      </div>
+                    </sc-for>
+                  </div>
+
+                  <div>
+                    <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim); marginBottom:8px">Why approval is required</div>
+                    <div style="padding:12px 13px; borderRadius:var(--radius-md); background:var(--color-surface-2); marginBottom:12px">
+                      <code style="fontFamily:monospace; fontSize:11.5px; color:var(--color-accent-on-soft)">approval.release v3</code>
+                      <p style="margin:6px 0 0; fontSize:12px; lineHeight:1.5; textWrap:pretty">Any capability at risk R3 or above that changes production state requires a human decision from a principal other than the requesting agent.</p>
+                    </div>
+                    <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim); marginBottom:8px">Traceability</div>
+                    <div style="display:flex; flexWrap:wrap; alignItems:center; gap:6px">
+                      <sc-for list="{{ chainRow }}" as="c" hint-placeholder-count="7">
+                        <span style="display:flex; alignItems:center; gap:6px">
+                          <span style="fontSize:10.5px; padding:3px 8px; borderRadius:var(--radius-sm); background:{{ c.bg }}; color:{{ c.color }}">{{ c.label }}</span>
+                          <sc-if value="{{ c.sep }}" hint-placeholder-val="{{ true }}"><i class="ph ph-arrow-right" style="fontSize:10.5px; opacity:0.4"></i></sc-if>
+                        </span>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="flex:none; display:flex; alignItems:center; gap:10px; padding:12px 16px; borderTop:1px solid var(--color-hairline); background:var(--color-surface-2)">
+                <div style="flex:1">
+                  <input class="input" placeholder="Decision comment (recorded in the audit trail)" style="height:32px; fontSize:12.5px; background:var(--color-surface)">
+                </div>
+                <button style="display:flex; alignItems:center; gap:6px; height:32px; padding:0 12px; background:transparent; color:var(--color-text); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12.5px; cursor:pointer" style-hover="background:var(--color-surface-3)"><i class="ph ph-clock-afternoon"></i>Defer</button>
+                <button style="display:flex; alignItems:center; gap:6px; height:32px; padding:0 12px; background:transparent; color:var(--st-fail); border:1px solid color-mix(in srgb, var(--st-fail) 55%, transparent); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12.5px; cursor:pointer" style-hover="background:var(--st-fail-bg)"><i class="ph ph-prohibit"></i>Reject</button>
+                <button style="display:flex; alignItems:center; gap:6px; height:32px; padding:0 14px; background:transparent; color:var(--st-ok); border:1px solid var(--st-ok); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12.5px; cursor:pointer" style-hover="background:var(--st-ok-bg)"><i class="ph ph-check-circle"></i>Approve release</button>
+              </div>
+            </section>
+          </div>
+        </sc-if>
+
+        <!-- ── WORK ITEMS ──────────────────────────────────────── -->
+        <sc-if value="{{ isWorkItems }}" hint-placeholder-val="{{ false }}">
+          <div style="maxWidth:1180px">
+            <div style="display:flex; alignItems:center; gap:12px; marginBottom:14px">
+              <h1 style="margin:0; fontSize:20px; fontWeight:500">Work items</h1>
+              <span style="fontSize:11.5px; color:var(--text-dim)">12 open · 3 in flight</span>
+              <div style="flex:1"></div>
+              <div style="display:flex; alignItems:center; gap:8px; height:30px; padding:0 10px; background:var(--color-surface); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); fontSize:12px; color:var(--text-dim); width:220px">
+                <i class="ph ph-magnifying-glass" style="fontSize:13px"></i><span>Filter work items</span>
+              </div>
+              <button style="display:flex; alignItems:center; gap:7px; height:30px; padding:0 12px; background:transparent; color:var(--color-accent-ui); border:1px solid var(--color-accent-ui); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12.5px; cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-accent) 12%, transparent)"><i class="ph ph-plus"></i>New work item</button>
+            </div>
+
+            <div style="display:flex; gap:7px; marginBottom:12px">
+              <sc-for list="{{ workFilters }}" as="f" hint-placeholder-count="5">
+                <span style="padding:4px 11px; borderRadius:99px; fontSize:11.5px; cursor:pointer; background:{{ f.bg }}; color:{{ f.color }}; boxShadow:{{ f.ring }}">{{ f.label }}</span>
+              </sc-for>
+            </div>
+
+            <div style="background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm); overflow:hidden">
+              <div style="display:grid; gridTemplateColumns:26px minmax(0,2.4fr) 0.8fr 1fr 1.5fr 0.8fr 0.9fr; gap:12px; padding:9px 14px; background:var(--color-surface-2); fontSize:11px; letterSpacing:0.08em; textTransform:uppercase; color:var(--text-dim)">
+                <span></span><span>Work item</span><span>Type</span><span>Status</span><span>Stage</span><span>Priority</span><span>Updated</span>
+              </div>
+              <sc-for list="{{ workRows }}" as="w" hint-placeholder-count="7">
+                <div style="display:grid; gridTemplateColumns:26px minmax(0,2.4fr) 0.8fr 1fr 1.5fr 0.8fr 0.9fr; gap:12px; padding:11px 14px; alignItems:center; borderTop:1px solid color-mix(in srgb, var(--color-text) 7%, transparent); cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+                  <i class="{{ w.icon }}" style="fontSize:14px; color:{{ w.tint }}"></i>
+                  <div style="minWidth:0">
+                    <div style="fontSize:12.5px; whiteSpace:nowrap; overflow:hidden; textOverflow:ellipsis">{{ w.title }}</div>
+                    <div style="fontSize:10.5px; marginTop:1px; color:var(--text-dim)">{{ w.key }}</div>
+                  </div>
+                  <span style="fontSize:11.5px; color:var(--text-muted)">{{ w.type }}</span>
+                  <span style="display:inline-flex; alignItems:center; gap:5px; justifySelf:start; fontSize:10.5px; padding:2px 8px; borderRadius:99px; background:{{ w.tintBg }}; color:{{ w.tint }}"><i class="{{ w.statusIcon }}" style="fontSize:9px"></i>{{ w.status }}</span>
+                  <div style="display:flex; alignItems:center; gap:3px">
+                    <sc-for list="{{ w.stages }}" as="s" hint-placeholder-count="10">
+                      <span title="{{ s.name }}" style="flex:1; height:4px; borderRadius:2px; background:{{ s.color }}"></span>
+                    </sc-for>
+                  </div>
+                  <span style="fontSize:11.5px; color:{{ w.prioColor }}">{{ w.priority }}</span>
+                  <span style="fontSize:11px; color:var(--text-dim)">{{ w.updated }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ── PROJECTS ────────────────────────────────────────── -->
+        <sc-if value="{{ isProjects }}" hint-placeholder-val="{{ false }}">
+          <div style="maxWidth:1000px">
+            <div style="display:flex; alignItems:center; gap:12px; marginBottom:14px">
+              <h1 style="margin:0; fontSize:20px; fontWeight:500">Projects</h1>
+              <div style="flex:1"></div>
+              <button style="display:flex; alignItems:center; gap:7px; height:30px; padding:0 12px; background:transparent; color:var(--color-accent-ui); border:1px solid var(--color-accent-ui); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12.5px; cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-accent) 12%, transparent)"><i class="ph ph-plus"></i>New project</button>
+            </div>
+            <div style="display:grid; gridTemplateColumns:repeat(2, minmax(0,1fr)); gap:12px">
+              <sc-for list="{{ projectCards }}" as="p" hint-placeholder-count="4">
+                <div style="padding:14px 16px; background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:{{ p.ring }}; cursor:pointer" style-hover="background:var(--color-surface-2)">
+                  <div style="display:flex; alignItems:center; gap:9px">
+                    <span style="display:grid; placeItems:center; width:26px; height:26px; borderRadius:var(--radius-sm); background:var(--color-accent-soft); color:var(--color-accent-ui); fontSize:13px"><i class="ph ph-folder"></i></span>
+                    <div style="flex:1; minWidth:0">
+                      <div style="fontSize:14px">{{ p.name }}</div>
+                      <code style="fontFamily:monospace; fontSize:10.5px; color:var(--text-dim)">{{ p.slug }}</code>
+                    </div>
+                    <sc-if value="{{ p.currentLabel }}" hint-placeholder-val="{{ false }}">
+                      <span style="fontSize:10.5px; padding:2px 8px; borderRadius:99px; background:var(--color-accent-soft); color:var(--color-accent-on-soft)">{{ p.currentLabel }}</span>
+                    </sc-if>
+                  </div>
+                  <div style="display:grid; gridTemplateColumns:repeat(4, 1fr); gap:10px; marginTop:14px">
+                    <sc-for list="{{ p.stats }}" as="s" hint-placeholder-count="4">
+                      <div>
+                        <div style="fontSize:10.5px; letterSpacing:0.08em; textTransform:uppercase; color:var(--text-dim)">{{ s.label }}</div>
+                        <div style="fontFamily:var(--font-heading); fontWeight:500; fontSize:16px; marginTop:2px; color:{{ s.tint }}">{{ s.value }}</div>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="display:flex; alignItems:center; gap:7px; marginTop:12px; paddingTop:10px; borderTop:1px solid color-mix(in srgb, var(--color-text) 8%, transparent); fontSize:11px; color:var(--text-dim)">
+                    <i class="{{ p.healthIcon }}" style="fontSize:12px; color:{{ p.healthTint }}"></i><span>{{ p.health }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ── GOVERNANCE ──────────────────────────────────────── -->
+        <sc-if value="{{ isGovernance }}" hint-placeholder-val="{{ false }}">
+          <div style="maxWidth:1180px">
+            <h1 style="margin:0 0 14px; fontSize:20px; fontWeight:500">Governance</h1>
+            <div style="display:grid; gridTemplateColumns:minmax(0,1.25fr) minmax(0,1fr); gap:14px">
+
+              <section style="background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm)">
+                <div style="display:flex; alignItems:center; gap:9px; padding:11px 14px; borderBottom:1px solid var(--color-hairline)">
+                  <i class="ph ph-shield-check" style="fontSize:14px; color:var(--color-accent-ui)"></i>
+                  <h2 style="margin:0; fontSize:13px; fontWeight:500; flex:1">Policies</h2>
+                  <span style="fontSize:11px; color:var(--text-dim)">4 published · 1 draft</span>
+                </div>
+                <sc-for list="{{ policyList }}" as="p" hint-placeholder-count="5">
+                  <div style="display:flex; alignItems:center; gap:11px; padding:10px 14px; borderTop:1px solid color-mix(in srgb, var(--color-text) 7%, transparent)">
+                    <div style="flex:1; minWidth:0">
+                      <code style="fontFamily:monospace; fontSize:12px">{{ p.key }}</code>
+                      <span style="fontSize:11px; marginLeft:7px; color:var(--text-dim)">v{{ p.version }}</span>
+                      <div style="fontSize:11px; marginTop:2px; color:var(--text-dim)">{{ p.scope }}</div>
+                    </div>
+                    <span style="fontSize:11px; color:var(--text-dim)">{{ p.enforced }}</span>
+                    <span style="fontSize:10.5px; padding:2px 8px; borderRadius:99px; background:{{ p.tintBg }}; color:{{ p.tint }}">{{ p.status }}</span>
+                  </div>
+                </sc-for>
+              </section>
+
+              <section style="background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm)">
+                <div style="display:flex; alignItems:center; gap:9px; padding:11px 14px; borderBottom:1px solid var(--color-hairline)">
+                  <i class="ph ph-siren" style="fontSize:14px; color:var(--st-fail)"></i>
+                  <h2 style="margin:0; fontSize:13px; fontWeight:500; flex:1">Risk activity</h2>
+                  <span style="fontSize:11px; color:var(--text-dim)">last 24h</span>
+                </div>
+                <sc-for list="{{ riskList }}" as="r" hint-placeholder-count="5">
+                  <div style="display:flex; gap:11px; padding:10px 14px; borderTop:1px solid color-mix(in srgb, var(--color-text) 7%, transparent)">
+                    <i class="{{ r.icon }}" style="fontSize:14px; color:var(--st-fail); marginTop:2px"></i>
+                    <div style="minWidth:0">
+                      <div style="fontSize:12px">{{ r.action }}</div>
+                      <div style="fontSize:10.5px; marginTop:2px; color:var(--text-dim); wordBreak:break-all">{{ r.meta }}</div>
+                    </div>
+                  </div>
+                </sc-for>
+              </section>
+
+              <section style="gridColumn:1 / -1; background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm)">
+                <div style="display:flex; alignItems:center; gap:9px; padding:11px 14px; borderBottom:1px solid var(--color-hairline)">
+                  <i class="ph ph-scroll" style="fontSize:14px; color:var(--color-accent-ui)"></i>
+                  <h2 style="margin:0; fontSize:13px; fontWeight:500; flex:1">Audit trail</h2>
+                  <span style="fontSize:11.5px; color:var(--color-accent-ui); cursor:pointer">Search events</span>
+                </div>
+                <div style="display:grid; gridTemplateColumns:0.9fr 1.4fr 1.3fr 1.4fr 0.7fr 0.9fr; gap:12px; padding:9px 14px; background:var(--color-surface-2); fontSize:11px; letterSpacing:0.08em; textTransform:uppercase; color:var(--text-dim)">
+                  <span>Time</span><span>Actor</span><span>Action</span><span>Target</span><span>Outcome</span><span>Correlation</span>
+                </div>
+                <sc-for list="{{ auditRows }}" as="a" hint-placeholder-count="6">
+                  <div style="display:grid; gridTemplateColumns:0.9fr 1.4fr 1.3fr 1.4fr 0.7fr 0.9fr; gap:12px; padding:9px 14px; alignItems:center; borderTop:1px solid color-mix(in srgb, var(--color-text) 7%, transparent); fontSize:11.5px" style-hover="background:color-mix(in srgb, var(--color-text) 4%, transparent)">
+                    <span style="color:var(--text-muted); fontFamily:monospace; fontSize:11px">{{ a.time }}</span>
+                    <span style="display:flex; alignItems:center; gap:6px; minWidth:0"><i class="{{ a.actorIcon }}" style="fontSize:12px; opacity:0.7"></i><span style="whiteSpace:nowrap; overflow:hidden; textOverflow:ellipsis">{{ a.actor }}</span></span>
+                    <code style="fontFamily:monospace; fontSize:11px; whiteSpace:nowrap; overflow:hidden; textOverflow:ellipsis">{{ a.action }}</code>
+                    <span style="color:var(--text-muted); whiteSpace:nowrap; overflow:hidden; textOverflow:ellipsis">{{ a.target }}</span>
+                    <span style="fontSize:10.5px; padding:2px 8px; borderRadius:99px; justifySelf:start; background:{{ a.tintBg }}; color:{{ a.tint }}">{{ a.outcome }}</span>
+                    <code style="fontFamily:monospace; fontSize:10.5px; color:var(--text-dim)">{{ a.corr }}</code>
+                  </div>
+                </sc-for>
+              </section>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ── WORKFLOW DESIGNER ───────────────────────────────── -->
+        <sc-if value="{{ isDesigner }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex; flexDirection:column; gap:12px; height:100%; minHeight:0">
+            <div style="display:flex; alignItems:center; gap:12px; flex:none">
+              <h1 style="margin:0; fontSize:18px; fontWeight:500">Development Path</h1>
+              <span style="fontSize:10.5px; padding:2px 9px; borderRadius:99px; background:var(--st-warn-bg); color:var(--st-warn)">DRAFT v5</span>
+              <span style="fontSize:11.5px; color:var(--text-dim)">v4 published · 3 runs in flight on v4</span>
+              <div style="flex:1"></div>
+              <button style="display:flex; alignItems:center; gap:6px; height:30px; padding:0 11px; background:transparent; color:var(--color-text); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12px; cursor:pointer" style-hover="background:var(--color-surface-2)"><i class="ph ph-git-diff"></i>Diff against v4</button>
+              <button style="display:flex; alignItems:center; gap:6px; height:30px; padding:0 11px; background:transparent; color:var(--color-text); border:1px solid var(--color-hairline); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12px; cursor:pointer" style-hover="background:var(--color-surface-2)"><i class="ph ph-flask"></i>Validate</button>
+              <button style="display:flex; alignItems:center; gap:6px; height:30px; padding:0 12px; background:transparent; color:var(--color-accent-ui); border:1px solid var(--color-accent-ui); borderRadius:var(--radius-md); fontFamily:var(--font-heading); fontWeight:500; fontSize:12px; cursor:pointer" style-hover="background:color-mix(in srgb, var(--color-accent) 12%, transparent)"><i class="ph ph-upload-simple"></i>Publish v5</button>
+            </div>
+
+            <div style="display:grid; gridTemplateColumns:184px minmax(0,1fr) 264px; gap:12px; flex:1; minHeight:0">
+
+              <section style="display:flex; flexDirection:column; minHeight:0; background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm); overflow:auto">
+                <div style="padding:11px 13px 6px; fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim)">Node palette</div>
+                <sc-for list="{{ palette }}" as="p" hint-placeholder-count="7">
+                  <div style="display:flex; alignItems:center; gap:9px; padding:8px 13px; cursor:grab; fontSize:12px" style-hover="background:color-mix(in srgb, var(--color-text) 6%, transparent)">
+                    <i class="{{ p.icon }}" style="fontSize:14px; color:var(--color-accent-ui); width:16px"></i>
+                    <span>{{ p.label }}</span>
+                  </div>
+                </sc-for>
+                <div style="padding:14px 13px 6px; fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim)">Agents</div>
+                <sc-for list="{{ paletteAgents }}" as="p" hint-placeholder-count="6">
+                  <div style="display:flex; alignItems:center; gap:9px; padding:8px 13px; cursor:grab; fontSize:12px" style-hover="background:color-mix(in srgb, var(--color-text) 6%, transparent)">
+                    <i class="ph ph-robot" style="fontSize:14px; opacity:0.7; width:16px"></i>
+                    <span>{{ p.label }}</span>
+                  </div>
+                </sc-for>
+              </section>
+
+              <section style="minHeight:0; borderRadius:var(--radius-md); boxShadow:var(--shadow-sm); background:var(--color-surface); backgroundImage:radial-gradient(circle at 1px 1px, var(--color-hairline) 1px, transparent 0); backgroundSize:18px 18px; overflow:auto; padding:26px">
+                <div style="display:flex; flexDirection:column; gap:14px; minWidth:520px">
+                  <sc-for list="{{ canvasNodes }}" as="n" hint-placeholder-count="6">
+                    <div style="display:flex; flexDirection:column; alignItems:center; gap:14px">
+                      <div style="width:100%; maxWidth:380px; padding:11px 13px; borderRadius:var(--radius-md); background:var(--color-surface-2); boxShadow:{{ n.ring }}; cursor:pointer" style-hover="background:var(--color-surface-3)">
+                        <div style="display:flex; alignItems:center; gap:9px">
+                          <span style="display:grid; placeItems:center; width:24px; height:24px; flex:none; borderRadius:var(--radius-sm); background:{{ n.tintBg }}; color:{{ n.tint }}; fontSize:13px"><i class="{{ n.icon }}"></i></span>
+                          <div style="flex:1; minWidth:0">
+                            <div style="fontSize:12.5px">{{ n.name }}</div>
+                            <div style="fontSize:10.5px; color:var(--text-dim)">{{ n.meta }}</div>
+                          </div>
+                          <sc-if value="{{ n.badge }}" hint-placeholder-val="{{ false }}">
+                            <span style="fontSize:10.5px; padding:2px 7px; borderRadius:99px; background:{{ n.tintBg }}; color:{{ n.tint }}">{{ n.badge }}</span>
+                          </sc-if>
+                        </div>
+                      </div>
+                      <sc-if value="{{ n.hasEdge }}" hint-placeholder-val="{{ true }}">
+                        <div style="display:flex; flexDirection:column; alignItems:center; gap:2px">
+                          <span style="width:1px; height:14px; background:var(--color-hairline)"></span>
+                          <sc-if value="{{ n.edgeLabel }}" hint-placeholder-val="{{ false }}">
+                            <span style="fontSize:10.5px; padding:1px 7px; borderRadius:99px; background:var(--color-surface-2); color:var(--text-muted); boxShadow:0 0 0 1px var(--color-hairline)">{{ n.edgeLabel }}</span>
+                          </sc-if>
+                          <i class="ph ph-caret-down" style="fontSize:11px; opacity:0.4"></i>
+                        </div>
+                      </sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+              </section>
+
+              <section style="display:flex; flexDirection:column; minHeight:0; background:var(--color-surface); borderRadius:var(--radius-md); boxShadow:var(--shadow-sm); overflow:auto">
+                <div style="padding:11px 13px; borderBottom:1px solid var(--color-hairline)">
+                  <div style="fontSize:11px; letterSpacing:0.1em; textTransform:uppercase; color:var(--text-dim)">Selected node</div>
+                  <div style="fontSize:14px; marginTop:5px">Engineering Review</div>
+                  <div style="fontSize:11px; marginTop:2px; color:var(--text-dim)">AGENT_TASK · engineering_review</div>
+                </div>
+                <div style="padding:13px">
+                  <sc-for list="{{ inspector }}" as="f" hint-placeholder-count="6">
+                    <div style="marginBottom:12px">
+                      <div style="fontSize:11px; marginBottom:4px; color:var(--text-muted)">{{ f.label }}</div>
+                      <div style="display:flex; alignItems:center; gap:7px; minHeight:30px; padding:0 10px; borderRadius:var(--radius-md); background:var(--color-surface-2); boxShadow:0 0 0 1px var(--color-hairline); fontSize:12px">
+                        <sc-if value="{{ f.icon }}" hint-placeholder-val="{{ true }}"><i class="{{ f.icon }}" style="fontSize:13px; color:var(--color-accent-ui)"></i></sc-if>
+                        <span style="flex:1">{{ f.value }}</span>
+                        <sc-if value="{{ f.caret }}" hint-placeholder-val="{{ true }}"><i class="ph ph-caret-down" style="fontSize:11px; opacity:0.5"></i></sc-if>
+                      </div>
+                    </div>
+                  </sc-for>
+                  <div style="marginTop:16px; padding:11px 12px; borderRadius:var(--radius-md); background:var(--st-warn-bg)">
+                    <div style="display:flex; gap:8px; alignItems:flex-start">
+                      <i class="ph-fill ph-warning" style="fontSize:14px; color:var(--st-warn); marginTop:1px"></i>
+                      <div style="fontSize:11.5px; lineHeight:1.45; textWrap:pretty">This node grants <code style="fontFamily:monospace; fontSize:11px">repository.write_file</code>, which is R2. Publishing v5 will require a policy review before the first run.</div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </sc-if>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1560,&quot;height&quot;:940},&quot;defaultMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;'dark' | 'light'&quot;,&quot;section&quot;:&quot;Shell&quot;},&quot;defaultScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;home&quot;,&quot;runs&quot;,&quot;approvals&quot;,&quot;work-items&quot;,&quot;projects&quot;,&quot;governance&quot;,&quot;designer&quot;],&quot;default&quot;:&quot;home&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Shell&quot;}}">
+const TINT = {
+  ok: ['var(--st-ok)', 'var(--st-ok-bg)'],
+  run: ['var(--st-run)', 'var(--st-run-bg)'],
+  warn: ['var(--st-warn)', 'var(--st-warn-bg)'],
+  fail: ['var(--st-fail)', 'var(--st-fail-bg)'],
+  idle: ['var(--st-idle)', 'var(--st-idle-bg)'],
+};
+const t = (k) => ({ tint: TINT[k][0], tintBg: TINT[k][1] });
+const MUTED = 'var(--text-dim)';
+const SEL_BG = 'color-mix(in srgb, var(--color-accent) 14%, transparent)';
+const ON_SOFT = 'var(--color-accent-on-soft)';
+const SEL_RING = 'inset 2px 0 0 var(--color-accent-ui)';
+
+const STAGE_NAMES = ['Trigger', 'Discovery', 'Requirements', 'Design', 'Planning', 'Approval', 'Development', 'Test', 'Review', 'Release'];
+const STAGE_STATES = ['done', 'done', 'done', 'done', 'done', 'done', 'done', 'running', 'todo', 'todo'];
+const STAGE_NOTES = ['', '', '', '', '', 'approved', '', '1m 47s', '', ''];
+
+function stageBars(doneCount, runningIndex) {
+  return STAGE_NAMES.map((name, i) => ({
+    name,
+    color: i < doneCount ? 'var(--st-ok)' : i === runningIndex ? 'var(--st-run)' : 'color-mix(in srgb, var(--color-text) 14%, transparent)',
+  }));
+}
+
+class Component extends DCLogic {
+  state = { screen: null, mode: null, task: 7 };
+
+  renderVals() {
+    const screen = this.state.screen ?? (this.props.defaultScreen || 'home');
+    const mode = this.state.mode ?? (this.props.defaultMode || 'dark');
+    const go = (s) => (e) => { e.preventDefault(); this.setState({ screen: s }); };
+
+    const navGroups = [
+      { label: 'Overview', items: [['home', 'Home', 'ph ph-house']] },
+      { label: 'Work', items: [['work-items', 'Work Items', 'ph ph-list-checks'], ['runs', 'Runs', 'ph ph-flow-arrow']] },
+      { label: 'Workflows', items: [['designer', 'Designer', 'ph ph-tree-structure'], [null, 'Definitions', 'ph ph-git-branch']] },
+      { label: 'Decisions', items: [['approvals', 'Approvals', 'ph ph-seal-check', '3'], ['governance', 'Governance', 'ph ph-shield-check']] },
+      { label: 'Platform', items: [[null, 'Agents', 'ph ph-robot'], [null, 'Knowledge', 'ph ph-books'], [null, 'Artifacts', 'ph ph-file-text'], ['projects', 'Projects', 'ph ph-folders'], [null, 'Integrations', 'ph ph-plugs'], [null, 'Insights', 'ph ph-chart-line'], [null, 'Administration', 'ph ph-gear-six']] },
+    ].map((g) => ({
+      label: g.label,
+      items: g.items.map(([id, label, icon, badge]) => ({
+        label, icon, badge: badge || '',
+        href: id ? '#' + id : '#',
+        go: id ? go(id) : (e) => e.preventDefault(),
+        current: screen === id ? 'page' : 'false',
+        bg: screen === id ? SEL_BG : 'transparent',
+        ring: screen === id ? SEL_RING : 'none',
+      })),
+    }));
+
+    const crumbTrail = {
+      home: ['DevOS POC', 'Home'],
+      'work-items': ['DevOS POC', 'Work', 'Work Items'],
+      runs: ['DevOS POC', 'Work', 'Add release readiness gate', 'Run 3f2b91c4'],
+      approvals: ['DevOS POC', 'Approvals', 'Release to production'],
+      projects: ['Organisation', 'Projects'],
+      governance: ['DevOS POC', 'Governance'],
+      designer: ['DevOS POC', 'Workflows', 'Development Path', 'Designer'],
+    }[screen] || ['DevOS POC'];
+
+    const crumbs = crumbTrail.map((label, i) => ({
+      label, sep: i < crumbTrail.length - 1,
+      color: i === crumbTrail.length - 1 ? 'var(--color-text)' : MUTED,
+    }));
+
+    return {
+      mode,
+      toggleMode: () => this.setState({ mode: mode === 'dark' ? 'light' : 'dark' }),
+      navGroups, crumbs,
+      goRuns: go('runs'),
+      isHome: screen === 'home', isRuns: screen === 'runs', isApprovals: screen === 'approvals',
+      isWorkItems: screen === 'work-items', isProjects: screen === 'projects',
+      isGovernance: screen === 'governance', isDesigner: screen === 'designer',
+
+      pulse: [
+        { label: 'Runs succeeded', value: '86%', delta: '+4 pts', deltaColor: 'var(--st-ok)', note: 'last 30 runs' },
+        { label: 'Median cycle time', value: '2h 14m', delta: '−18m', deltaColor: 'var(--st-ok)', note: 'intake to release' },
+        { label: 'Waiting on humans', value: '41m', delta: '+9m', deltaColor: 'var(--st-warn)', note: 'median approval wait' },
+        { label: 'Bottleneck stage', value: 'Review', delta: '3 runs', deltaColor: MUTED, note: 'longest queue' },
+      ],
+
+      attention: [
+        { icon: 'ph ph-seal-check', title: 'Release to production — build 8821', meta: 'Release Agent v2 · run 3f2b91c4 · R3', tag: 'Approval', age: '12m', ...t('warn') },
+        { icon: 'ph ph-x-circle', title: 'engineering_review failed on permanent policy denial', meta: 'Resolve context manifest truncation · run 9c40ab17', tag: 'Failed', age: '38m', ...t('fail') },
+        { icon: 'ph ph-hand-palm', title: 'Development Agent blocked — capability not granted', meta: 'deployment.deploy_environment denied by policy', tag: 'Blocked', age: '1h', ...t('fail') },
+        { icon: 'ph ph-plugs', title: 'Jira credential expires in 3 days', meta: 'Integration devos-jira · scope read:issue', tag: 'Integration', age: '2h', ...t('warn') },
+      ],
+
+      activeRuns: [
+        { title: 'Add release readiness gate', workflow: 'Development Path v4', current: 'automated_validation', status: 'RUNNING', elapsed: '6m 12s', icon: 'ph-fill ph-circle', stages: stageBars(7, 7), ...t('run') },
+        { title: 'Publish tool capability catalogue', workflow: 'Planning Path v2', current: 'design_approval', status: 'AWAITING APPROVAL', elapsed: '41m', icon: 'ph ph-hourglass', stages: stageBars(5, 5), ...t('warn') },
+        { title: 'Resolve context manifest truncation', workflow: 'Development Path v4', current: 'engineering_review', status: 'FAILED', elapsed: '38m', icon: 'ph ph-x', stages: stageBars(8, 8), ...t('fail') },
+      ],
+
+      activity: [
+        { icon: 'ph-fill ph-file-text', tint: 'var(--st-ok)', text: 'Technical Design v2 published for “Add release readiness gate”', meta: 'Technical Design Agent · 14:11' },
+        { icon: 'ph-fill ph-git-pull-request', tint: 'var(--st-ok)', text: 'Pull request devos/devos#412 opened', meta: 'Development Agent · 14:16' },
+        { icon: 'ph-fill ph-seal-check', tint: 'var(--st-ok)', text: 'PLAN_APPROVAL approved by R. Aldridge', meta: '“Scope matches the requirement.” · 13:52' },
+        { icon: 'ph-fill ph-x-circle', tint: 'var(--st-fail)', text: 'run_tests failed — transient CI timeout, retry scheduled', meta: 'ci.run_tests · 14:17' },
+        { icon: 'ph-fill ph-shield-check', tint: 'var(--st-warn)', text: 'approval.release v3 published', meta: 'Administrator · 09:20' },
+        { icon: 'ph-fill ph-rocket-launch', tint: 'var(--st-ok)', text: 'Release 2026.8.19 completed with full evidence chain', meta: 'Release Path v2 · yesterday' },
+      ],
+
+      health: [
+        { icon: 'ph ph-git-branch', name: 'GitHub', state: 'Healthy', tint: 'var(--st-ok)' },
+        { icon: 'ph ph-kanban', name: 'Jira', state: 'Credential expiring', tint: 'var(--st-warn)' },
+        { icon: 'ph ph-gear', name: 'CI (Actions)', state: 'Degraded — queue 6m', tint: 'var(--st-warn)' },
+        { icon: 'ph ph-database', name: 'Event bus', state: 'Healthy', tint: 'var(--st-ok)' },
+      ],
+
+      pipeline: STAGE_NAMES.map((name, i) => {
+        const st = STAGE_STATES[i];
+        const done = st === 'done', running = st === 'running';
+        return {
+          name, note: STAGE_NOTES[i], state: st,
+          icon: done ? 'ph ph-check' : running ? 'ph-fill ph-circle' : 'ph ph-minus',
+          dotBg: done ? 'var(--st-ok-bg)' : running ? 'var(--st-run-bg)' : 'var(--st-idle-bg)',
+          dotFg: done ? 'var(--st-ok)' : running ? 'var(--st-run)' : 'var(--st-idle)',
+          dotRing: running ? '0 0 0 3px var(--st-run-bg)' : 'none',
+          labelColor: done || running ? 'var(--color-text)' : MUTED,
+          leftLine: i === 0 ? 'transparent' : (i <= 7 ? 'var(--st-ok)' : 'var(--color-hairline)'),
+          rightLine: i === STAGE_NAMES.length - 1 ? 'transparent' : (i < 7 ? 'var(--st-ok)' : 'var(--color-hairline)'),
+        };
+      }),
+
+      taskList: [
+        ['discovery', 'AGENT_TASK', 'Discovery Agent', '18s', 'ok', ''],
+        ['requirements', 'AGENT_TASK', 'Requirements Agent', '1m 04s', 'ok', ''],
+        ['technical_design', 'AGENT_TASK', 'Technical Design Agent', '1m 31s', 'ok', ''],
+        ['planning', 'AGENT_TASK', 'Planning Agent', '42s', 'ok', ''],
+        ['plan_approval', 'APPROVAL', 'R. Aldridge', '11m', 'ok', 'Approved 13:52'],
+        ['development', 'AGENT_TASK', 'Development Agent', '2m 08s', 'ok', '6 files · PR #412'],
+        ['automated_validation', 'TASK', '', '1m 47s', 'run', 'Retry 2 of 3'],
+        ['engineering_review', 'AGENT_TASK', 'Review Agent', '—', 'idle', ''],
+        ['release_approval', 'APPROVAL', '', '—', 'warn', 'Will require R3 approval'],
+      ].map(([name, kind, agent, duration, tone, flag], i) => ({
+        name, kind, agent, duration, flag,
+        flagIcon: tone === 'run' ? 'ph ph-arrow-counter-clockwise' : tone === 'warn' ? 'ph ph-seal-check' : 'ph ph-check',
+        icon: tone === 'ok' ? 'ph ph-check' : tone === 'run' ? 'ph-fill ph-circle' : tone === 'warn' ? 'ph ph-hourglass' : 'ph ph-minus',
+        ...t(tone),
+        select: () => this.setState({ task: i }),
+        bg: i === 6 ? SEL_BG : 'transparent',
+        ring: i === 6 ? SEL_RING : 'none',
+      })),
+
+      detailTabs: ['Overview', 'Agent', 'Tools', 'Artifacts', 'Events'].map((label, i) => ({
+        label,
+        color: i === 0 ? 'var(--color-text)' : MUTED,
+        underline: i === 0 ? 'inset 0 -2px 0 var(--color-accent-ui)' : 'none',
+      })),
+
+      taskInputs: [
+        { name: 'Implementation Plan v3', kind: 'ARTIFACT', icon: 'ph ph-file-text' },
+        { name: 'devos/devos @ feature/release-gate', kind: 'REPOSITORY', icon: 'ph ph-git-branch' },
+        { name: 'Add release readiness gate', kind: 'WORK_ITEM', icon: 'ph ph-list-checks' },
+      ],
+
+      toolActivity: [
+        { key: 'ci.run_build', target: 'devos/devos @ 4f1c9ab', risk: 'R1', approval: 'Not required', duration: '38s', ref: 'build 8821', icon: 'ph ph-check-circle', ...t('ok'), riskBg: 'var(--st-idle-bg)', riskFg: 'var(--st-idle)' },
+        { key: 'ci.run_tests', target: 'suite: unit + contract', risk: 'R1', approval: 'Not required', duration: '1m 09s', ref: 'attempt 1 timed out', icon: 'ph ph-x-circle', ...t('fail'), riskBg: 'var(--st-idle-bg)', riskFg: 'var(--st-idle)' },
+        { key: 'ci.run_tests', target: 'suite: unit + contract', risk: 'R1', approval: 'Not required', duration: '1m 47s', ref: 'run 40219 · in progress', icon: 'ph-fill ph-circle', ...t('run'), riskBg: 'var(--st-idle-bg)', riskFg: 'var(--st-idle)' },
+        { key: 'deployment.deploy_environment', target: 'environment: production', risk: 'R3', approval: 'Required — pending', duration: '—', ref: 'blocked by policy', icon: 'ph ph-lock-simple', ...t('warn'), riskBg: 'var(--st-fail-bg)', riskFg: 'var(--st-fail)' },
+      ],
+
+      validation: [
+        { name: 'Build compiles', result: 'Passed · 38s', icon: 'ph ph-check-circle', tint: 'var(--st-ok)' },
+        { name: 'Unit tests', result: '412 passed, 0 failed', icon: 'ph ph-check-circle', tint: 'var(--st-ok)' },
+        { name: 'Contract tests', result: 'Running · 18 of 46', icon: 'ph-fill ph-circle', tint: 'var(--st-run)' },
+        { name: 'Coverage threshold ≥ 80%', result: 'Awaiting test completion', icon: 'ph ph-minus-circle', tint: 'var(--st-idle)' },
+      ],
+
+      policyRows: [
+        { key: 'tool.ci.execute', outcome: 'Allowed', icon: 'ph ph-check-circle', tint: 'var(--st-ok)' },
+        { key: 'agent.autonomy.development', outcome: 'Allowed within scope', icon: 'ph ph-check-circle', tint: 'var(--st-ok)' },
+        { key: 'approval.release', outcome: 'Approval required', icon: 'ph ph-lock-simple', tint: 'var(--st-warn)' },
+      ],
+
+      outputStats: [
+        { label: 'Tests passed', value: '412', tint: 'var(--st-ok)' },
+        { label: 'Tests failed', value: '0', tint: 'var(--color-text)' },
+        { label: 'Files changed', value: '6', tint: 'var(--color-text)' },
+        { label: 'Evidence artifacts', value: '2', tint: 'var(--color-text)' },
+      ],
+
+      approvalFilters: ['Pending 3', 'Decided', 'All'].map((label, i) => ({
+        label,
+        bg: i === 0 ? SEL_BG : 'transparent',
+        color: i === 0 ? ON_SOFT : MUTED,
+      })),
+
+      approvalList: [
+        { type: 'RELEASE_APPROVAL', subject: 'Deploy build 8821 to production', requester: 'Release Agent v2 · run 3f2b91c4', risk: 'R3', age: '12m', icon: 'ph ph-robot', riskBg: 'var(--st-fail-bg)', riskFg: 'var(--st-fail)', bg: SEL_BG, ring: SEL_RING },
+        { type: 'DESIGN_APPROVAL', subject: 'Technical Design v2 — release readiness gate', requester: 'Technical Design Agent · run 3f2b91c4', risk: 'R1', age: '1h', icon: 'ph ph-robot', riskBg: 'var(--st-idle-bg)', riskFg: 'var(--st-idle)', bg: 'transparent', ring: 'none' },
+        { type: 'TOOL_APPROVAL', subject: 'repository.write_file on protected path', requester: 'Development Agent · run 9c40ab17', risk: 'R2', age: '3h', icon: 'ph ph-robot', riskBg: 'var(--st-warn-bg)', riskFg: 'var(--st-warn)', bg: 'transparent', ring: 'none' },
+        { type: 'PLAN_APPROVAL', subject: 'Implementation Plan v3 — approved', requester: 'Decided by R. Aldridge · 13:52', risk: 'R1', age: '2h', icon: 'ph ph-user', riskBg: 'var(--st-idle-bg)', riskFg: 'var(--st-idle)', bg: 'transparent', ring: 'none' },
+        { type: 'RELEASE_APPROVAL', subject: 'Deploy build 8790 to production — rejected', requester: 'Decided by R. Aldridge · yesterday', risk: 'R3', age: '1d', icon: 'ph ph-user', riskBg: 'var(--st-idle-bg)', riskFg: 'var(--st-idle)', bg: 'transparent', ring: 'none' },
+      ],
+
+      approvalTarget: [
+        { label: 'Target resource', value: 'devos-api', note: 'Service · 3 replicas', icon: 'ph ph-cube', tint: 'var(--color-accent-ui)' },
+        { label: 'Environment', value: 'production', note: 'Customer-facing · rollback available', icon: 'ph ph-globe-hemisphere-west', tint: 'var(--st-fail)' },
+        { label: 'Requested by', value: 'Release Agent v2', note: 'Autonomous · acting for run 3f2b91c4', icon: 'ph ph-robot', tint: 'var(--color-accent-ui)' },
+      ],
+
+      evidence: [
+        { name: 'Automated Validation Results', meta: 'TEST_EVIDENCE v1 · 412 passed, 0 failed', verdict: 'Passed', icon: 'ph ph-check-circle', ...t('ok') },
+        { name: 'Engineering Review Record', meta: 'REVIEW_EVIDENCE v1 · 2 findings, both minor', verdict: 'Approved', icon: 'ph ph-magnifying-glass', ...t('ok') },
+        { name: 'Release Readiness Report', meta: 'RELEASE_EVIDENCE v1 · all gates met', verdict: 'Ready', icon: 'ph ph-clipboard-text', ...t('ok') },
+        { name: 'Pull request devos/devos#412', meta: '6 files changed · reviewed by Review Agent', verdict: 'Merged', icon: 'ph ph-git-pull-request', ...t('ok') },
+      ],
+
+      chainRow: ['Requirement', 'Design', 'Plan', 'Code', 'Test', 'Review', 'Release'].map((label, i, arr) => ({
+        label, sep: i < arr.length - 1,
+        bg: i === arr.length - 1 ? 'var(--st-warn-bg)' : 'var(--color-surface-2)',
+        color: i === arr.length - 1 ? 'var(--st-warn)' : 'var(--text-muted)',
+      })),
+
+      workFilters: ['All 12', 'In flight 3', 'Awaiting approval 2', 'Failed 1', 'Mine 5'].map((label, i) => ({
+        label,
+        bg: i === 0 ? SEL_BG : 'var(--color-surface)',
+        color: i === 0 ? ON_SOFT : 'var(--text-muted)',
+        ring: i === 0 ? 'none' : '0 0 0 1px var(--color-hairline)',
+      })),
+
+      workRows: [
+        ['Add release readiness gate', 'DEVOS-118', 'FEATURE', 'RUNNING', 'run', 'HIGH', '4s ago', 7, 7],
+        ['Resolve context manifest truncation', 'DEVOS-117', 'BUG', 'FAILED', 'fail', 'HIGH', '38m ago', 8, 8],
+        ['Publish tool capability catalogue', 'DEVOS-115', 'FEATURE', 'AWAITING APPROVAL', 'warn', 'MEDIUM', '41m ago', 5, 5],
+        ['Retry policy for transient build failures', 'DEVOS-114', 'TASK', 'READY', 'idle', 'LOW', '2h ago', 0, -1],
+        ['Agent execution replay for failed runs', 'DEVOS-111', 'FEATURE', 'READY', 'idle', 'MEDIUM', '5h ago', 0, -1],
+        ['Knowledge source freshness indicator', 'DEVOS-108', 'FEATURE', 'SUCCEEDED', 'ok', 'MEDIUM', 'yesterday', 10, -1],
+        ['Audit export for compliance review', 'DEVOS-104', 'TASK', 'SUCCEEDED', 'ok', 'LOW', '2d ago', 10, -1],
+      ].map(([title, key, type, status, tone, priority, updated, done, running]) => ({
+        title, key, type, status, priority, updated,
+        icon: type === 'BUG' ? 'ph ph-bug' : type === 'TASK' ? 'ph ph-dot-outline' : 'ph ph-sparkle',
+        statusIcon: tone === 'ok' ? 'ph ph-check' : tone === 'run' ? 'ph-fill ph-circle' : tone === 'fail' ? 'ph ph-x' : tone === 'warn' ? 'ph ph-hourglass' : 'ph ph-minus',
+        ...t(tone),
+        stages: stageBars(done, running),
+        prioColor: priority === 'HIGH' ? 'var(--st-warn)' : 'var(--text-muted)',
+      })),
+
+      projectCards: [
+        {
+          name: 'DevOS POC', slug: 'devos-poc', currentLabel: 'Current',
+          ring: 'var(--shadow-sm), inset 2px 0 0 var(--color-accent-ui)',
+          stats: [
+            { label: 'In flight', value: '3', tint: 'var(--st-run)' },
+            { label: 'Approvals', value: '3', tint: 'var(--st-warn)' },
+            { label: 'Artifacts', value: '48', tint: 'var(--color-text)' },
+            { label: 'Success', value: '86%', tint: 'var(--color-text)' },
+          ],
+          health: 'CI degraded · Jira credential expiring in 3 days', healthIcon: 'ph ph-warning-circle', healthTint: 'var(--st-warn)',
+        },
+        {
+          name: 'DevOS Development', slug: 'devos-development', currentLabel: '',
+          ring: 'var(--shadow-sm)',
+          stats: [
+            { label: 'In flight', value: '1', tint: 'var(--st-run)' },
+            { label: 'Approvals', value: '0', tint: 'var(--color-text)' },
+            { label: 'Artifacts', value: '126', tint: 'var(--color-text)' },
+            { label: 'Success', value: '94%', tint: 'var(--color-text)' },
+          ],
+          health: 'All integrations healthy', healthIcon: 'ph ph-check-circle', healthTint: 'var(--st-ok)',
+        },
+      ],
+
+      policyList: [
+        { key: 'approval.release', version: 3, scope: 'R3+ capabilities changing production state', enforced: '2 gates today', status: 'PUBLISHED', ...t('ok') },
+        { key: 'tool.repository.write', version: 2, scope: 'Protected paths require named approval', enforced: '1 denial today', status: 'PUBLISHED', ...t('ok') },
+        { key: 'tool.ci.execute', version: 4, scope: 'Build and test capabilities, R1', enforced: '9 allows today', status: 'PUBLISHED', ...t('ok') },
+        { key: 'agent.autonomy.development', version: 1, scope: 'Development agents may not deploy', enforced: 'not yet enforced', status: 'DRAFT', ...t('warn') },
+        { key: 'knowledge.classification', version: 2, scope: 'Restricted sources excluded from context', enforced: '0 denials today', status: 'PUBLISHED', ...t('ok') },
+      ],
+
+      riskList: [
+        { action: 'TOOL_INVOCATION_DENIED · deployment.deploy_environment', meta: 'agent:development-agent · run 3f2b91c4 · 13:58:44', icon: 'ph ph-prohibit' },
+        { action: 'POLICY_DENIED · repository.write_file on protected path', meta: 'agent:development-agent · run 9c40ab17 · 12:31:07', icon: 'ph ph-shield-warning' },
+        { action: 'APPROVAL_REJECTED · RELEASE_APPROVAL build 8790', meta: 'user:r.aldridge · “Validation evidence incomplete.” · yesterday', icon: 'ph ph-x-circle' },
+        { action: 'CAPABILITY_DENIED · knowledge.read restricted source', meta: 'agent:requirements-agent · run 9c40ab17 · 11:07:12', icon: 'ph ph-lock-simple' },
+        { action: 'TOOL_INVOCATION_FAILED · ci.run_tests timeout', meta: 'agent:system · run 3f2b91c4 · 14:17:55', icon: 'ph ph-warning' },
+      ],
+
+      auditRows: [
+        { time: '14:26:41', actor: 'Release Agent v2', actorIcon: 'ph ph-robot', action: 'APPROVAL_REQUESTED', target: 'RELEASE_APPROVAL · production', outcome: 'PENDING', corr: 'cor-8f21a', ...t('warn') },
+        { time: '14:18:02', actor: 'system', actorIcon: 'ph ph-cpu', action: 'TASK_RETRY_SCHEDULED', target: 'automated_validation · attempt 2', outcome: 'SUCCESS', corr: 'cor-8f219', ...t('ok') },
+        { time: '14:17:55', actor: 'Development Agent', actorIcon: 'ph ph-robot', action: 'TOOL_INVOKED', target: 'ci.run_tests · suite unit+contract', outcome: 'FAILURE', corr: 'cor-8f218', ...t('fail') },
+        { time: '14:16:10', actor: 'Development Agent', actorIcon: 'ph ph-robot', action: 'TOOL_INVOKED', target: 'repository.create_pull_request', outcome: 'SUCCESS', corr: 'cor-8f215', ...t('ok') },
+        { time: '13:58:44', actor: 'Development Agent', actorIcon: 'ph ph-robot', action: 'CAPABILITY_DENIED', target: 'deployment.deploy_environment', outcome: 'FAILURE', corr: 'cor-8f210', ...t('fail') },
+        { time: '13:52:19', actor: 'R. Aldridge', actorIcon: 'ph ph-user', action: 'APPROVAL_GRANTED', target: 'PLAN_APPROVAL · Implementation Plan v3', outcome: 'SUCCESS', corr: 'cor-8f204', ...t('ok') },
+      ],
+
+      palette: [
+        { label: 'Agent task', icon: 'ph ph-robot' },
+        { label: 'Tool task', icon: 'ph ph-wrench' },
+        { label: 'Approval gate', icon: 'ph ph-seal-check' },
+        { label: 'Condition', icon: 'ph ph-arrows-split' },
+        { label: 'Parallel', icon: 'ph ph-arrows-out-line-horizontal' },
+        { label: 'Wait', icon: 'ph ph-hourglass' },
+        { label: 'Terminate', icon: 'ph ph-stop-circle' },
+      ],
+      paletteAgents: [
+        { label: 'Discovery Agent' }, { label: 'Requirements Agent' }, { label: 'Technical Design Agent' },
+        { label: 'Planning Agent' }, { label: 'Development Agent' }, { label: 'Review Agent' },
+      ],
+
+      canvasNodes: [
+        { name: 'Trigger — work item ready', meta: 'TRIGGER · workItemId required', icon: 'ph ph-lightning', badge: '', hasEdge: true, edgeLabel: '', ring: '0 0 0 1px var(--color-hairline)', ...t('idle') },
+        { name: 'Development', meta: 'AGENT_TASK · Development Agent v4', icon: 'ph ph-robot', badge: 'R2 tools', hasEdge: true, edgeLabel: '', ring: '0 0 0 1px var(--color-hairline)', ...t('idle') },
+        { name: 'Automated Validation', meta: 'TASK · ci.run_build, ci.run_tests', icon: 'ph ph-wrench', badge: 'retry 3', hasEdge: true, edgeLabel: 'on failure → Development', ring: '0 0 0 1px var(--color-hairline)', ...t('idle') },
+        { name: 'Engineering Review', meta: 'AGENT_TASK · Review Agent v3', icon: 'ph ph-magnifying-glass', badge: 'selected', hasEdge: true, edgeLabel: 'changes requested → Development', ring: '0 0 0 1px var(--color-accent-ui), 0 0 0 4px var(--color-accent-soft)', ...t('idle') },
+        { name: 'Release Approval', meta: 'APPROVAL · approval.release v3', icon: 'ph ph-seal-check', badge: 'human gate', hasEdge: true, edgeLabel: '', ring: '0 0 0 1px var(--color-hairline)', ...t('warn') },
+        { name: 'Closure', meta: 'TASK · record release evidence', icon: 'ph ph-flag-checkered', badge: '', hasEdge: false, edgeLabel: '', ring: '0 0 0 1px var(--color-hairline)', ...t('idle') },
+      ],
+
+      inspector: [
+        { label: 'Node id', value: 'engineering_review', icon: '', caret: false },
+        { label: 'Agent', value: 'Review Agent v3', icon: 'ph ph-robot', caret: true },
+        { label: 'Prompt reference', value: 'review/v3', icon: 'ph ph-file-code', caret: true },
+        { label: 'Allowed capabilities', value: 'repository.read_file, repository.write_file', icon: 'ph ph-wrench', caret: true },
+        { label: 'Knowledge access', value: 'Engineering standards, ADR corpus', icon: 'ph ph-books', caret: true },
+        { label: 'On changes requested', value: 'Route to Development', icon: 'ph ph-arrows-split', caret: true },
+        { label: 'Retry limit', value: '2 attempts', icon: 'ph ph-arrow-counter-clockwise', caret: true },
+      ],
+    };
+  }
+}
+
+</script>
+</body>
+</html>

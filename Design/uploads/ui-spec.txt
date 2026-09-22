@@ -1,0 +1,876 @@
+DevOS UI/UX Specification
+Version 1.0 • Product Experience &amp; Interaction Specification
+Purpose: Define the user experience, information architecture, primary screens, navigation, interaction patterns, workflow visibility, approvals, artifacts, agent activity, administration and responsive behaviour for DevOS.
+[Heading1] Document Control
+Item
+Value
+Product
+DevOS
+Document
+UI/UX Specification
+Version
+1.0
+Status
+Product Baseline
+Inputs
+Functional Specification; Domain Model; Workflow Engine; Agent Framework; Knowledge &amp; Context; Tool &amp; Integration; Artifact; Core Platform; Event &amp; Messaging; Security &amp; Identity
+[Heading1] 1. Executive Summary
+DevOS should present a single engineering workspace in which users can understand work, inspect workflow progress, review agent activity, inspect artifacts, approve consequential actions and intervene when necessary.
+The UI should not attempt to expose every internal platform concept equally. The primary experience should be task-oriented: what is happening, what has been produced, what needs attention and what happens next.
+The design should make autonomous activity observable without overwhelming users with model-level detail. Users should be able to drill from a high-level workflow view into tasks, agents, context, tool calls and artifacts when they need evidence.
+[Heading1] 2. UX Principles
+Work first: organise the experience around engineering work rather than AI novelty.
+Human control: users can understand, approve, pause and stop automation.
+Progressive disclosure: show summaries first, evidence on demand.
+Traceability: every important action can be followed to its source and output.
+Explainability without exposing hidden chain-of-thought: show decisions, evidence, policies and outcomes, not private model reasoning.
+Consistency: common interaction patterns across workflows, agents, artifacts and integrations.
+Safe defaults: destructive actions are visibly differentiated and protected.
+Low cognitive load: users should not need to understand DevOS internals to use it.
+Fast path for experts: keyboard navigation, search and deep links.
+Accessible by design.
+[Heading1] 3. Primary Personas
+Persona
+Primary goals
+Product Owner
+Define work, inspect requirements, approve outputs
+Business Analyst
+Analyse requirements and manage discovery artifacts
+Architect
+Review designs, decisions and technical constraints
+Developer
+Receive implementation work, inspect agent activity and code outputs
+QA Engineer
+Inspect test scope, results and defects
+Engineering Manager
+Monitor workflow progress, bottlenecks and outcomes
+Reviewer
+Review and approve consequential artifacts/actions
+Administrator
+Manage users, projects, integrations, agents and policies
+[Heading1] 4. Core User Jobs
+Job
+Primary UI
+Start software change
+Work item / workflow launch
+Understand progress
+Workflow run
+Review generated requirement/design
+Artifact viewer
+Understand agent action
+Agent execution detail
+Approve action
+Approval centre
+Inspect failure
+Execution/task detail
+Manage workflows
+Workflow designer
+Manage agents
+Agent administration
+Connect engineering tools
+Integration administration
+Monitor DevOS
+Operations/dashboard
+[Heading1] 5. Information Architecture
+DevOS
+├── Home
+├── Work
+│   ├── Work Items
+│   └── Workflow Runs
+├── Workflows
+│   ├── Definitions
+│   └── Designer
+├── Agents
+│   ├── Agents
+│   └── Executions
+├── Knowledge
+│   ├── Sources
+│   └── Context
+├── Artifacts
+├── Approvals
+├── Integrations
+├── Insights
+└── Administration
+[Heading1] 6. Global Application Shell
+Element
+Purpose
+Top bar
+Project/context, search, notifications, user
+Primary navigation
+Major DevOS areas
+Context bar
+Current organisation/project/workflow
+Main content
+Current page
+Activity/alerts
+Important events requiring attention
+Command/search
+Fast navigation and actions
+[Heading1] 7. Navigation Model
+Primary navigation should remain stable while project-specific context is shown prominently.
+Area
+Default entry
+Home
+Project overview
+Work
+Work items and active runs
+Workflows
+Workflow definitions
+Agents
+Agent catalogue/executions
+Knowledge
+Sources and retrieval
+Artifacts
+Engineering outputs
+Approvals
+Pending decisions
+Integrations
+Connected systems
+Insights
+Operational/engineering metrics
+Administration
+Settings and access
+[Heading1] 8. Home Dashboard
+The Home page should answer four questions: What needs attention? What is running? What changed? What should I do next?
+Widget
+Content
+Attention
+Pending approvals, failures, blocked workflows
+Active work
+Running workflows and tasks
+Recent activity
+Published artifacts, completed runs, reviews
+Engineering pulse
+Workflow success, cycle time, bottlenecks
+Quick actions
+Start workflow, create work item, view approvals
+System health
+Integration/platform issues
+[Heading1] 9. Project Overview
+Section
+Purpose
+Project status
+Overall workflow/activity state
+Active changes
+Current software changes
+Workflow health
+Success/failure/bottlenecks
+Recent artifacts
+Latest engineering outputs
+Agent activity
+Current automated work
+Integrations
+Repository/issue/CI health
+Open approvals
+Human decisions needed
+[Heading1] 10. Work Item View
+Area
+Purpose
+Header
+Work item identity/status
+Description
+Original business/engineering request
+Workflow
+Associated workflow and run
+Artifacts
+Generated outputs
+Activity
+Chronological events
+Approvals
+Decisions
+External links
+Jira/repository/provider references
+Start/restart controls
+Workflow actions
+[Heading1] 11. Workflow Definition View
+Element
+Purpose
+Overview
+Workflow purpose/version/status
+Stages
+Ordered workflow steps
+Agents
+Agent assignments
+Tools
+Allowed capabilities
+Inputs
+Required artifacts/data
+Outputs
+Produced artifacts
+Policies
+Approval/risk controls
+Version history
+Changes and publication
+[Heading1] 12. Workflow Run View
+This is the most important operational screen in DevOS.
+Element
+Purpose
+Run header
+Status, duration, initiator, version
+Progress
+Stage/task progression
+Current task
+What is happening now
+Timeline
+Events and state changes
+Artifacts
+Outputs produced
+Agent activity
+Executions
+Tool activity
+External actions
+Approvals
+Pending/completed gates
+Issues
+Failures, warnings, blockers
+Controls
+Pause, resume, retry, cancel where authorised
+[Heading1] 13. Workflow Visualisation
+Trigger → Discovery → Requirements → Design → Planning → Approval → Development → Test → Review → Release
+   ✓          ✓             ✓          ●          ○          ○          ○          ○          ○
+State
+UI treatment
+Completed
+Clear completed indicator
+Running
+Active indicator + elapsed time
+Waiting
+Waiting reason
+Blocked
+Visible blocker
+Failed
+Failure + recovery action
+Skipped
+Explicit reason
+Pending approval
+Prominent approval state
+[Heading1] 14. Task Detail
+Section
+Content
+Task purpose
+What the task is intended to achieve
+Inputs
+Artifacts/context supplied
+Agent
+Assigned agent/version
+Tools
+Capabilities available/used
+Output
+Result/artifacts
+Validation
+Checks and results
+Policy
+Relevant security/approval state
+Timeline
+Start/end/retries
+Failure
+Error and recovery options
+[Heading1] 15. Agent Catalogue
+Field
+Purpose
+Agent name
+Human-readable identity
+Role
+Analyst/architect/developer/etc.
+Status
+Draft/published/disabled
+Version
+Current version
+Capabilities
+Permitted actions
+Knowledge access
+Permitted sources
+Tools
+Allowed tools
+Policies
+Authority constraints
+[Heading1] 16. Agent Execution View
+The user should see what the agent did without seeing private chain-of-thought.
+Section
+Content
+Objective
+Task given to agent
+Inputs
+Relevant artifact/context references
+Actions
+Tools/capabilities invoked
+Outputs
+Artifacts/results
+Decisions
+Outcome and rationale summary where available
+Evidence
+Tests, files, provider results
+Policy
+Allow/deny/approval outcomes
+Status
+Running/completed/failed
+[Heading1] 17. Knowledge UI
+Screen
+Purpose
+Knowledge Sources
+Connected/indexed sources
+Source detail
+Status, permissions, freshness
+Knowledge items
+Indexed content
+Context view
+What was supplied to an execution
+Retrieval evidence
+Sources used for an answer/task
+Sync history
+Ingestion/indexing status
+The UI should show source provenance and access classification clearly.
+[Heading1] 18. Context Inspection
+For reproducibility, users should be able to inspect the context manifest associated with a material agent execution.
+Context element
+Display
+Source
+Name/reference
+Version
+Source version where available
+Reason
+Why included
+Authority
+Trust/priority
+Classification
+Sensitivity
+Timestamp
+Freshness
+Truncation
+Whether content was summarised/limited
+[Heading1] 19. Artifact Library
+Feature
+Purpose
+Search
+Find artifacts
+Filter
+Type/status/project/author
+Preview
+Read content
+Version history
+Inspect lineage
+Diff
+Compare versions
+Relationships
+Trace upstream/downstream
+Review
+Approval/review state
+Export
+Generate supported representations
+[Heading1] 20. Artifact Viewer
+Panel
+Purpose
+Header
+Type/version/status
+Content
+Primary artifact
+Metadata
+Project/source/author
+Provenance
+Workflow/agent/context
+Relationships
+Upstream/downstream
+Validation
+Quality results
+Review
+Comments/approval
+Version history
+Previous versions
+[Heading1] 21. Artifact Traceability
+The UI should make the engineering chain visible:
+Requirement → Design → Plan → Code → Test → Review → Release
+A user should be able to navigate in both directions where relationships exist.
+[Heading1] 22. Approval Centre
+Element
+Purpose
+Pending approvals
+Actions requiring user decision
+Risk
+Risk classification
+Requester
+Human/agent/workflow
+Target
+Resource/environment
+Evidence
+Relevant artifact/results
+Policy
+Why approval is required
+Approve
+Authorise exact action
+Reject
+Reject with reason
+Defer
+Leave pending
+[Heading1] 23. Approval Detail
+Show exactly what will happen.
+Show target resource and environment.
+Show the workflow/agent requesting the action.
+Show relevant evidence and validation.
+Show applicable policy.
+Show risk level.
+Never require the user to inspect raw tool/API parameters to understand the decision.
+[Heading1] 24. Integrations
+Screen
+Purpose
+Integration catalogue
+Available provider types
+Connected integrations
+Configured connections
+Integration detail
+Health, scopes, projects
+Capabilities
+Available tools
+Credential status
+Connected/expiring/revoked
+Test connection
+Validate connectivity
+Resource mappings
+Repositories/projects/environments
+[Heading1] 25. Tool Activity
+Field
+Display
+Tool
+Capability name
+Target
+Resource
+Actor
+Agent/user
+Risk
+R0–R4
+Approval
+Required/approved/not required
+Status
+Success/failure
+Duration
+Execution time
+Provider reference
+External ID
+Result
+Summary
+[Heading1] 26. Administration
+Area
+Capabilities
+Organisation
+Name/settings
+Users
+Invite/suspend/manage
+Teams
+Membership/roles
+Projects
+Create/configure/archive
+Roles
+Permission configuration
+Agents
+Publish/disable
+Workflows
+Publish/retire
+Tools
+Enable/policy
+Integrations
+Connect/manage
+Policies
+Security/approval
+Audit
+Search events
+System health
+Dependencies
+[Heading1] 27. Search
+Search should be a first-class cross-DevOS capability.
+Search target
+Examples
+Work
+Feature/bug/key
+Artifact
+PRD/design/plan
+Workflow
+Workflow name/run
+Agent
+Agent/version
+Knowledge
+Source/content
+Integration
+Repository/project
+Activity
+Event/action
+Results should respect the caller's permissions.
+[Heading1] 28. Global Command Palette
+Open project
+Search work
+Start workflow
+Open approval
+Open artifact
+Open workflow run
+Jump to agent
+Open integration
+View recent activity
+Keyboard-accessible command navigation is recommended for power users.
+[Heading1] 29. Notifications
+Notification
+Action
+Approval requested
+Open approval
+Workflow failed
+Open run/task
+Agent blocked
+Open execution
+Integration failure
+Open integration
+Artifact ready for review
+Open artifact
+Workflow completed
+Open run/results
+Security warning
+Open relevant security event
+[Heading1] 30. Activity Timeline
+A consistent timeline component should be reused across work items, workflow runs, artifacts and projects.
+Event
+Example
+Workflow
+Stage started
+Agent
+Execution completed
+Tool
+Pull request created
+Artifact
+Technical design published
+Approval
+Approved
+Integration
+Pipeline completed
+System
+Retry scheduled
+[Heading1] 31. Status Model
+Status
+Meaning
+Draft
+Not active
+Ready
+Available to run
+Running
+Currently executing
+Waiting
+Waiting on dependency/time
+Approval
+Human decision required
+Blocked
+Cannot progress
+Succeeded
+Completed successfully
+Failed
+Execution failed
+Cancelled
+Stopped
+Archived
+No longer active
+Status labels should be consistent across all screens.
+[Heading1] 32. Error UX
+Explain what failed in human terms.
+Show the affected component/resource.
+Distinguish transient from permanent failure.
+Provide safe recovery actions.
+Show technical details progressively.
+Never expose secrets or internal credentials.
+Link to relevant logs/evidence for authorised users.
+[Heading1] 33. Human Intervention
+Action
+Typical use
+Pause
+Temporarily stop workflow progression
+Resume
+Continue after issue resolved
+Retry
+Repeat safe failed task
+Skip
+Bypass task only when policy allows
+Cancel
+Stop workflow
+Reassign
+Change responsible agent/user where supported
+Approve
+Authorise gated action
+Reject
+Prevent progression
+The UI must clearly state the consequences and permissions for each intervention.
+[Heading1] 34. Autonomous Mode Indicator
+Users should always know when DevOS is acting autonomously.
+State
+Indicator
+Human action
+User initiated
+Agent running
+Autonomous execution active
+Awaiting approval
+Human gate required
+Paused
+Automation stopped
+Policy blocked
+Action prevented
+External action
+Tool has changed external state
+[Heading1] 35. Design System
+Use a consistent component library.
+Use semantic status indicators rather than colour alone.
+Use cards sparingly; prioritise information hierarchy.
+Use tables for dense operational data.
+Use timelines for execution history.
+Use drawers/modals for focused inspection.
+Use confirmation dialogs for consequential actions.
+Maintain consistent spacing, typography and interaction states.
+[Heading1] 36. Accessibility
+Requirement
+Target
+Keyboard
+All primary actions accessible
+Focus
+Visible focus state
+Screen reader
+Semantic labels/landmarks
+Colour
+Never rely on colour alone
+Contrast
+Meet WCAG-aligned contrast expectations
+Motion
+Respect reduced-motion settings
+Forms
+Clear labels/errors
+Tables
+Accessible headers/navigation
+Target WCAG 2.2 AA for the production UI.
+[Heading1] 37. Responsive Design
+Viewport
+Behaviour
+Desktop
+Full navigation and multi-panel operational views
+Tablet
+Condensed navigation; stacked panels
+Mobile
+Focus on approvals, alerts, status and essential inspection
+DevOS is primarily an engineering desktop application; mobile should prioritise monitoring and approvals rather than full workflow design.
+[Heading1] 38. Deep Linking
+Every major resource should have a stable URL/deep link.
+Links should preserve organisation/project context.
+Links should open the exact artifact version/run/task where applicable.
+Permission failures should be explicit rather than silently redirecting.
+[Heading1] 39. UX for AI Uncertainty
+DevOS should not present model output as fact merely because it was generated.
+State
+UX treatment
+High confidence/evidence
+Normal result with evidence
+Uncertain
+Visible uncertainty indicator
+Insufficient information
+Explicitly state insufficient information
+Conflicting sources
+Show conflict and source evidence
+Policy blocked
+Explain policy boundary
+Human decision required
+Prominent approval/review state
+[Heading1] 40. UX for Explainability
+The UI should expose evidence and action rationale without exposing private chain-of-thought.
+Show
+Do not expose
+Inputs used
+Private chain-of-thought
+Sources
+Hidden reasoning tokens
+Tools invoked
+Raw internal deliberation
+Outputs/evidence
+Sensitive model internals
+Policy decision
+Unnecessary hidden reasoning
+[Heading1] 41. UX Requirements
+ID
+Requirement
+UX-001
+Users shall see current project context.
+UX-002
+Users shall see workflow progress.
+UX-003
+Users shall inspect agent executions.
+UX-004
+Users shall inspect artifact provenance.
+UX-005
+Users shall review and resolve approvals.
+UX-006
+Users shall inspect tool actions and outcomes.
+UX-007
+Users shall search authorised DevOS resources.
+UX-008
+Users shall manage integrations subject to permission.
+UX-009
+Users shall see system and integration health.
+UX-010
+Users shall intervene in workflows where authorised.
+UX-011
+The UI shall preserve security boundaries.
+UX-012
+The UI shall expose uncertainty and evidence appropriately.
+[Heading1] 42. Non-Functional UX Requirements
+ID
+Requirement
+UX-NFR-001
+Primary pages should be responsive under normal operating conditions.
+UX-NFR-002
+Long-running operations must use progress states rather than blocking the UI.
+UX-NFR-003
+The UI must support keyboard navigation.
+UX-NFR-004
+The production UI should target WCAG 2.2 AA.
+UX-NFR-005
+Permissions must be enforced server-side, not merely hidden in UI.
+UX-NFR-006
+Sensitive content must respect classification and access policy.
+UX-NFR-007
+Operational data should update without requiring constant manual refresh where practical.
+UX-NFR-008
+Critical actions should provide clear confirmation and outcome feedback.
+[Heading1] 43. Conceptual UI Architecture
+                         DevOS UI
+                            │
+             ┌──────────────┼──────────────┐
+             ▼              ▼              ▼
+          Navigation     Context       Notifications
+             │              │              │
+             └──────────────┼──────────────┘
+                            ▼
+                    Feature Screens
+       ┌──────────┬─────────┼─────────┬──────────┐
+       ▼          ▼         ▼         ▼          ▼
+     Work      Workflows  Agents   Artifacts  Approvals
+                            │
+                            ▼
+                    API / Control Plane
+[Heading1] 44. Recommended MVP Screens
+Priority
+Screen
+P0
+Login / project selection
+P0
+Home dashboard
+P0
+Work item detail
+P0
+Workflow run
+P0
+Task detail
+P0
+Artifact viewer
+P0
+Approval centre/detail
+P0
+Integration status
+P0
+Basic administration
+P1
+Agent catalogue/execution
+P1
+Knowledge sources/context
+P1
+Workflow definition
+P1
+Insights
+P2
+Visual workflow designer
+P2
+Advanced analytics
+[Heading1] 45. MVP User Journey
+User selects project.
+User opens a work item or creates one.
+User starts the Software Change Workflow.
+DevOS shows workflow progress.
+Agent-generated artifacts appear as they are produced.
+User inspects PRD/design/implementation plan.
+DevOS requests approval when required.
+User reviews evidence and approves.
+Development agent executes.
+User sees code/tool/test activity.
+QA/review results appear.
+User approves release if required.
+DevOS displays final release evidence and traceability.
+[Heading1] 46. Empty States
+Explain what the screen is for.
+Provide the most useful next action.
+Do not imply a failure when there is simply no data.
+Respect permissions when explaining unavailable resources.
+[Heading1] 47. Loading States
+Use skeletons for page-level loading.
+Use progress indicators for long-running operations.
+Show stage/task status for workflow execution.
+Do not display fake progress.
+Where duration is unpredictable, show elapsed time and current state.
+[Heading1] 48. Confirmation Patterns
+Action
+Pattern
+Cancel workflow
+Confirm + explain consequence
+Approve deployment
+Show target/risk/evidence + confirm
+Delete integration
+Confirm + explain impact
+Disable agent
+Confirm active-run implications
+Retry
+Show what will be repeated
+[Heading1] 49. Testing Strategy
+Level
+Focus
+Component
+Visual/interaction states
+Accessibility
+Keyboard, screen reader, contrast
+Usability
+Primary engineering workflows
+Security
+Permission-aware UI
+Integration
+Live workflow updates
+End-to-end
+Work item → workflow → approval → release
+Responsive
+Desktop/tablet/mobile critical flows
+[Heading1] 50. Initial Acceptance Criteria
+A user can select an organisation/project.
+A user can see active and recent work.
+A workflow run displays live stage/task status.
+A user can inspect an agent execution without seeing private chain-of-thought.
+A user can inspect generated artifact versions and provenance.
+A user can see tool actions and outcomes.
+A user can approve or reject a configured gated action.
+A user can identify the target resource and risk before approval.
+A user can navigate from a requirement to downstream artifacts.
+A user can see failures and safe recovery options.
+A user can search authorised DevOS resources.
+Security-restricted resources are not exposed by UI navigation or search.
+Critical actions provide clear feedback.
+Primary workflows are keyboard accessible.
+[Heading1] 51. Architectural Decisions
+[Heading2] ADR-UX-001: Work-centric UI
+The primary navigation and dashboards are organised around engineering work and outcomes rather than AI components.
+[Heading2] ADR-UX-002: Progressive disclosure
+Summaries are shown first; detailed execution evidence is available on demand.
+[Heading2] ADR-UX-003: Server-side security
+The UI never acts as the security boundary; all permissions are enforced by the platform.
+[Heading2] ADR-UX-004: No chain-of-thought
+DevOS exposes inputs, evidence, actions, decisions and outcomes rather than private model reasoning.
+[Heading2] ADR-UX-005: Workflow run as primary operational view
+The workflow run provides the central operational representation of autonomous engineering work.
+[Heading2] ADR-UX-006: Desktop-first engineering experience
+Core development workflows are optimised for desktop, while mobile focuses on alerts, approvals and monitoring.
+[Heading1] 52. Future UX Capabilities
+Visual workflow designer
+Natural-language workflow creation with controlled preview
+AI-assisted workflow debugging
+Interactive artifact traceability graph
+Live agent collaboration views
+Advanced engineering intelligence
+Custom dashboards
+Organisation-wide governance console
+Agent simulation/replay UI
+Workflow run comparison
+Change-impact visualisation
+[Heading1] 53. Conclusion
+The DevOS UI should make autonomous software development understandable and controllable. The user should be able to move from a work item to workflow progress, agent activity, tools, artifacts, approvals and final evidence without needing to understand the internal architecture.
+The workflow run is the central operational experience. Around it, the UI provides work management, artifacts, agents, knowledge, approvals, integrations and administration. This creates a product experience that feels like an engineering operating environment rather than a collection of AI utilities.

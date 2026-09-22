@@ -21,10 +21,10 @@ import {
   type Agent,
   type AgentVersion,
   type AgentVersionQuality,
-} from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { LoadingState } from '../components/LoadingState.js';
-import { useProjectContext } from '../project-context.js';
+} from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { LoadingState } from '../../components/LoadingState.js';
+import { useProjectContext } from '../../project-context.js';
 
 interface AgentFormState {
   key: string;

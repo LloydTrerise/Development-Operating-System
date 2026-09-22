@@ -19,10 +19,10 @@ import {
   type QualityReport,
   type RecoveryProxySummary,
   type SlowestWorkflowRow,
-} from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { useOrganisationContext } from '../organisation-context.js';
-import { useProjectContext } from '../project-context.js';
+} from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { useOrganisationContext } from '../../organisation-context.js';
+import { useProjectContext } from '../../project-context.js';
 
 function formatRate(rate: number): string {
   return `${(rate * 100).toFixed(0)}%`;

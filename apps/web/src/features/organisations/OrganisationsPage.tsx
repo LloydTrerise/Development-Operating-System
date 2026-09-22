@@ -8,10 +8,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { createOrganisation } from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { LoadingState } from '../components/LoadingState.js';
-import { useOrganisationContext } from '../organisation-context.js';
+import { createOrganisation } from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { LoadingState } from '../../components/LoadingState.js';
+import { useOrganisationContext } from '../../organisation-context.js';
 
 export function OrganisationsPage() {
   const { organisations, selectedOrganisationId, selectOrganisation, loading, error, refresh } =

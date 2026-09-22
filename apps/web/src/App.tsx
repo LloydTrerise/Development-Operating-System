@@ -11,6 +11,7 @@ import {
   List,
   ListItemButton,
   ListItemText,
+  ListSubheader,
   MenuItem,
   Select,
   Toolbar,
@@ -19,20 +20,21 @@ import {
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import { getHealth } from './api-client.js';
-import { AgentsPage } from './pages/AgentsPage.js';
-import { ApprovalsPage } from './pages/ApprovalsPage.js';
-import { CostPage } from './pages/CostPage.js';
-import { DashboardPage } from './pages/DashboardPage.js';
-import { EngineeringIntelligencePage } from './pages/EngineeringIntelligencePage.js';
-import { GovernancePage } from './pages/GovernancePage.js';
-import { KnowledgeSourcesPage } from './pages/KnowledgeSourcesPage.js';
-import { OrganisationsPage } from './pages/OrganisationsPage.js';
-import { ProjectTypesPage } from './pages/ProjectTypesPage.js';
-import { ProjectsPage } from './pages/ProjectsPage.js';
-import { RunsPage } from './pages/RunsPage.js';
-import { WorkItemsPage } from './pages/WorkItemsPage.js';
-import { WorkflowLibraryPage } from './pages/WorkflowLibraryPage.js';
-import { WorkflowsPage } from './pages/WorkflowsPage.js';
+import { AgentsPage } from './features/agents/AgentsPage.js';
+import { ApprovalsPage } from './features/approvals/ApprovalsPage.js';
+import { CostPage } from './features/cost/CostPage.js';
+import { HomePage } from './features/home/HomePage.js';
+import { EngineeringIntelligencePage } from './features/engineering-intelligence/EngineeringIntelligencePage.js';
+import { GovernancePage } from './features/governance/GovernancePage.js';
+import { KnowledgeSourcesPage } from './features/knowledge/KnowledgeSourcesPage.js';
+import { OrganisationsPage } from './features/organisations/OrganisationsPage.js';
+import { ProjectTypesPage } from './features/project-types/ProjectTypesPage.js';
+import { ProjectsPage } from './features/projects/ProjectsPage.js';
+import { RunsPage } from './features/runs/RunsPage.js';
+import { WorkItemDetailPage } from './features/work-items/WorkItemDetailPage.js';
+import { WorkItemsPage } from './features/work-items/WorkItemsPage.js';
+import { WorkflowLibraryPage } from './features/workflow-library/WorkflowLibraryPage.js';
+import { WorkflowsPage } from './features/workflows/WorkflowsPage.js';
 import { useOrganisationContext } from './organisation-context.js';
 import { useProjectContext } from './project-context.js';
 import { useSession } from './session.js';
@@ -42,21 +44,59 @@ type ApiStatus = 'checking' | 'online' | 'offline';
 
 const DRAWER_WIDTH = 220;
 
-const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard' },
-  { to: '/organisations', label: 'Organisations' },
-  { to: '/projects', label: 'Projects' },
-  { to: '/project-types', label: 'Project Types' },
-  { to: '/work-items', label: 'Work Items' },
-  { to: '/agents', label: 'Agents' },
-  { to: '/knowledge', label: 'Knowledge' },
-  { to: '/workflows', label: 'Workflows' },
-  { to: '/workflow-library', label: 'Workflow Library' },
-  { to: '/runs', label: 'Runs' },
-  { to: '/approvals', label: 'Approvals' },
-  { to: '/governance', label: 'Governance' },
-  { to: '/cost', label: 'Cost' },
-  { to: '/engineering-intelligence', label: 'Engineering Intelligence' },
+/**
+ * Grouped per Design/DevOS.dc.html's own navGroups mockup shape
+ * (Overview/Work/Workflows/Decisions/Platform). The mockup's own IA only
+ * names 10 of today's 14 real pages; the remaining 4 (Project Types,
+ * Workflow Library, Cost, Engineering Intelligence) are placed here as a
+ * disclosed assumption (specs/sprints/sprint-29/DEVOS-204.md) — Project
+ * Types under Platform (a platform-level template catalog, not a single
+ * workflow run), Workflow Library under Workflows (filling the mockup's
+ * "Definitions" slot), Cost/Engineering Intelligence under Platform as
+ * their own entries. Artifacts/Integrations are reserved, deliberately
+ * empty groups populated for real in Sprints 35/36 — no placeholder link,
+ * only the heading, until each area's route actually exists.
+ */
+const NAV_GROUPS = [
+  {
+    label: 'Overview',
+    items: [{ to: '/', label: 'Home' }],
+  },
+  {
+    label: 'Work',
+    items: [
+      { to: '/work-items', label: 'Work Items' },
+      { to: '/runs', label: 'Runs' },
+    ],
+  },
+  {
+    label: 'Workflows',
+    items: [
+      { to: '/workflows', label: 'Workflows' },
+      { to: '/workflow-library', label: 'Workflow Library' },
+    ],
+  },
+  {
+    label: 'Decisions',
+    items: [
+      { to: '/approvals', label: 'Approvals' },
+      { to: '/governance', label: 'Governance' },
+    ],
+  },
+  {
+    label: 'Platform',
+    items: [
+      { to: '/organisations', label: 'Organisations' },
+      { to: '/projects', label: 'Projects' },
+      { to: '/project-types', label: 'Project Types' },
+      { to: '/agents', label: 'Agents' },
+      { to: '/knowledge', label: 'Knowledge' },
+      { to: '/cost', label: 'Cost' },
+      { to: '/engineering-intelligence', label: 'Engineering Intelligence' },
+    ],
+  },
+  { label: 'Artifacts', items: [] },
+  { label: 'Integrations', items: [] },
 ] as const;
 
 function OrganisationSelector() {
@@ -282,26 +322,35 @@ export function App() {
         <Toolbar />
         <Divider />
         <List>
-          {NAV_ITEMS.map(({ to, label }) => (
-            <ListItemButton
-              key={to}
-              component={NavLink}
-              to={to}
-              end={to === '/'}
-              sx={{ '&.active': { bgcolor: 'action.selected' } }}
-            >
-              <ListItemText primary={label} />
-            </ListItemButton>
+          {NAV_GROUPS.map((group) => (
+            <li key={group.label}>
+              <ul style={{ padding: 0 }}>
+                <ListSubheader component="div">{group.label}</ListSubheader>
+                {group.items.map(({ to, label }) => (
+                  <ListItemButton
+                    key={to}
+                    component={NavLink}
+                    to={to}
+                    end={to === '/'}
+                    sx={{ '&.active': { bgcolor: 'action.selected' } }}
+                  >
+                    <ListItemText primary={label} />
+                  </ListItemButton>
+                ))}
+              </ul>
+            </li>
           ))}
         </List>
       </Drawer>
       <Box component="main" sx={{ flexGrow: 1, p: 3, mt: 8 }}>
         <Routes>
-          <Route path="/" element={<DashboardPage />} />
+          <Route path="/" element={<HomePage />} />
           <Route path="/organisations" element={<OrganisationsPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/project-types" element={<ProjectTypesPage />} />
           <Route path="/work-items" element={<WorkItemsPage />} />
+          {/* DEVOS-206 scaffolding proof of concept for the /{area}/:id convention; replaced with real content by Sprint 31's DEVOS-213. */}
+          <Route path="/work-items/:id" element={<WorkItemDetailPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/knowledge" element={<KnowledgeSourcesPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />

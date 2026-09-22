@@ -12,11 +12,11 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { createProject, listProjectTypes, type ProjectType } from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { LoadingState } from '../components/LoadingState.js';
-import { useOrganisationContext } from '../organisation-context.js';
-import { useProjectContext } from '../project-context.js';
+import { createProject, listProjectTypes, type ProjectType } from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { LoadingState } from '../../components/LoadingState.js';
+import { useOrganisationContext } from '../../organisation-context.js';
+import { useProjectContext } from '../../project-context.js';
 
 export function ProjectsPage() {
   const { projects, selectedProjectId, selectProject, loading, error, refresh } =

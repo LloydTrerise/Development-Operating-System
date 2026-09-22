@@ -16,10 +16,10 @@ import {
   listApprovalsForProject,
   rejectApproval,
   type Approval,
-} from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { StatusChip } from '../components/StatusChip.js';
-import { useProjectContext } from '../project-context.js';
+} from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { StatusChip } from '../../components/StatusChip.js';
+import { useProjectContext } from '../../project-context.js';
 
 /**
  * DEVOS-046 — a minimal approval inbox: pending approvals a reviewer can act

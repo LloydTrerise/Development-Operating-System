@@ -27,12 +27,12 @@ import {
   type AuditRecord,
   type Policy,
   type SimulatedPolicyDecision,
-} from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { PolicyAuthoringForm } from '../components/PolicyAuthoringForm.js';
-import { StatusChip } from '../components/StatusChip.js';
-import { useOrganisationContext } from '../organisation-context.js';
-import { useProjectContext } from '../project-context.js';
+} from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { PolicyAuthoringForm } from '../../components/PolicyAuthoringForm.js';
+import { StatusChip } from '../../components/StatusChip.js';
+import { useOrganisationContext } from '../../organisation-context.js';
+import { useProjectContext } from '../../project-context.js';
 
 /**
  * DEVOS-090 — no wireframe exists anywhere in the spec corpus for this page

@@ -14,12 +14,12 @@ import {
   listProjectTypes,
   updateProjectType,
   type ProjectType,
-} from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { LoadingState } from '../components/LoadingState.js';
-import { ProjectTypeAgentsEditor } from '../components/ProjectTypeAgentsEditor.js';
-import { ProjectTypeWorkflowsEditor } from '../components/ProjectTypeWorkflowsEditor.js';
-import { useSession } from '../session.js';
+} from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { LoadingState } from '../../components/LoadingState.js';
+import { ProjectTypeAgentsEditor } from '../../components/ProjectTypeAgentsEditor.js';
+import { ProjectTypeWorkflowsEditor } from '../../components/ProjectTypeWorkflowsEditor.js';
+import { useSession } from '../../session.js';
 
 export function ProjectTypesPage() {
   const session = useSession();

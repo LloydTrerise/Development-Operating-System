@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  body { margin: 0; min-height: 100vh; background: #f4f5f7; color: rgba(0,0,0,0.87); font-family: Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: #3f4a5a; }
+  a:hover { color: #2f3846; }
+</style>
+</helmet>
+
+<div style="display:flex; min-height:100vh; background:#f4f5f7; font-family:Helvetica, Arial, sans-serif; color:rgba(0,0,0,0.87)">
+
+  <div style="position:fixed; top:0; left:0; right:0; zIndex:1201; background:#3f4a5a; color:#fff; boxShadow:0px 2px 4px -1px rgba(0,0,0,0.2),0px 4px 5px 0px rgba(0,0,0,0.14),0px 1px 10px 0px rgba(0,0,0,0.12)">
+    <div style="minHeight:64px; display:flex; alignItems:center; gap:16px; padding:0 24px">
+      <h1 style="margin:0; flexGrow:1; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em; whiteSpace:nowrap">DevOS</h1>
+      <div style="minWidth:180px; position:relative">
+        <div style="display:flex; alignItems:center; justifyContent:space-between; height:40px; padding:0 14px; border:1px solid rgba(255,255,255,0.4); borderRadius:4px; fontSize:14.857px; color:#fff">
+          <span>DevOS POC</span>
+          <span style="fontSize:19px; lineHeight:1; opacity:0.9">▾</span>
+        </div>
+      </div>
+      <span style="fontSize:13px; lineHeight:1.43">API: online</span>
+      <span style="fontSize:13px; lineHeight:1.43">Session: dev-identity (dev-principal)</span>
+      <button style="width:40px; height:40px; display:grid; placeItems:center; background:transparent; border:0; borderRadius:50%; color:inherit; cursor:pointer; fontSize:18px" style-hover="background:rgba(255,255,255,0.08)" aria-label="Switch to dark mode">☾</button>
+    </div>
+  </div>
+
+  <div style="width:220px; flexShrink:0">
+    <div style="position:fixed; top:0; left:0; bottom:0; width:220px; boxSizing:border-box; background:#fff; borderRight:1px solid rgba(0,0,0,0.12)">
+      <div style="minHeight:64px"></div>
+      <div style="height:1px; background:rgba(0,0,0,0.12)"></div>
+      <ul style="listStyle:none; margin:0; padding:8px 0">
+        <sc-for list="{{ nav }}" as="item" hint-placeholder-count="6">
+          <li>
+            <a href="{{ item.href }}" onClick="{{ item.go }}" style="display:flex; alignItems:center; padding:8px 16px; textDecoration:none; color:rgba(0,0,0,0.87); background:{{ item.bg }}; cursor:pointer" style-hover="background:rgba(0,0,0,0.04)">
+              <span style="fontSize:14.857px; lineHeight:1.5">{{ item.label }}</span>
+            </a>
+          </li>
+        </sc-for>
+      </ul>
+    </div>
+  </div>
+
+  <main style="flexGrow:1; padding:24px; marginTop:64px; minWidth:0">
+
+    <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+      <section>
+        <h2 style="margin:0 0 0.35em; fontSize:31.57px; fontWeight:600; lineHeight:1.235; letterSpacing:0.00735em">Dashboard</h2>
+        <p style="margin:0; fontSize:14.857px; lineHeight:1.5; color:rgba(0,0,0,0.6)">Project, work item, and run visibility will appear here as later tasks add the underlying APIs.</p>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{ isProjects }}" hint-placeholder-val="{{ false }}">
+      <section>
+        <h2 style="margin:0 0 0.35em; fontSize:31.57px; fontWeight:600; lineHeight:1.235; letterSpacing:0.00735em">Projects</h2>
+        <ul style="listStyle:none; margin:0; padding:4px 0">
+          <sc-for list="{{ projects }}" as="p" hint-placeholder-count="2">
+            <li>
+              <div style="display:flex; alignItems:center; padding:4px 16px; background:{{ p.bg }}; cursor:pointer" style-hover="background:rgba(0,0,0,0.04)">
+                <span style="fontSize:14.857px; lineHeight:1.5">{{ p.label }}</span>
+              </div>
+            </li>
+          </sc-for>
+        </ul>
+        <h3 style="margin:32px 0 0.35em; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em">New project</h3>
+        <div style="display:flex; flexDirection:column; gap:16px; maxWidth:360px">
+          <div style="position:relative">
+            <label style="position:absolute; top:-9px; left:9px; padding:0 5px; background:#f4f5f7; fontSize:11.14px; color:rgba(0,0,0,0.6)">Name&#8202;*</label>
+            <div style="height:40px; border:1px solid rgba(0,0,0,0.23); borderRadius:4px"></div>
+          </div>
+          <div style="position:relative">
+            <label style="position:absolute; top:-9px; left:9px; padding:0 5px; background:#f4f5f7; fontSize:11.14px; color:rgba(0,0,0,0.6)">Slug&#8202;*</label>
+            <div style="height:40px; border:1px solid rgba(0,0,0,0.23); borderRadius:4px"></div>
+          </div>
+          <button style="alignSelf:flex-start; padding:6px 16px; background:#3f4a5a; color:#fff; border:0; borderRadius:4px; fontSize:13px; fontWeight:500; textTransform:uppercase; letterSpacing:0.02857em; cursor:pointer; boxShadow:0px 3px 1px -2px rgba(0,0,0,0.2),0px 2px 2px 0px rgba(0,0,0,0.14),0px 1px 5px 0px rgba(0,0,0,0.12)">Create project</button>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{ isWorkItems }}" hint-placeholder-val="{{ false }}">
+      <section>
+        <h2 style="margin:0 0 0.35em; fontSize:31.57px; fontWeight:600; lineHeight:1.235; letterSpacing:0.00735em">Work Items</h2>
+        <div style="maxWidth:720px; overflowX:auto">
+          <table style="width:100%; borderCollapse:collapse; fontSize:13px">
+            <thead>
+              <tr>
+                <th style="textAlign:left; padding:6px 16px; fontWeight:500; fontSize:13px; lineHeight:1.43; borderBottom:1px solid rgba(224,224,224,1)">Title</th>
+                <th style="textAlign:left; padding:6px 16px; fontWeight:500; fontSize:13px; lineHeight:1.43; borderBottom:1px solid rgba(224,224,224,1)">Type</th>
+                <th style="textAlign:left; padding:6px 16px; fontWeight:500; fontSize:13px; lineHeight:1.43; borderBottom:1px solid rgba(224,224,224,1)">Status</th>
+                <th style="textAlign:left; padding:6px 16px; fontWeight:500; fontSize:13px; lineHeight:1.43; borderBottom:1px solid rgba(224,224,224,1)">Priority</th>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ workItems }}" as="w" hint-placeholder-count="4">
+                <tr>
+                  <td style="padding:6px 16px; fontSize:13px; lineHeight:1.43; borderBottom:1px solid rgba(224,224,224,1)">{{ w.title }}</td>
+                  <td style="padding:6px 16px; fontSize:13px; lineHeight:1.43; borderBottom:1px solid rgba(224,224,224,1)">{{ w.type }}</td>
+                  <td style="padding:6px 16px; borderBottom:1px solid rgba(224,224,224,1)">
+                    <span style="display:inline-flex; alignItems:center; height:24px; padding:0 8px; borderRadius:16px; fontSize:12.09px; background:{{ w.chipBg }}; color:{{ w.chipFg }}">{{ w.status }}</span>
+                  </td>
+                  <td style="padding:6px 16px; fontSize:13px; lineHeight:1.43; borderBottom:1px solid rgba(224,224,224,1)">{{ w.priority }}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <h3 style="margin:32px 0 0.35em; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em">New work item</h3>
+        <div style="display:flex; flexDirection:column; gap:16px; maxWidth:360px">
+          <div style="position:relative">
+            <label style="position:absolute; top:-9px; left:9px; padding:0 5px; background:#f4f5f7; fontSize:11.14px; color:rgba(0,0,0,0.6)">Title&#8202;*</label>
+            <div style="height:40px; border:1px solid rgba(0,0,0,0.23); borderRadius:4px"></div>
+          </div>
+          <button style="alignSelf:flex-start; padding:6px 16px; background:#3f4a5a; color:#fff; border:0; borderRadius:4px; fontSize:13px; fontWeight:500; textTransform:uppercase; letterSpacing:0.02857em; cursor:pointer; boxShadow:0px 3px 1px -2px rgba(0,0,0,0.2),0px 2px 2px 0px rgba(0,0,0,0.14),0px 1px 5px 0px rgba(0,0,0,0.12)">Create work item</button>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{ isRuns }}" hint-placeholder-val="{{ false }}">
+      <section>
+        <h2 style="margin:0 0 0.35em; fontSize:31.57px; fontWeight:600; lineHeight:1.235; letterSpacing:0.00735em">Runs</h2>
+        <h3 style="margin:0 0 0.35em; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em">Start a run</h3>
+        <div style="display:flex; flexDirection:row; gap:16px; alignItems:flex-start; flexWrap:wrap; marginBottom:32px">
+          <div style="minWidth:240px; position:relative">
+            <label style="position:absolute; top:-9px; left:9px; padding:0 5px; background:#f4f5f7; fontSize:11.14px; color:rgba(0,0,0,0.6)">Work item&#8202;*</label>
+            <div style="display:flex; alignItems:center; justifyContent:space-between; height:40px; padding:0 14px; border:1px solid rgba(0,0,0,0.23); borderRadius:4px; fontSize:14.857px">
+              <span>Add release readiness gate</span><span style="opacity:0.54; fontSize:19px; lineHeight:1">▾</span>
+            </div>
+          </div>
+          <div style="minWidth:220px; position:relative">
+            <label style="position:absolute; top:-9px; left:9px; padding:0 5px; background:#f4f5f7; fontSize:11.14px; color:rgba(0,0,0,0.6)">Workflow&#8202;*</label>
+            <div style="display:flex; alignItems:center; justifyContent:space-between; height:40px; padding:0 14px; border:1px solid rgba(0,0,0,0.23); borderRadius:4px; fontSize:14.857px">
+              <span>Development Path</span><span style="opacity:0.54; fontSize:19px; lineHeight:1">▾</span>
+            </div>
+          </div>
+          <button style="marginTop:4px; padding:6px 16px; background:#3f4a5a; color:#fff; border:0; borderRadius:4px; fontSize:13px; fontWeight:500; textTransform:uppercase; letterSpacing:0.02857em; cursor:pointer; boxShadow:0px 3px 1px -2px rgba(0,0,0,0.2),0px 2px 2px 0px rgba(0,0,0,0.14),0px 1px 5px 0px rgba(0,0,0,0.12)">Start run</button>
+        </div>
+
+        <h3 style="margin:0 0 0.35em; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em">Runs started this session</h3>
+        <div style="marginBottom:32px">
+          <div style="marginBottom:24px; background:#fff; border:1px solid rgba(0,0,0,0.12); borderRadius:4px">
+            <div style="padding:16px 16px 24px">
+              <div style="display:flex; alignItems:center; gap:12px; marginBottom:8px; flexWrap:wrap">
+                <span style="fontSize:14.857px; lineHeight:1.75">Run <code style="fontFamily:monospace; fontSize:0.9em">3f2b91c4-7e0d-4a55-9a11-8d6c0f2ab310</code></span>
+                <span style="display:inline-flex; alignItems:center; height:24px; padding:0 8px; borderRadius:16px; fontSize:12.09px; background:#0288d1; color:#fff">RUNNING</span>
+                <span style="fontSize:11.14px; lineHeight:1.66; letterSpacing:0.03333em; color:rgba(0,0,0,0.6)">(polling…)</span>
+              </div>
+
+              <div style="fontSize:13px; fontWeight:500; lineHeight:1.57; marginTop:16px; marginBottom:8px">Timeline</div>
+              <ul style="listStyle:none; margin:0; padding:0">
+                <sc-for list="{{ tasks }}" as="t" hint-placeholder-count="4">
+                  <li style="display:block; marginBottom:12px">
+                    <div style="display:flex; alignItems:center; gap:8px; flexWrap:wrap">
+                      <span style="fontSize:13px; lineHeight:1.43">{{ t.label }}</span>
+                      <span style="display:inline-flex; alignItems:center; height:24px; padding:0 8px; borderRadius:16px; fontSize:12.09px; background:{{ t.chipBg }}; color:{{ t.chipFg }}">{{ t.status }}</span>
+                    </div>
+                    <sc-if value="{{ t.hasAgent }}" hint-placeholder-val="{{ true }}">
+                      <div style="marginLeft:16px; marginTop:4px">
+                        <div style="fontSize:11.14px; lineHeight:1.66; letterSpacing:0.03333em; color:rgba(0,0,0,0.6)">Agent</div>
+                        <div style="fontSize:13px; lineHeight:1.43">{{ t.agentLine }}</div>
+                        <div style="fontSize:11.14px; lineHeight:1.66; letterSpacing:0.03333em; color:rgba(0,0,0,0.6); marginTop:8px">Context manifest</div>
+                        <div style="fontSize:13px; lineHeight:1.43">{{ t.contextLine }}</div>
+                        <div style="fontSize:11.14px; lineHeight:1.66; letterSpacing:0.03333em; color:rgba(0,0,0,0.6); marginTop:8px">Output</div>
+                        <pre style="margin:0; padding:8px; background:#fff; border:1px solid rgba(0,0,0,0.12); borderRadius:4px; fontFamily:monospace; fontSize:12px; overflow:auto">{{ t.output }}</pre>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ t.hasTools }}" hint-placeholder-val="{{ false }}">
+                      <div style="marginLeft:16px; marginTop:8px">
+                        <div style="fontSize:11.14px; lineHeight:1.66; letterSpacing:0.03333em; color:rgba(0,0,0,0.6)">Tool invocations</div>
+                        <ul style="listStyle:none; margin:0; padding:0">
+                          <sc-for list="{{ t.tools }}" as="tool" hint-placeholder-count="2">
+                            <li style="display:block">
+                              <div style="display:flex; alignItems:center; gap:8px; flexWrap:wrap">
+                                <span style="fontSize:13px; lineHeight:1.43">{{ tool.key }}</span>
+                                <span style="display:inline-flex; alignItems:center; height:24px; padding:0 8px; borderRadius:16px; fontSize:12.09px; background:{{ tool.chipBg }}; color:{{ tool.chipFg }}">{{ tool.status }}</span>
+                                <span style="fontSize:11.14px; lineHeight:1.66; letterSpacing:0.03333em; color:rgba(0,0,0,0.6)">{{ tool.evidence }}</span>
+                              </div>
+                            </li>
+                          </sc-for>
+                        </ul>
+                      </div>
+                    </sc-if>
+                  </li>
+                </sc-for>
+              </ul>
+
+              <div style="marginTop:16px; background:#fff; boxShadow:0px 2px 1px -1px rgba(0,0,0,0.2),0px 1px 1px 0px rgba(0,0,0,0.14),0px 1px 3px 0px rgba(0,0,0,0.12); borderRadius:4px">
+                <div style="minHeight:48px; display:flex; alignItems:center; padding:0 16px; gap:8px; cursor:pointer">
+                  <span style="flexGrow:1; fontSize:13px; fontWeight:500; lineHeight:1.57">Artifacts (3)</span>
+                  <span style="opacity:0.54">⌄</span>
+                </div>
+              </div>
+              <div style="background:#fff; boxShadow:0px 2px 1px -1px rgba(0,0,0,0.2),0px 1px 1px 0px rgba(0,0,0,0.14),0px 1px 3px 0px rgba(0,0,0,0.12)">
+                <div style="minHeight:48px; display:flex; alignItems:center; padding:0 16px; gap:8px; cursor:pointer">
+                  <span style="flexGrow:1; fontSize:13px; fontWeight:500; lineHeight:1.57">Test evidence</span>
+                  <span style="opacity:0.54">⌄</span>
+                </div>
+              </div>
+              <div style="background:#fff; boxShadow:0px 2px 1px -1px rgba(0,0,0,0.2),0px 1px 1px 0px rgba(0,0,0,0.14),0px 1px 3px 0px rgba(0,0,0,0.12)">
+                <div style="minHeight:48px; display:flex; alignItems:center; padding:0 16px; gap:8px; cursor:pointer">
+                  <span style="flexGrow:1; fontSize:13px; fontWeight:500; lineHeight:1.57">Review evidence</span>
+                  <span style="opacity:0.54">⌄</span>
+                </div>
+              </div>
+              <div style="background:#fff; boxShadow:0px 2px 1px -1px rgba(0,0,0,0.2),0px 1px 1px 0px rgba(0,0,0,0.14),0px 1px 3px 0px rgba(0,0,0,0.12); borderBottomLeftRadius:4px; borderBottomRightRadius:4px">
+                <div style="minHeight:48px; display:flex; alignItems:center; padding:0 16px; gap:8px; cursor:pointer">
+                  <span style="flexGrow:1; fontSize:13px; fontWeight:500; lineHeight:1.57">Release readiness</span>
+                  <span style="opacity:0.54; transform:rotate(180deg)">⌄</span>
+                </div>
+                <div style="padding:8px 16px 16px">
+                  <p style="margin:0 0 0.35em; fontSize:13px; lineHeight:1.43">Not ready to release.</p>
+                  <div style="display:flex; flexDirection:column; gap:8px">
+                    <sc-for list="{{ readinessReasons }}" as="r" hint-placeholder-count="2">
+                      <div role="alert" style="display:flex; alignItems:center; gap:12px; margin:8px 0; padding:6px 16px; background:#fdeded; color:#5f2120; borderRadius:4px; fontSize:13px; lineHeight:1.43">
+                        <span style="fontSize:20px; lineHeight:1; color:#ef5350">⚠</span><span>{{ r }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <h3 style="margin:0 0 0.35em; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em">Work item timeline</h3>
+        <p style="margin:0 0 0.35em; fontSize:13px; lineHeight:1.43; color:rgba(0,0,0,0.6)">Every run this work item&#39;s change has gone through — planning, development, release, and any others — oldest first, not just the runs started above.</p>
+        <p style="margin:0; fontSize:14.857px; lineHeight:1.5; color:rgba(0,0,0,0.6)">No runs recorded yet for this work item.</p>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{ isApprovals }}" hint-placeholder-val="{{ false }}">
+      <section>
+        <h2 style="margin:0 0 0.35em; fontSize:31.57px; fontWeight:600; lineHeight:1.235; letterSpacing:0.00735em">Approvals</h2>
+        <h3 style="margin:0 0 0.35em; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em">Pending</h3>
+        <div style="display:flex; flexDirection:column; gap:16px; marginBottom:32px">
+          <div style="background:#fff; border:1px solid rgba(0,0,0,0.12); borderRadius:4px">
+            <div style="padding:16px 16px 24px">
+              <p style="margin:0 0 0.35em; fontSize:14.857px; lineHeight:1.5"><strong>RELEASE_APPROVAL</strong> for run <code style="fontFamily:monospace; fontSize:0.9em">3f2b91c4-7e0d-4a55-9a11-8d6c0f2ab310</code> — requested by dev-principal at 2026-08-26T14:12:08.441Z</p>
+              <div style="fontSize:13px; fontWeight:500; lineHeight:1.57; marginTop:16px">Evidence</div>
+              <ul style="listStyle:none; margin:0; padding:4px 0">
+                <li style="padding:4px 0; fontSize:13px; lineHeight:1.43"><strong>Release Readiness Report</strong> (RELEASE_EVIDENCE)</li>
+                <li style="padding:4px 0; fontSize:13px; lineHeight:1.43"><strong>Automated Validation Results</strong> (TEST_EVIDENCE)</li>
+              </ul>
+              <div style="display:flex; flexDirection:row; gap:16px; alignItems:center; marginTop:16px">
+                <div style="flexGrow:1; position:relative">
+                  <label style="position:absolute; top:-9px; left:9px; padding:0 5px; background:#fff; fontSize:11.14px; color:rgba(0,0,0,0.6)">Comment</label>
+                  <div style="height:40px; border:1px solid rgba(0,0,0,0.23); borderRadius:4px"></div>
+                </div>
+                <button style="padding:6px 16px; background:#2e7d32; color:#fff; border:0; borderRadius:4px; fontSize:13px; fontWeight:500; textTransform:uppercase; letterSpacing:0.02857em; cursor:pointer; boxShadow:0px 3px 1px -2px rgba(0,0,0,0.2),0px 2px 2px 0px rgba(0,0,0,0.14),0px 1px 5px 0px rgba(0,0,0,0.12)">Approve</button>
+                <button style="padding:5px 15px; background:transparent; color:#d32f2f; border:1px solid rgba(211,47,47,0.5); borderRadius:4px; fontSize:13px; fontWeight:500; textTransform:uppercase; letterSpacing:0.02857em; cursor:pointer">Reject</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <h3 style="margin:0 0 0.35em; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em">Decided</h3>
+        <ul style="listStyle:none; margin:0; padding:4px 0">
+          <sc-for list="{{ decidedApprovals }}" as="a" hint-placeholder-count="2">
+            <li style="display:flex; alignItems:center; gap:16px; padding:4px 0">
+              <div style="flexGrow:1">
+                <div style="fontSize:13px; lineHeight:1.43">{{ a.type }}</div>
+                <div style="fontSize:12.09px; lineHeight:1.43; color:rgba(0,0,0,0.6)">{{ a.secondary }}</div>
+              </div>
+              <span style="display:inline-flex; alignItems:center; height:24px; padding:0 8px; borderRadius:16px; fontSize:12.09px; background:{{ a.chipBg }}; color:{{ a.chipFg }}">{{ a.status }}</span>
+            </li>
+          </sc-for>
+        </ul>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{ isGovernance }}" hint-placeholder-val="{{ false }}">
+      <section>
+        <h2 style="margin:0 0 0.35em; fontSize:31.57px; fontWeight:600; lineHeight:1.235; letterSpacing:0.00735em">Governance</h2>
+        <div style="display:flex; flexDirection:column; gap:32px">
+          <div>
+            <h3 style="margin:0 0 0.35em; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em">Policies</h3>
+            <ul style="listStyle:none; margin:0; padding:4px 0">
+              <sc-for list="{{ policies }}" as="p" hint-placeholder-count="3">
+                <li style="display:flex; alignItems:center; gap:16px; padding:4px 0">
+                  <div style="flexGrow:1; fontSize:13px; lineHeight:1.43"><strong>{{ p.key }}</strong> v{{ p.version }}{{ p.published }}</div>
+                  <span style="display:inline-flex; alignItems:center; height:24px; padding:0 8px; borderRadius:16px; fontSize:12.09px; background:{{ p.chipBg }}; color:{{ p.chipFg }}">{{ p.status }}</span>
+                </li>
+              </sc-for>
+            </ul>
+          </div>
+          <div>
+            <h3 style="margin:0 0 0.35em; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em">Approvals</h3>
+            <ul style="listStyle:none; margin:0; padding:4px 0">
+              <sc-for list="{{ allApprovals }}" as="a" hint-placeholder-count="3">
+                <li style="display:flex; alignItems:center; gap:16px; padding:4px 0">
+                  <div style="flexGrow:1">
+                    <div style="fontSize:13px; lineHeight:1.43">{{ a.type }}</div>
+                    <div style="fontSize:12.09px; lineHeight:1.43; color:rgba(0,0,0,0.6)">{{ a.secondary }}</div>
+                  </div>
+                  <span style="display:inline-flex; alignItems:center; height:24px; padding:0 8px; borderRadius:16px; fontSize:12.09px; background:{{ a.chipBg }}; color:{{ a.chipFg }}">{{ a.status }}</span>
+                </li>
+              </sc-for>
+            </ul>
+          </div>
+          <div>
+            <h3 style="margin:0 0 0.35em; fontSize:18.57px; fontWeight:600; lineHeight:1.6; letterSpacing:0.0075em">Risk activity</h3>
+            <p style="margin:0 0 0.35em; fontSize:13px; lineHeight:1.43; color:rgba(0,0,0,0.6)">Denied or failed security-significant actions, most recent first.</p>
+            <ul style="listStyle:none; margin:0; padding:4px 0">
+              <sc-for list="{{ riskActivity }}" as="r" hint-placeholder-count="2">
+                <li style="padding:4px 0">
+                  <div style="fontSize:13px; lineHeight:1.43"><strong>{{ r.action }}</strong> on {{ r.targetType }} <code style="fontFamily:monospace; fontSize:0.9em">{{ r.targetId }}</code></div>
+                  <div style="fontSize:12.09px; lineHeight:1.43; color:rgba(0,0,0,0.6)">{{ r.meta }}</div>
+                </li>
+              </sc-for>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </sc-if>
+
+  </main>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+const CHIP = {
+  success: ['#2e7d32', '#fff'], error: ['#d32f2f', '#fff'], warning: ['#ed6c02', '#fff'],
+  info: ['#0288d1', '#fff'], default: ['rgba(0,0,0,0.08)', 'rgba(0,0,0,0.87)'],
+};
+const STATUS_COLOR = {
+  COMPLETED: 'success', SUCCEEDED: 'success', APPROVED: 'success', PUBLISHED: 'success', ACTIVE: 'success',
+  FAILED: 'error', REJECTED: 'error', CANCELLED: 'error', DISABLED: 'error', RETIRED: 'error',
+  ARCHIVED: 'error', SUPERSEDED: 'error', CHANGES_REQUESTED: 'error',
+  RUNNING: 'info',
+  PENDING: 'warning', WAITING: 'warning', AWAITING_APPROVAL: 'warning', PAUSED: 'warning',
+  QUEUED: 'warning', READY: 'warning', DRAFT: 'warning', VALIDATING: 'warning', REVIEW: 'warning',
+  GENERATED: 'warning', DEPRECATED: 'warning',
+};
+function chip(status) {
+  const [bg, fg] = CHIP[STATUS_COLOR[status] || 'default'];
+  return { status, chipBg: bg, chipFg: fg };
+}
+
+class Component extends DCLogic {
+  state = { page: 'dashboard' };
+
+  renderVals() {
+    const page = this.state.page;
+    const go = (p) => (e) => { e.preventDefault(); this.setState({ page: p }); };
+    const nav = [
+      ['dashboard', 'Dashboard'], ['projects', 'Projects'], ['work-items', 'Work Items'],
+      ['runs', 'Runs'], ['approvals', 'Approvals'], ['governance', 'Governance'],
+    ].map(([id, label]) => ({
+      label, href: '#' + id, go: go(id),
+      bg: page === id ? 'rgba(0,0,0,0.08)' : 'transparent',
+    }));
+
+    return {
+      nav,
+      isDashboard: page === 'dashboard', isProjects: page === 'projects',
+      isWorkItems: page === 'work-items', isRuns: page === 'runs',
+      isApprovals: page === 'approvals', isGovernance: page === 'governance',
+
+      projects: [
+        { label: 'DevOS Development (devos-development)', bg: 'transparent' },
+        { label: 'DevOS POC (devos-poc)', bg: 'rgba(63,74,90,0.12)' },
+      ],
+
+      workItems: [
+        { title: 'Add release readiness gate', type: 'FEATURE', priority: 'HIGH', ...chip('RUNNING') },
+        { title: 'Resolve context manifest truncation', type: 'BUG', priority: 'HIGH', ...chip('AWAITING_APPROVAL') },
+        { title: 'Publish tool capability catalogue', type: 'FEATURE', priority: 'MEDIUM', ...chip('SUCCEEDED') },
+        { title: 'Retry policy for transient build failures', type: 'TASK', priority: 'LOW', ...chip('READY') },
+      ],
+
+      tasks: [
+        {
+          label: '1. discovery (AGENT_TASK)', ...chip('SUCCEEDED'), hasAgent: true, hasTools: false,
+          agentLine: 'DISCOVERY (prompt discovery/v3) — COMPLETED',
+          contextLine: '4 sources: WORK_ITEM, KNOWLEDGE_ITEM, ARTIFACT, POLICY',
+          output: '{\n  "summary": "Release gate must block on failed validation.",\n  "openQuestions": 1\n}',
+          tools: [],
+        },
+        {
+          label: '2. requirements (AGENT_TASK)', ...chip('SUCCEEDED'), hasAgent: true, hasTools: false,
+          agentLine: 'REQUIREMENTS (prompt requirements/v2) — COMPLETED',
+          contextLine: '3 sources: WORK_ITEM, ARTIFACT, KNOWLEDGE_ITEM',
+          output: '{\n  "artifactId": "d41a7c92-1b8e-4f30-96aa-27c5be4d1f08",\n  "requirements": 7\n}',
+          tools: [],
+        },
+        {
+          label: '3. development (AGENT_TASK)', ...chip('SUCCEEDED'), hasAgent: true, hasTools: true,
+          agentLine: 'DEVELOPMENT (prompt development/v4) — COMPLETED',
+          contextLine: '5 sources: ARTIFACT, WORK_ITEM, KNOWLEDGE_ITEM, POLICY, REPOSITORY',
+          output: '{\n  "filesChanged": 6,\n  "pullRequest": "devos/devos#412"\n}',
+          tools: [
+            { key: 'repository.write_file', evidence: 'evidence: sha 4f1c9ab', ...chip('SUCCEEDED') },
+            { key: 'repository.create_pull_request', evidence: 'evidence: devos/devos#412', ...chip('SUCCEEDED') },
+          ],
+        },
+        {
+          label: '4. automated_validation (TASK)', ...chip('RUNNING'), hasAgent: false, hasTools: true,
+          agentLine: '', contextLine: '', output: '',
+          tools: [
+            { key: 'ci.run_build', evidence: 'evidence: build 8821', ...chip('SUCCEEDED') },
+            { key: 'ci.run_tests', evidence: '', ...chip('RUNNING') },
+          ],
+        },
+      ],
+
+      readinessReasons: [
+        'Automated validation has not completed for the latest artifact version.',
+        'RELEASE_APPROVAL is pending.',
+      ],
+
+      decidedApprovals: [
+        { type: 'DESIGN_APPROVAL', secondary: 'by dev-principal — "Design matches the spec."', ...chip('APPROVED') },
+        { type: 'PLAN_APPROVAL', secondary: 'by dev-principal', ...chip('APPROVED') },
+        { type: 'RELEASE_APPROVAL', secondary: 'by dev-principal — "Validation evidence incomplete."', ...chip('REJECTED') },
+      ],
+
+      allApprovals: [
+        { type: 'RELEASE_APPROVAL', secondary: 'requested by dev-principal', ...chip('PENDING') },
+        { type: 'DESIGN_APPROVAL', secondary: 'decided by dev-principal', ...chip('APPROVED') },
+        { type: 'PLAN_APPROVAL', secondary: 'decided by dev-principal', ...chip('APPROVED') },
+      ],
+
+      policies: [
+        { key: 'approval.release', version: 3, published: ' — published 2026-08-14T09:20:11.002Z', ...chip('PUBLISHED') },
+        { key: 'tool.repository.write', version: 2, published: ' — published 2026-08-02T16:44:03.771Z', ...chip('PUBLISHED') },
+        { key: 'agent.autonomy.development', version: 1, published: '', ...chip('DRAFT') },
+      ],
+
+      riskActivity: [
+        { action: 'TOOL_INVOCATION_DENIED', targetType: 'TOOL_CAPABILITY', targetId: 'deployment.deploy_environment', meta: 'by agent:development-agent at 2026-08-26T13:58:44.019Z' },
+        { action: 'POLICY_DENIED', targetType: 'WORKFLOW_RUN', targetId: '3f2b91c4-7e0d-4a55-9a11-8d6c0f2ab310', meta: 'by agent:review-agent at 2026-08-26T11:07:12.560Z' },
+      ],
+    };
+  }
+}
+
+</script>
+</body>
+</html>

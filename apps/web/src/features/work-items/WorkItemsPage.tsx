@@ -11,11 +11,11 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { createWorkItem, listWorkItems, type WorkItem } from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { LoadingState } from '../components/LoadingState.js';
-import { StatusChip } from '../components/StatusChip.js';
-import { useProjectContext } from '../project-context.js';
+import { createWorkItem, listWorkItems, type WorkItem } from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { LoadingState } from '../../components/LoadingState.js';
+import { StatusChip } from '../../components/StatusChip.js';
+import { useProjectContext } from '../../project-context.js';
 
 export function WorkItemsPage() {
   const { selectedProjectId } = useProjectContext();

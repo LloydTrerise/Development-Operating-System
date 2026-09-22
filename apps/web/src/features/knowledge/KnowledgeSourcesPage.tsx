@@ -20,10 +20,10 @@ import {
   updateKnowledgeSource,
   type KnowledgeReference,
   type KnowledgeSource,
-} from '../api-client.js';
-import { ErrorAlert } from '../components/ErrorAlert.js';
-import { LoadingState } from '../components/LoadingState.js';
-import { useProjectContext } from '../project-context.js';
+} from '../../api-client.js';
+import { ErrorAlert } from '../../components/ErrorAlert.js';
+import { LoadingState } from '../../components/LoadingState.js';
+import { useProjectContext } from '../../project-context.js';
 
 interface KnowledgeSourceFormState {
   key: string;
