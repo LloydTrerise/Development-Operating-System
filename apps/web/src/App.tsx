@@ -31,6 +31,7 @@ import { HomePage } from './features/home/HomePage.js';
 import { EngineeringIntelligencePage } from './features/engineering-intelligence/EngineeringIntelligencePage.js';
 import { GovernancePage } from './features/governance/GovernancePage.js';
 import { IntegrationsPage } from './features/integrations/IntegrationsPage.js';
+import { KnowledgeMarketplacePage } from './features/knowledge/KnowledgeMarketplacePage.js';
 import { KnowledgeSourceDetailPage } from './features/knowledge/KnowledgeSourceDetailPage.js';
 import { KnowledgeSourcesPage } from './features/knowledge/KnowledgeSourcesPage.js';
 import { OrganisationsPage } from './features/organisations/OrganisationsPage.js';
@@ -98,6 +99,7 @@ const NAV_GROUPS = [
       { to: '/agents', label: 'Agents' },
       { to: '/agents/marketplace', label: 'Agent Marketplace' },
       { to: '/knowledge', label: 'Knowledge' },
+      { to: '/knowledge/marketplace', label: 'Knowledge Marketplace' },
       { to: '/cost', label: 'Cost' },
       { to: '/engineering-intelligence', label: 'Engineering Intelligence' },
     ],
@@ -368,6 +370,9 @@ export function App() {
           {/* DEVOS-230: the `/{area}/:id` convention's real Agent detail view. */}
           <Route path="/agents/:id" element={<AgentDetailPage />} />
           <Route path="/knowledge" element={<KnowledgeSourcesPage />} />
+          {/* DEVOS-248: a static path, ranks above the dynamic `/knowledge/:id`
+              route below regardless of declaration order. */}
+          <Route path="/knowledge/marketplace" element={<KnowledgeMarketplacePage />} />
           {/* DEVOS-231: the `/{area}/:id` convention's real Knowledge Source detail view. */}
           <Route path="/knowledge/:id" element={<KnowledgeSourceDetailPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />

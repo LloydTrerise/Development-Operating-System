@@ -21,6 +21,7 @@ import {
   getProjectCostSummary,
   getWorkItem,
   installAgentVersion,
+  installKnowledgeSource,
   listApprovalsForRun,
   listArtifactVersions,
   listAuditRecordsForProject,
@@ -33,6 +34,7 @@ import {
   listProjectTypes,
   listProjects,
   listSharedAgentVersions,
+  listSharedKnowledgeSources,
   publishPolicy,
   removeMember,
   shareAgentVersion,
@@ -752,6 +754,55 @@ describe('api client', () => {
     expect(result.ok).toBe(true);
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/knowledge-sources/source-1');
+  });
+
+  // DEVOS-249: `GET /organisations/:organisationId/shared-knowledge-sources`
+  // already existed (DEVOS-189), unmodified, with zero client call site
+  // until Sprint 38 wired it into `KnowledgeMarketplacePage.tsx`.
+  it("DEVOS-249: lists an organisation's shared knowledge sources at the real route", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { data: [], meta: { requestId: 'req-45' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listSharedKnowledgeSources('org-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/shared-knowledge-sources');
+  });
+
+  // DEVOS-249: `POST /organisations/:organisationId/shared-knowledge-sources/:knowledgeSourceId/install`
+  // already existed (DEVOS-189), unmodified, with zero client call site
+  // until Sprint 38 wired it into `KnowledgeMarketplacePage.tsx`.
+  it('DEVOS-249: installs a shared knowledge source at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'source-2',
+          projectId: 'project-2',
+          key: 'standard',
+          name: 'Coding Standard',
+          sourceType: 'STANDARD',
+          content: 'Use tabs.',
+          status: 'ACTIVE',
+          createdBy: 'user-1',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          sharedAcrossOrganisation: false,
+        },
+        meta: { requestId: 'req-46' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await installKnowledgeSource('org-1', 'source-1', 'project-2');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/shared-knowledge-sources/source-1/install');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ targetProjectId: 'project-2' });
   });
 
   // DEVOS-234: `GET /artifacts/:artifactId` already existed, unmodified,
