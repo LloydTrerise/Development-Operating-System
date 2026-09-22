@@ -677,6 +677,20 @@ export interface AgentVersion {
   createdBy: string;
   publishedAt?: string;
   createdAt: string;
+  /** DEVOS-244: widens the type with a field `toAgentVersionDto` already
+   * returns unconditionally (`sharedAcrossOrganisation ?? false`) but was
+   * untyped on the frontend until now. */
+  sharedAcrossOrganisation: boolean;
+}
+
+/** DEVOS-244: mirrors `packages/domain/src/agents/agent-version.ts`'s real
+ * `SharedAgentVersion` exactly — note there is no `sourceProjectName` field,
+ * unlike `SharedKnowledgeSource` below, a real, disclosed divergence (see
+ * specs/sprints/sprint-37/README.md's grounding). */
+export interface SharedAgentVersion extends AgentVersion {
+  agentKey: string;
+  agentName: string;
+  sourceProjectId: string;
 }
 
 /** DEVOS-173: the first real create path for a per-project (non-template) agent. */
@@ -721,6 +735,41 @@ export interface AgentVersionQuality {
 
 export function getAgentQuality(agentId: string): Promise<ApiResult<AgentVersionQuality[]>> {
   return request<AgentVersionQuality[]>(`/api/v1/agents/${agentId}/quality`);
+}
+
+/** DEVOS-244: the real, organisation-scoped "share" primitive (DEVOS-177),
+ * previously wired at the API layer only. */
+export function shareAgentVersion(
+  agentId: string,
+  version: number,
+  shared: boolean,
+): Promise<ApiResult<AgentVersion>> {
+  return request<AgentVersion>(`/api/v1/agents/${agentId}/versions/${version}/share`, {
+    method: 'POST',
+    body: { shared },
+  });
+}
+
+/** DEVOS-244: every real agent version shared across the given organisation
+ * (DEVOS-178), previously wired at the API layer only. */
+export function listSharedAgentVersions(
+  organisationId: string,
+): Promise<ApiResult<SharedAgentVersion[]>> {
+  return request<SharedAgentVersion[]>(`/api/v1/organisations/${organisationId}/shared-agents`);
+}
+
+/** DEVOS-244: clones a shared agent version into a brand-new agent under a
+ * different project in the same organisation (DEVOS-178), previously wired
+ * at the API layer only. */
+export function installAgentVersion(
+  organisationId: string,
+  agentVersionId: string,
+  targetProjectId: string,
+): Promise<ApiResult<Agent & { version: AgentVersion }>> {
+  return request<Agent & { version: AgentVersion }>(
+    `/api/v1/organisations/${organisationId}/shared-agents/${agentVersionId}/install`,
+    { method: 'POST', body: { targetProjectId } },
+  );
 }
 
 export function startRun(

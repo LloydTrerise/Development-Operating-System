@@ -20,6 +20,7 @@ import {
   getOrganisationCostReport,
   getProjectCostSummary,
   getWorkItem,
+  installAgentVersion,
   listApprovalsForRun,
   listArtifactVersions,
   listAuditRecordsForProject,
@@ -31,8 +32,10 @@ import {
   listPoliciesForProject,
   listProjectTypes,
   listProjects,
+  listSharedAgentVersions,
   publishPolicy,
   removeMember,
+  shareAgentVersion,
   simulatePolicy,
   startRun,
   startRunFromVersion,
@@ -907,5 +910,87 @@ describe('api client', () => {
       credentialReference: 'github/devos-pilot-test-pat',
       configuration: { github: { owner: 'devos-org', repo: 'devos-pilot' } },
     });
+  });
+
+  // DEVOS-244: `POST /agents/:agentId/versions/:version/share` already
+  // existed (DEVOS-177), unmodified, with zero client wrapper.
+  it('DEVOS-244: shares an agent version at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'agent-version-1',
+          agentId: 'agent-1',
+          version: 1,
+          status: 'PUBLISHED',
+          configuration: { role: 'DEVELOPMENT', provider: 'anthropic', modelRef: 'claude-sonnet-5' },
+          createdBy: 'seed-user',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          sharedAcrossOrganisation: true,
+        },
+        meta: { requestId: 'req-33' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await shareAgentVersion('agent-1', 1, true);
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/agents/agent-1/versions/1/share');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ shared: true });
+  });
+
+  // DEVOS-244: `GET /organisations/:organisationId/shared-agents` already
+  // existed (DEVOS-178), unmodified, with zero client wrapper.
+  it("DEVOS-244: lists an organisation's shared agent versions at the real route", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { data: [], meta: { requestId: 'req-34' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listSharedAgentVersions('org-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/shared-agents');
+  });
+
+  // DEVOS-244: `POST /organisations/:organisationId/shared-agents/:agentVersionId/install`
+  // already existed (DEVOS-178), unmodified, with zero client wrapper.
+  it('DEVOS-244: installs a shared agent version at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'agent-2',
+          projectId: 'project-2',
+          key: 'dev-agent',
+          name: 'Dev Agent',
+          status: 'ACTIVE',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          version: {
+            id: 'agent-version-2',
+            agentId: 'agent-2',
+            version: 1,
+            status: 'PUBLISHED',
+            configuration: { role: 'DEVELOPMENT', provider: 'anthropic', modelRef: 'claude-sonnet-5' },
+            createdBy: 'seed-user',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            sharedAcrossOrganisation: false,
+          },
+        },
+        meta: { requestId: 'req-35' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await installAgentVersion('org-1', 'agent-version-1', 'project-2');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/shared-agents/agent-version-1/install');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ targetProjectId: 'project-2' });
   });
 });

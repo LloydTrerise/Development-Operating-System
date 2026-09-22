@@ -19,6 +19,7 @@ import {
   getAgentQuality,
   listAgentVersions,
   publishAgentVersion,
+  shareAgentVersion,
   type Agent,
   type AgentVersion,
   type AgentVersionQuality,
@@ -47,6 +48,11 @@ function PanelHeader({ title }: { title: string }) {
  * binding or per-agent policy record exists anywhere in this codebase — per
  * this sprint's own "omit rather than fabricate" discipline (see
  * specs/sprints/sprint-34/README.md's grounding).
+ *
+ * DEVOS-245: the Versions table also gained a Share/Unshare action per
+ * PUBLISHED version (wiring DEVOS-177's real `sharedAgentVersion` route for
+ * the first time) and a "Shared" indicator column — see
+ * specs/sprints/sprint-37/README.md's grounding.
  */
 export function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -112,6 +118,23 @@ export function AgentDetailPage() {
     setRefreshToken((token) => token + 1);
   }
 
+  // DEVOS-245: no client-side role check — the backend's real `ForbiddenError`
+  // ("Only a project owner may share an agent version.") surfaces through
+  // `actionError`/`ErrorAlert` on rejection, matching `handlePublish`'s own
+  // established convention exactly.
+  async function handleShareToggle(version: AgentVersion) {
+    if (!id) return;
+    setBusy(true);
+    setActionError(null);
+    const result = await shareAgentVersion(id, version.version, !version.sharedAcrossOrganisation);
+    setBusy(false);
+    if (!result.ok) {
+      setActionError(result.error.message);
+      return;
+    }
+    setRefreshToken((token) => token + 1);
+  }
+
   const sortedVersions = [...versions].sort((a, b) => b.version - a.version);
   const hasDraft = sortedVersions[0]?.status === 'DRAFT';
   const qualityByVersionId = new Map(quality.map((q) => [q.agentVersionId, q]));
@@ -160,6 +183,7 @@ export function AgentDetailPage() {
                 <TableRow>
                   <TableCell>Version</TableCell>
                   <TableCell>Status</TableCell>
+                  <TableCell>Shared</TableCell>
                   <TableCell>Role</TableCell>
                   <TableCell>Provider</TableCell>
                   <TableCell>Model</TableCell>
@@ -176,6 +200,13 @@ export function AgentDetailPage() {
                       <TableCell>{version.version}</TableCell>
                       <TableCell>
                         <StatusChip status={version.status} />
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          size="small"
+                          variant={version.sharedAcrossOrganisation ? 'filled' : 'outlined'}
+                          label={version.sharedAcrossOrganisation ? 'Shared' : 'Not shared'}
+                        />
                       </TableCell>
                       <TableCell>{version.configuration.role}</TableCell>
                       <TableCell>{version.configuration.provider}</TableCell>
@@ -199,13 +230,22 @@ export function AgentDetailPage() {
                             Publish
                           </Button>
                         )}
+                        {version.status === 'PUBLISHED' && (
+                          <Button
+                            size="small"
+                            disabled={busy}
+                            onClick={() => handleShareToggle(version)}
+                          >
+                            {version.sharedAcrossOrganisation ? 'Unshare' : 'Share'}
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
                 })}
                 {sortedVersions.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8}>
+                    <TableCell colSpan={9}>
                       <Typography color="text.secondary">No versions yet.</Typography>
                     </TableCell>
                   </TableRow>

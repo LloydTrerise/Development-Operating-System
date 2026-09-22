@@ -21,6 +21,7 @@ import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import { getHealth } from './api-client.js';
 import { AgentDetailPage } from './features/agents/AgentDetailPage.js';
+import { AgentMarketplacePage } from './features/agents/AgentMarketplacePage.js';
 import { AgentsPage } from './features/agents/AgentsPage.js';
 import { ApprovalsPage } from './features/approvals/ApprovalsPage.js';
 import { ArtifactLibraryPage } from './features/artifacts/ArtifactLibraryPage.js';
@@ -95,6 +96,7 @@ const NAV_GROUPS = [
       { to: '/projects', label: 'Projects' },
       { to: '/project-types', label: 'Project Types' },
       { to: '/agents', label: 'Agents' },
+      { to: '/agents/marketplace', label: 'Agent Marketplace' },
       { to: '/knowledge', label: 'Knowledge' },
       { to: '/cost', label: 'Cost' },
       { to: '/engineering-intelligence', label: 'Engineering Intelligence' },
@@ -360,6 +362,9 @@ export function App() {
           {/* DEVOS-206 scaffolding proof of concept for the /{area}/:id convention; replaced with real content by Sprint 31's DEVOS-213. */}
           <Route path="/work-items/:id" element={<WorkItemDetailPage />} />
           <Route path="/agents" element={<AgentsPage />} />
+          {/* DEVOS-245: a static path, ranks above the dynamic `/agents/:id`
+              route below regardless of declaration order. */}
+          <Route path="/agents/marketplace" element={<AgentMarketplacePage />} />
           {/* DEVOS-230: the `/{area}/:id` convention's real Agent detail view. */}
           <Route path="/agents/:id" element={<AgentDetailPage />} />
           <Route path="/knowledge" element={<KnowledgeSourcesPage />} />
