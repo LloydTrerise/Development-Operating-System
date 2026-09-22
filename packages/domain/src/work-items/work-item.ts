@@ -55,4 +55,11 @@ export interface WorkItemRepository {
    * added after a repository's own initial interface.
    */
   countReworkCyclesForProject?: (projectId: ProjectId) => Promise<WorkItemReworkCount[]>;
+  /**
+   * DEVOS-261: real Postgres full-text search, mirroring
+   * `KnowledgeSourceRepository.searchForProject`'s (DEVOS-187) exact
+   * pattern. Optional, matching this repository's own established
+   * additive-method convention (`countReworkCyclesForProject`).
+   */
+  searchForProject?: (projectId: ProjectId, query: string) => Promise<WorkItem[]>;
 }

@@ -4,6 +4,13 @@ import { AuthenticationError } from './errors.js';
 export interface RouteContext {
   principal: Principal | null;
   params: Record<string, string>;
+  /**
+   * DEVOS-262: real URL query-string parameters (e.g. `?q=...`) — no route
+   * needed these before this sprint's cross-entity search route, so this
+   * field did not exist until now. Additive; every existing handler ignores
+   * it unchanged.
+   */
+  query: Record<string, string>;
   body: unknown;
   /**
    * DEVOS-088: the same id already returned to the caller as

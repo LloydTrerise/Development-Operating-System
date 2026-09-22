@@ -83,6 +83,27 @@ export function createWorkItemRepository(db: QueryExecutor): WorkItemRepository 
     // `costBreakdownByRoleForOrganisation`'s own `agent_versions.configuration->>'role'`
     // jsonb-text-extraction pattern. Cast to numeric for the `> 0` filter
     // and for a correct (not lexicographic-string) ordering.
+    // DEVOS-261: real Postgres full-text search, mirroring
+    // `KnowledgeSourceRepository.searchForProject`'s (DEVOS-187) exact
+    // pattern. `description` is `NOT NULL` (migrations/0004_work_items.ts),
+    // so no `coalesce()` is needed.
+    async searchForProject(projectId, query) {
+      const rows = await db
+        .selectFrom('work_items')
+        .selectAll()
+        .where('project_id', '=', projectId)
+        .where(
+          sql<boolean>`to_tsvector('english', title || ' ' || description) @@ plainto_tsquery('english', ${query})`,
+        )
+        .orderBy(
+          sql`ts_rank(to_tsvector('english', title || ' ' || description), plainto_tsquery('english', ${query}))`,
+          'desc',
+        )
+        .limit(50)
+        .execute();
+      return rows.map(toDomain);
+    },
+
     async countReworkCyclesForProject(projectId) {
       const rows = await db
         .selectFrom('work_items')

@@ -64,4 +64,13 @@ export interface ArtifactRepository {
     organisationId: OrganisationId,
     artifactType: string,
   ) => Promise<ArtifactEvidenceRow[]>;
+  /**
+   * DEVOS-261: real Postgres full-text search over `name` (the only real
+   * searchable text column on this table — per-version content lives in
+   * `ArtifactVersion.metadata`, out of this method's scope), mirroring
+   * `KnowledgeSourceRepository.searchForProject`'s (DEVOS-187) exact
+   * pattern. Optional, matching this repository's own established
+   * additive-method convention (`listEvidenceForProject`).
+   */
+  searchForProject?: (projectId: ProjectId, query: string) => Promise<Artifact[]>;
 }

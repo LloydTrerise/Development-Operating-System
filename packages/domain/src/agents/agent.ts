@@ -16,4 +16,12 @@ export interface AgentRepository {
   getByProjectAndKey: (projectId: ProjectId, key: string) => Promise<Agent | null>;
   listForProject: (projectId: ProjectId) => Promise<Agent[]>;
   create: (agent: Agent) => Promise<void>;
+  /**
+   * DEVOS-261: real Postgres full-text search over `name`/`description`,
+   * mirroring `KnowledgeSourceRepository.searchForProject`'s (DEVOS-187)
+   * exact pattern. Optional, matching this codebase's established
+   * additive-method convention for repository extensions added after a
+   * repository's own initial interface.
+   */
+  searchForProject?: (projectId: ProjectId, query: string) => Promise<Agent[]>;
 }

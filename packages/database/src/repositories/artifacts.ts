@@ -6,6 +6,7 @@ import type {
   WorkflowTaskId,
 } from '@devos/contracts';
 import type { Artifact, ArtifactRepository } from '@devos/domain';
+import { sql } from 'kysely';
 import type { ArtifactsTable } from '../database.js';
 import type { QueryExecutor } from './base.js';
 
@@ -119,6 +120,26 @@ export function createArtifactRepository(db: QueryExecutor): ArtifactRepository 
         createdAt: row.created_at,
         metadata: (row.metadata as Record<string, unknown> | null) ?? {},
       }));
+    },
+
+    // DEVOS-261: real Postgres full-text search over `name` — the only
+    // real searchable text column on this table (per-version content lives
+    // in `ArtifactVersion.metadata`, out of scope) — mirroring
+    // `KnowledgeSourceRepository.searchForProject`'s (DEVOS-187) exact
+    // pattern.
+    async searchForProject(projectId, query) {
+      const rows = await db
+        .selectFrom('artifacts')
+        .selectAll()
+        .where('project_id', '=', projectId)
+        .where(sql<boolean>`to_tsvector('english', name) @@ plainto_tsquery('english', ${query})`)
+        .orderBy(
+          sql`ts_rank(to_tsvector('english', name), plainto_tsquery('english', ${query}))`,
+          'desc',
+        )
+        .limit(50)
+        .execute();
+      return rows.map(toDomain);
     },
   };
 }

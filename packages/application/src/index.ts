@@ -118,6 +118,8 @@ export * from './tasks/run-validation-task.js';
 export * from './tasks/tool-invocation-outcome.js';
 export * from './system-health/deps.js';
 export * from './system-health/get-project-system-health.js';
+export * from './search/deps.js';
+export * from './search/search-project.js';
 export * from './tools/deps.js';
 export * from './tools/get-capability.js';
 export * from './tools/list-capabilities.js';

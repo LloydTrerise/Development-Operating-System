@@ -66,6 +66,7 @@ import type {
   ProjectTypeUseCaseDeps,
   ProjectUseCaseDeps,
   ReleaseReadinessUseCaseDeps,
+  SearchUseCaseDeps,
   SystemHealthUseCaseDeps,
   ToolInvocationSummaryUseCaseDeps,
   ToolUseCaseDeps,
@@ -101,6 +102,7 @@ import { createPolicyRoutes } from './routes/policies.js';
 import { createProjectTypeRoutes } from './routes/project-types.js';
 import { createProjectRoutes } from './routes/projects.js';
 import { createReleaseReadinessRoutes } from './routes/release-readiness.js';
+import { createSearchRoutes } from './routes/search.js';
 import { createSystemHealthRoutes } from './routes/system-health.js';
 import { createToolCapabilityRoutes } from './routes/tool-capabilities.js';
 import { createToolInvocationSummaryRoutes } from './routes/tool-invocation-summaries.js';
@@ -222,6 +224,7 @@ export interface CreateAppOptions {
   approvalDeps?: ApprovalUseCaseDeps;
   toolDeps?: ToolUseCaseDeps;
   systemHealthDeps?: SystemHealthUseCaseDeps;
+  searchDeps?: SearchUseCaseDeps;
   /** DEVOS-091: overridable so tests can exercise a real 429 without firing 60+ requests. */
   mutationRateLimiter?: RateLimiter;
   /** DEVOS-135: overridable the same way `database` itself is — a real
@@ -435,6 +438,14 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     integrations: integrationDeps.integrations,
     toolCapabilities: toolDeps.toolCapabilities,
   };
+  const searchDeps: SearchUseCaseDeps = options.searchDeps ?? {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    workItems: workItemDeps.workItems,
+    artifacts: artifactDeps.artifacts,
+    workflowDefinitions: workflowDeps.workflowDefinitions,
+    agents: agentDeps.agents,
+  };
 
   const routes: Route[] = [
     ...createHealthRoutes(API_PREFIX, database),
@@ -471,6 +482,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createApprovalRoutes(API_PREFIX, approvalDeps),
     ...createToolCapabilityRoutes(API_PREFIX, toolDeps),
     ...createSystemHealthRoutes(API_PREFIX, systemHealthDeps, database),
+    ...createSearchRoutes(API_PREFIX, searchDeps),
   ];
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -483,7 +495,8 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     }
 
     const requestId = resolveCorrelationId(req);
-    const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const pathname = url.pathname;
 
     try {
       const raw = await readBody(req);
@@ -504,6 +517,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
       const data = await match.route.handler({
         principal,
         params: match.params,
+        query: Object.fromEntries(url.searchParams),
         body,
         correlationId: requestId,
       });

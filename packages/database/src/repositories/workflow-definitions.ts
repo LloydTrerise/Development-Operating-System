@@ -1,5 +1,6 @@
 import type { ProjectId, WorkflowId } from '@devos/contracts';
 import type { WorkflowDefinition, WorkflowDefinitionRepository } from '@devos/domain';
+import { sql } from 'kysely';
 import type { WorkflowDefinitionsTable } from '../database.js';
 import type { QueryExecutor } from './base.js';
 
@@ -60,6 +61,27 @@ export function createWorkflowDefinitionRepository(
           updated_at: definition.updatedAt,
         })
         .execute();
+    },
+
+    // DEVOS-261: real Postgres full-text search over `name`/`description`,
+    // mirroring `KnowledgeSourceRepository.searchForProject`'s (DEVOS-187)
+    // exact pattern. `description` is nullable, so `coalesce()` is needed
+    // (unlike `work_items.description`).
+    async searchForProject(projectId, query) {
+      const rows = await db
+        .selectFrom('workflow_definitions')
+        .selectAll()
+        .where('project_id', '=', projectId)
+        .where(
+          sql<boolean>`to_tsvector('english', name || ' ' || coalesce(description, '')) @@ plainto_tsquery('english', ${query})`,
+        )
+        .orderBy(
+          sql`ts_rank(to_tsvector('english', name || ' ' || coalesce(description, '')), plainto_tsquery('english', ${query}))`,
+          'desc',
+        )
+        .limit(50)
+        .execute();
+      return rows.map(toDomain);
     },
   };
 }

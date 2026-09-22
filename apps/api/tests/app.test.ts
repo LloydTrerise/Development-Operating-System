@@ -17,6 +17,7 @@ import type {
   ProjectTypeUseCaseDeps,
   ProjectUseCaseDeps,
   ReleaseReadinessUseCaseDeps,
+  SearchUseCaseDeps,
   SystemHealthUseCaseDeps,
   ToolInvocationSummaryUseCaseDeps,
   ToolUseCaseDeps,
@@ -296,6 +297,15 @@ function createInMemoryWorkItemDeps(projectDeps: ProjectUseCaseDeps): WorkItemUs
       if (!existing) return;
       workItems.set(id, { ...existing, ...changes, updatedAt });
     },
+    // DEVOS-262: a simple substring stand-in for real Postgres full-text
+    // search, exercised by the new search route's own tests.
+    searchForProject: async (projectId, query) =>
+      [...workItems.values()].filter(
+        (item) =>
+          item.projectId === projectId &&
+          (item.title.toLowerCase().includes(query.toLowerCase()) ||
+            (item.description ?? '').toLowerCase().includes(query.toLowerCase())),
+      ),
   };
 
   return {
@@ -324,6 +334,15 @@ function createInMemoryWorkflowDeps(
     create: async (definition) => {
       definitions.set(definition.id, definition);
     },
+    // DEVOS-262: a simple substring stand-in for real Postgres full-text
+    // search, exercised by the new search route's own tests.
+    searchForProject: async (projectId, query) =>
+      [...definitions.values()].filter(
+        (d) =>
+          d.projectId === projectId &&
+          (d.name.toLowerCase().includes(query.toLowerCase()) ||
+            (d.description ?? '').toLowerCase().includes(query.toLowerCase())),
+      ),
   };
 
   const workflowVersions: WorkflowVersionRepository = {
@@ -419,6 +438,12 @@ function createInMemoryArtifactDeps(
     create: async (artifact) => {
       artifactsStore.set(artifact.id, artifact);
     },
+    // DEVOS-262: a simple substring stand-in for real Postgres full-text
+    // search, exercised by the new search route's own tests.
+    searchForProject: async (projectId, query) =>
+      [...artifactsStore.values()].filter(
+        (a) => a.projectId === projectId && a.name.toLowerCase().includes(query.toLowerCase()),
+      ),
   };
 
   const artifactVersions: ArtifactVersionRepository = {
@@ -456,6 +481,15 @@ function createInMemoryAgentDeps(projectDeps: ProjectUseCaseDeps): AgentUseCaseD
     create: async (agent) => {
       agentsStore.set(agent.id, agent);
     },
+    // DEVOS-262: a simple substring stand-in for real Postgres full-text
+    // search, exercised by the new search route's own tests.
+    searchForProject: async (projectId, query) =>
+      [...agentsStore.values()].filter(
+        (a) =>
+          a.projectId === projectId &&
+          (a.name.toLowerCase().includes(query.toLowerCase()) ||
+            (a.description ?? '').toLowerCase().includes(query.toLowerCase())),
+      ),
   };
 
   const agentVersions: AgentVersionRepository = {
@@ -550,6 +584,23 @@ function createInMemorySystemHealthDeps(
     memberships: projectDeps.memberships,
     integrations: integrationDeps.integrations,
     toolCapabilities: toolDeps.toolCapabilities,
+  };
+}
+
+function createInMemorySearchDeps(
+  projectDeps: ProjectUseCaseDeps,
+  workItemDeps: WorkItemUseCaseDeps,
+  artifactDeps: ArtifactUseCaseDeps,
+  workflowDeps: WorkflowUseCaseDeps,
+  agentDeps: AgentUseCaseDeps,
+): SearchUseCaseDeps {
+  return {
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    workItems: workItemDeps.workItems,
+    artifacts: artifactDeps.artifacts,
+    workflowDefinitions: workflowDeps.workflowDefinitions,
+    agents: agentDeps.agents,
   };
 }
 
@@ -3523,6 +3574,133 @@ describe('system health route (DEVOS-258)', () => {
     const project = (await projectResponse.json()).data;
 
     const response = await authed(`/api/v1/projects/${project.id}/system-health`, 'mallory');
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('cross-entity search route (DEVOS-262)', () => {
+  let server: Server;
+  let baseUrl: string;
+  let storageDir: string;
+
+  beforeAll(async () => {
+    storageDir = await mkdtemp(path.join(tmpdir(), 'devos-api-search-'));
+    const projectDeps = createInMemoryProjectDeps();
+    const workItemDeps = createInMemoryWorkItemDeps(projectDeps);
+    const workflowDeps = createInMemoryWorkflowDeps(projectDeps, workItemDeps);
+    const artifactDeps = createInMemoryArtifactDeps(projectDeps, storageDir);
+    const agentDeps = createInMemoryAgentDeps(projectDeps);
+    const searchDeps = createInMemorySearchDeps(
+      projectDeps,
+      workItemDeps,
+      artifactDeps,
+      workflowDeps,
+      agentDeps,
+    );
+    const started = await startServer({
+      projectDeps,
+      workItemDeps,
+      workflowDeps,
+      artifactDeps,
+      agentDeps,
+      searchDeps,
+      listRunsForDefinition: workflowDeps.listRunsForDefinition,
+    });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(async () => {
+    server.close();
+    await rm(storageDir, { recursive: true, force: true });
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('returns real, non-empty results across all four entity types for a shared keyword', async () => {
+    const projectResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Search Project', slug: `search-project-${Math.random()}` }),
+    });
+    const project = (await projectResponse.json()).data;
+
+    await authed(`/api/v1/projects/${project.id}/work-items`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Add CSV export to the dashboard' }),
+    });
+    await authed(`/api/v1/projects/${project.id}/artifacts`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        artifactType: 'REPORT',
+        name: 'Discovery Report — dashboard',
+        content: 'real content',
+      }),
+    });
+    await authed(`/api/v1/projects/${project.id}/workflows`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        key: 'dashboard-path',
+        name: 'Dashboard Path',
+        definition: { name: 'Dashboard Path', nodes: [{ id: 'a', type: 'TASK' }], edges: [] },
+      }),
+    });
+    await authed(`/api/v1/projects/${project.id}/agents`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        key: 'dashboard-agent',
+        name: 'Dashboard Agent',
+        configuration: { role: 'DEVELOPER', provider: 'anthropic', modelRef: 'claude' },
+      }),
+    });
+
+    const response = await authed(`/api/v1/projects/${project.id}/search?q=dashboard`, 'alice');
+    expect(response.status).toBe(200);
+    const body = (await response.json()).data;
+    expect(body.projectId).toBe(project.id);
+    expect(body.query).toBe('dashboard');
+    expect(body.workItems).toHaveLength(1);
+    expect(body.artifacts).toHaveLength(1);
+    expect(body.workflows).toHaveLength(1);
+    expect(body.agents).toHaveLength(1);
+  });
+
+  it('rejects a missing or empty q query parameter with 400', async () => {
+    const projectResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'No Query Project', slug: `no-query-${Math.random()}` }),
+    });
+    const project = (await projectResponse.json()).data;
+
+    const missing = await authed(`/api/v1/projects/${project.id}/search`, 'alice');
+    expect(missing.status).toBe(400);
+
+    const empty = await authed(`/api/v1/projects/${project.id}/search?q=`, 'alice');
+    expect(empty.status).toBe(400);
+  });
+
+  it('404s a non-member', async () => {
+    const projectResponse = await authed('/api/v1/projects', 'bob', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Private Search Project',
+        slug: `private-search-${Math.random()}`,
+      }),
+    });
+    const project = (await projectResponse.json()).data;
+
+    const response = await authed(`/api/v1/projects/${project.id}/search?q=dashboard`, 'mallory');
     expect(response.status).toBe(404);
   });
 });
