@@ -6,9 +6,12 @@ import {
   createOrganisation,
   createOrganisationPolicy,
   createPolicy,
+  createArtifact,
   createProjectTypeAgent,
   createProjectTypeWorkflow,
   getAgent,
+  getArtifactForPrincipal,
+  getArtifactProvenance,
   getArtifactVersionById,
   getHealth,
   getKnowledgeSource,
@@ -17,6 +20,7 @@ import {
   getProjectCostSummary,
   getWorkItem,
   listApprovalsForRun,
+  listArtifactVersions,
   listAuditRecordsForProject,
   listAuditRecordsForOrganisation,
   listMembers,
@@ -695,7 +699,13 @@ describe('api client', () => {
   it('DEVOS-230: gets a single agent at the real route', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(200, {
-        data: { id: 'agent-1', projectId: 'project-1', key: 'dev-agent', name: 'Dev Agent', status: 'ACTIVE' },
+        data: {
+          id: 'agent-1',
+          projectId: 'project-1',
+          key: 'dev-agent',
+          name: 'Dev Agent',
+          status: 'ACTIVE',
+        },
         meta: { requestId: 'req-25' },
       }),
     );
@@ -737,5 +747,105 @@ describe('api client', () => {
     expect(result.ok).toBe(true);
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/knowledge-sources/source-1');
+  });
+
+  // DEVOS-234: `GET /artifacts/:artifactId` already existed, unmodified,
+  // with zero client wrapper — see specs/sprints/sprint-35/DEVOS-234.md's
+  // own grounding.
+  it('DEVOS-234: gets a single artifact at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'artifact-1',
+          projectId: 'project-1',
+          type: 'CODE_CHANGE',
+          name: 'Change',
+          status: 'GENERATED',
+          provenance: {},
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+        meta: { requestId: 'req-27' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getArtifactForPrincipal('artifact-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/artifacts/artifact-1');
+  });
+
+  // DEVOS-234: `GET /artifacts/:artifactId/versions` already existed,
+  // unmodified, with zero client wrapper.
+  it("DEVOS-234: lists an artifact's versions at the real route", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { data: [], meta: { requestId: 'req-28' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listArtifactVersions('artifact-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/artifacts/artifact-1/versions');
+  });
+
+  // DEVOS-234: `POST /projects/:projectId/artifacts` already existed,
+  // unmodified, with zero client wrapper. The route returns only the
+  // created Artifact, not `{ artifact, version }` — confirmed by direct
+  // read of apps/api/src/routes/artifacts.ts.
+  it('DEVOS-234: creates an artifact at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(201, {
+        data: {
+          id: 'artifact-2',
+          projectId: 'project-1',
+          type: 'PRD',
+          name: 'New artifact',
+          status: 'GENERATED',
+          provenance: {},
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+        meta: { requestId: 'req-29' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createArtifact('project-1', {
+      artifactType: 'PRD',
+      name: 'New artifact',
+      content: 'Some content',
+    });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/artifacts');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      artifactType: 'PRD',
+      name: 'New artifact',
+      content: 'Some content',
+    });
+  });
+
+  // DEVOS-234: `GET /artifacts/:artifactId/provenance` already existed,
+  // unmodified, with zero client wrapper.
+  it("DEVOS-234: gets an artifact's provenance at the real route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { workflowRunId: 'run-1', workflowTaskId: 'task-1' },
+        meta: { requestId: 'req-30' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getArtifactProvenance('artifact-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/artifacts/artifact-1/provenance');
   });
 });

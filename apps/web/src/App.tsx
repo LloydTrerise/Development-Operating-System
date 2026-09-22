@@ -23,6 +23,8 @@ import { getHealth } from './api-client.js';
 import { AgentDetailPage } from './features/agents/AgentDetailPage.js';
 import { AgentsPage } from './features/agents/AgentsPage.js';
 import { ApprovalsPage } from './features/approvals/ApprovalsPage.js';
+import { ArtifactLibraryPage } from './features/artifacts/ArtifactLibraryPage.js';
+import { ArtifactViewerPage } from './features/artifacts/ArtifactViewerPage.js';
 import { CostPage } from './features/cost/CostPage.js';
 import { HomePage } from './features/home/HomePage.js';
 import { EngineeringIntelligencePage } from './features/engineering-intelligence/EngineeringIntelligencePage.js';
@@ -56,9 +58,10 @@ const DRAWER_WIDTH = 220;
  * Types under Platform (a platform-level template catalog, not a single
  * workflow run), Workflow Library under Workflows (filling the mockup's
  * "Definitions" slot), Cost/Engineering Intelligence under Platform as
- * their own entries. Artifacts/Integrations are reserved, deliberately
- * empty groups populated for real in Sprints 35/36 — no placeholder link,
- * only the heading, until each area's route actually exists.
+ * their own entries. Integrations remains reserved, deliberately empty
+ * (populated for real in Sprint 36) — no placeholder link, only the
+ * heading, until its route actually exists. Artifacts is populated for
+ * real by Sprint 35's DEVOS-235.
  */
 const NAV_GROUPS = [
   {
@@ -98,7 +101,7 @@ const NAV_GROUPS = [
       { to: '/engineering-intelligence', label: 'Engineering Intelligence' },
     ],
   },
-  { label: 'Artifacts', items: [] },
+  { label: 'Artifacts', items: [{ to: '/artifacts', label: 'Artifacts' }] },
   { label: 'Integrations', items: [] },
 ] as const;
 
@@ -370,6 +373,9 @@ export function App() {
           <Route path="/governance" element={<GovernancePage />} />
           <Route path="/cost" element={<CostPage />} />
           <Route path="/engineering-intelligence" element={<EngineeringIntelligencePage />} />
+          <Route path="/artifacts" element={<ArtifactLibraryPage />} />
+          {/* DEVOS-236: the `/{area}/:id` convention's real Artifact Viewer. */}
+          <Route path="/artifacts/:id" element={<ArtifactViewerPage />} />
         </Routes>
       </Box>
     </Box>

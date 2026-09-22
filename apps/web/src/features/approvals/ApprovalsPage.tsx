@@ -24,7 +24,7 @@ import { LoadingState } from '../../components/LoadingState.js';
 import { StatusChip } from '../../components/StatusChip.js';
 import { useProjectContext } from '../../project-context.js';
 
-type EvidenceDetail = { artifactName: string; artifactType: string } | 'error';
+type EvidenceDetail = { artifactId: string; artifactName: string; artifactType: string } | 'error';
 
 const RISK_COLOR: Record<string, 'default' | 'warning' | 'error'> = {
   R0: 'default',
@@ -110,7 +110,11 @@ export function ApprovalsPage() {
         setEvidenceDetails((current) => ({
           ...current,
           [id]: result.ok
-            ? { artifactName: result.data.artifactName, artifactType: result.data.artifactType }
+            ? {
+                artifactId: result.data.artifactId,
+                artifactName: result.data.artifactName,
+                artifactType: result.data.artifactType,
+              }
             : 'error',
         }));
       });
@@ -298,9 +302,9 @@ export function ApprovalsPage() {
                         key={artifactVersionId}
                         primary={
                           detail && detail !== 'error' ? (
-                            <>
+                            <RouterLink to={`/artifacts/${detail.artifactId}`}>
                               <strong>{detail.artifactName}</strong> ({detail.artifactType})
-                            </>
+                            </RouterLink>
                           ) : (
                             <code>{artifactVersionId}</code>
                           )

@@ -202,9 +202,7 @@ export function RunCard({
                   Approval — {approval.approvalType}, requested by {approval.requestedBy}
                 </Typography>
                 <StatusChip status={approval.status} />
-                <RouterLink to={`/approvals?approvalId=${approval.id}`}>
-                  View approval
-                </RouterLink>
+                <RouterLink to={`/approvals?approvalId=${approval.id}`}>View approval</RouterLink>
               </Stack>
             ))}
           </Stack>
@@ -244,7 +242,14 @@ export function RunCard({
             <List dense disablePadding>
               {runArtifacts.map((artifact) => (
                 <ListItem key={artifact.id} disableGutters>
-                  <ListItemText primary={`${artifact.name} (${artifact.type})`} />
+                  <ListItemText
+                    primary={
+                      <>
+                        {`${artifact.name} (${artifact.type})`}{' '}
+                        <RouterLink to={`/artifacts/${artifact.id}`}>View</RouterLink>
+                      </>
+                    }
+                  />
                   <StatusChip status={artifact.status} />
                 </ListItem>
               ))}
@@ -264,7 +269,10 @@ export function RunCard({
             </AccordionSummary>
             <AccordionDetails>
               <Typography variant="body2" gutterBottom>
-                Passed: {String(testEvidence.metadata?.passed ?? 'unknown')}
+                Passed: {String(testEvidence.metadata?.passed ?? 'unknown')}{' '}
+                <RouterLink to={`/artifacts/${testEvidence.artifactId}`}>
+                  View in Artifact Viewer
+                </RouterLink>
               </Typography>
               <Typography variant="caption" color="text.secondary" component="div">
                 Build
@@ -289,7 +297,10 @@ export function RunCard({
             </AccordionSummary>
             <AccordionDetails>
               <Typography variant="body2" gutterBottom>
-                Decision: <strong>{String(reviewEvidence.metadata?.decision ?? 'unknown')}</strong>
+                Decision: <strong>{String(reviewEvidence.metadata?.decision ?? 'unknown')}</strong>{' '}
+                <RouterLink to={`/artifacts/${reviewEvidence.artifactId}`}>
+                  View in Artifact Viewer
+                </RouterLink>
               </Typography>
               <List dense disablePadding>
                 {findings.map((finding, index) => (

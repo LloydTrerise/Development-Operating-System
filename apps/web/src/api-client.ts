@@ -271,6 +271,11 @@ export interface ArtifactVersion {
   artifactId: string;
   version: number;
   contentType: string;
+  /** DEVOS-234: already returned by `toArtifactVersionDto` — widened here to
+   * match; an opaque content-addressed storage pointer/hash, not a fetchable
+   * URL (no route in this codebase serves decoded artifact content). */
+  contentUri: string;
+  contentHash: string;
   metadata?: Record<string, unknown>;
   createdBy: string;
   createdAt: string;
@@ -766,6 +771,52 @@ export function getArtifactVersion(
   return request<ArtifactVersion>(`/api/v1/artifacts/${artifactId}/versions/${version}`);
 }
 
+/** DEVOS-234: closes the previously-unwrapped `GET /artifacts/:artifactId`
+ * route (existing, unmodified) — named to match the real application-layer
+ * use case, `getArtifactForPrincipal`. */
+export function getArtifactForPrincipal(artifactId: string): Promise<ApiResult<Artifact>> {
+  return request<Artifact>(`/api/v1/artifacts/${artifactId}`);
+}
+
+/** DEVOS-234: closes the previously-unwrapped `GET /artifacts/:artifactId/versions`
+ * route (existing, unmodified) — every version of one artifact, oldest first. */
+export function listArtifactVersions(artifactId: string): Promise<ApiResult<ArtifactVersion[]>> {
+  return request<ArtifactVersion[]>(`/api/v1/artifacts/${artifactId}/versions`);
+}
+
+/** DEVOS-234: closes the previously-unwrapped `POST /projects/:projectId/artifacts`
+ * route (existing, unmodified). Typed to return `Artifact` only, matching the
+ * real route response — the application-layer `createArtifact` function
+ * returns a richer `{ artifact, version }`, but the route only serializes
+ * the artifact half (confirmed by direct read of `apps/api/src/routes/artifacts.ts`). */
+export function createArtifact(
+  projectId: string,
+  input: { artifactType: string; name: string; content: string; contentType?: string },
+): Promise<ApiResult<Artifact>> {
+  return request<Artifact>(`/api/v1/projects/${projectId}/artifacts`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+/** DEVOS-234: closes the previously-unwrapped `GET /artifacts/:artifactId/provenance`
+ * route (existing, unmodified). Returns no more than the artifact's own
+ * `provenance` field already carries — confirmed by direct read of
+ * `packages/application/src/artifacts/get-artifact-provenance.ts`; the
+ * richer domain `ArtifactProvenance` contract (origin/agent/contextManifestId)
+ * is not implemented by any real code path, so this frontend type is
+ * deliberately narrower than that contract. */
+export interface ArtifactProvenanceInfo {
+  workflowRunId?: string;
+  workflowTaskId?: string;
+}
+
+export function getArtifactProvenance(
+  artifactId: string,
+): Promise<ApiResult<ArtifactProvenanceInfo>> {
+  return request<ArtifactProvenanceInfo>(`/api/v1/artifacts/${artifactId}/provenance`);
+}
+
 /** DEVOS-095: resolves a bare artifact-version id to its owning artifact's
  * name/type — what an approval's evidence reference actually carries. */
 export interface ArtifactVersionWithArtifact extends ArtifactVersion {
@@ -1114,9 +1165,7 @@ export function listKnowledgeSources(projectId: string): Promise<ApiResult<Knowl
 
 /** DEVOS-231: the real single-source fetch backing `KnowledgeSourceDetailPage.tsx` — closes
  * the previously-unwrapped `GET /knowledge-sources/:knowledgeSourceId` route (existing, unmodified). */
-export function getKnowledgeSource(
-  knowledgeSourceId: string,
-): Promise<ApiResult<KnowledgeSource>> {
+export function getKnowledgeSource(knowledgeSourceId: string): Promise<ApiResult<KnowledgeSource>> {
   return request<KnowledgeSource>(`/api/v1/knowledge-sources/${knowledgeSourceId}`);
 }
 
