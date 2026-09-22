@@ -1,11 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Button,
-  Chip,
+  Paper,
   Stack,
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   TextField,
@@ -13,17 +15,16 @@ import {
 } from '@mui/material';
 import {
   createAgent,
-  createNewAgentVersion,
   getAgentQuality,
   listAgentVersions,
   listAgents,
-  publishAgentVersion,
   type Agent,
   type AgentVersion,
   type AgentVersionQuality,
 } from '../../api-client.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
+import { StatusChip } from '../../components/StatusChip.js';
 import { useProjectContext } from '../../project-context.js';
 
 interface AgentFormState {
@@ -55,16 +56,24 @@ function parseCapabilities(value: string): string[] {
     .filter((item) => item.length > 0);
 }
 
+function PanelHeader({ title }: { title: string }) {
+  return (
+    <Typography variant="subtitle1" sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+      {title}
+    </Typography>
+  );
+}
+
 /**
- * DEVOS-173: the first web UI anywhere for real, non-template agents —
- * `Agent`/`AgentVersion` previously had no UI at all, only direct API
- * calls (confirmed by `specs/DEVOS-AGENT-PLATFORM-BACKLOG.md` §2 before
- * this task was scoped). Reuses `ProjectTypeAgentsEditor.tsx`'s own
- * configuration-field set and `CostPage.tsx`/`EngineeringIntelligencePage.tsx`'s
- * project-scoped page pattern.
+ * DEVOS-230: restyled into a summary table (`Paper`/`PanelHeader`, mirroring
+ * `WorkItemsPage.tsx`'s DEVOS-212 dense-table convention) with row-click
+ * navigation to a real `/agents/:id` detail view — the full per-version
+ * table, quality figures, and Publish/Draft-new-version actions moved to
+ * `AgentDetailPage.tsx`. See specs/sprints/sprint-34/DEVOS-230.md.
  */
 export function AgentsPage() {
   const { selectedProjectId } = useProjectContext();
+  const navigate = useNavigate();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [versionsByAgentId, setVersionsByAgentId] = useState<Record<string, AgentVersion[]>>({});
   const [qualityByAgentId, setQualityByAgentId] = useState<Record<string, AgentVersionQuality[]>>(
@@ -76,7 +85,6 @@ export function AgentsPage() {
   const [form, setForm] = useState<AgentFormState>(EMPTY_FORM);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [busyAgentId, setBusyAgentId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedProjectId) {
@@ -159,28 +167,6 @@ export function AgentsPage() {
     setRefreshToken((token) => token + 1);
   }
 
-  async function handleDraftNewVersion(agentId: string) {
-    setBusyAgentId(agentId);
-    const result = await createNewAgentVersion(agentId);
-    setBusyAgentId(null);
-    if (!result.ok) {
-      setSubmitError(result.error.message);
-      return;
-    }
-    setRefreshToken((token) => token + 1);
-  }
-
-  async function handlePublish(agentId: string) {
-    setBusyAgentId(agentId);
-    const result = await publishAgentVersion(agentId);
-    setBusyAgentId(null);
-    if (!result.ok) {
-      setSubmitError(result.error.message);
-      return;
-    }
-    setRefreshToken((token) => token + 1);
-  }
-
   if (!selectedProjectId) {
     return (
       <section>
@@ -202,79 +188,71 @@ export function AgentsPage() {
       {error && <ErrorAlert message={`Failed to load agents: ${error}`} />}
 
       {!loading && !error && (
-        <Stack spacing={3} sx={{ mb: 4 }}>
-          {agents.map((agent) => {
-            const versions = [...(versionsByAgentId[agent.id] ?? [])].sort(
-              (a, b) => b.version - a.version,
-            );
-            const latest = versions[0];
-            const hasDraft = latest?.status === 'DRAFT';
-            const qualityByVersionId = new Map(
-              (qualityByAgentId[agent.id] ?? []).map((q) => [q.agentVersionId, q]),
-            );
-            return (
-              <div key={agent.id}>
-                <Typography variant="h6" component="h3">
-                  {agent.name} <Chip size="small" label={agent.key} sx={{ ml: 1 }} />
-                </Typography>
-                <Table size="small" data-testid={`agent-versions-${agent.key}`}>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Version</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell>Role</TableCell>
-                      <TableCell>Model</TableCell>
-                      <TableCell>Review pass rate</TableCell>
-                      <TableCell />
+        <Paper variant="outlined" sx={{ mb: 4 }}>
+          <PanelHeader title="Agents" />
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Agent</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Latest version</TableCell>
+                  <TableCell>Version status</TableCell>
+                  <TableCell>Review pass rate</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {agents.map((agent) => {
+                  const versions = [...(versionsByAgentId[agent.id] ?? [])].sort(
+                    (a, b) => b.version - a.version,
+                  );
+                  const latest = versions[0];
+                  const latestQuality = latest
+                    ? (qualityByAgentId[agent.id] ?? []).find(
+                        (q) => q.agentVersionId === latest.id,
+                      )
+                    : undefined;
+                  return (
+                    <TableRow
+                      key={agent.id}
+                      hover
+                      onClick={() => navigate(`/agents/${agent.id}`)}
+                      sx={{ cursor: 'pointer' }}
+                    >
+                      <TableCell>
+                        <Typography variant="body2">{agent.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {agent.key}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <StatusChip status={agent.status} />
+                      </TableCell>
+                      <TableCell>{latest ? `v${latest.version}` : '—'}</TableCell>
+                      <TableCell>
+                        {latest ? <StatusChip status={latest.status} /> : '—'}
+                      </TableCell>
+                      <TableCell>
+                        {latestQuality
+                          ? `${(latestQuality.passRate * 100).toFixed(0)}% (${latestQuality.reviewCount} reviewed)`
+                          : 'No reviews yet'}
+                      </TableCell>
                     </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {versions.map((version) => {
-                      const quality = qualityByVersionId.get(version.id);
-                      return (
-                        <TableRow key={version.id}>
-                          <TableCell>{version.version}</TableCell>
-                          <TableCell>{version.status}</TableCell>
-                          <TableCell>{version.configuration.role}</TableCell>
-                          <TableCell>{version.configuration.modelRef}</TableCell>
-                          <TableCell data-testid={`review-pass-rate-${version.id}`}>
-                            {quality
-                              ? `${(quality.passRate * 100).toFixed(0)}% (${quality.reviewCount} reviewed)`
-                              : 'No reviews yet'}
-                          </TableCell>
-                          <TableCell>
-                            {version.status === 'DRAFT' && (
-                              <Button
-                                size="small"
-                                disabled={busyAgentId === agent.id}
-                                onClick={() => handlePublish(agent.id)}
-                              >
-                                Publish
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-                {!hasDraft && (
-                  <Button
-                    size="small"
-                    sx={{ mt: 1 }}
-                    disabled={busyAgentId === agent.id}
-                    onClick={() => handleDraftNewVersion(agent.id)}
-                  >
-                    Draft new version
-                  </Button>
+                  );
+                })}
+                {agents.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <Typography color="text.secondary">
+                        No agents in this project yet.
+                      </Typography>
+                    </TableCell>
+                  </TableRow>
                 )}
-              </div>
-            );
-          })}
-          {agents.length === 0 && (
-            <Typography color="text.secondary">No agents in this project yet.</Typography>
-          )}
-        </Stack>
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
       )}
 
       <Typography variant="h6" component="h3" gutterBottom>

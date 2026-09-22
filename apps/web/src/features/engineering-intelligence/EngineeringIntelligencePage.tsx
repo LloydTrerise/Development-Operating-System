@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Box,
   LinearProgress,
   Paper,
   Stack,
@@ -26,6 +27,14 @@ import { useProjectContext } from '../../project-context.js';
 
 function formatRate(rate: number): string {
   return `${(rate * 100).toFixed(0)}%`;
+}
+
+function PanelHeader({ title }: { title: string }) {
+  return (
+    <Typography variant="subtitle1" sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+      {title}
+    </Typography>
+  );
 }
 
 function rateColor(rate: number, count: number): 'success' | 'warning' | 'error' | 'inherit' {
@@ -286,51 +295,43 @@ export function EngineeringIntelligencePage() {
       {loadError && <ErrorAlert message={`Failed to load engineering-report data: ${loadError}`} />}
 
       <Stack spacing={4}>
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            This project
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2 }}>
+        <Paper variant="outlined">
+          <PanelHeader title="This project" />
+          <Box sx={{ p: 2 }}>
             <QualitySummary
               report={projectReport}
               emptyMessage="No engineering-intelligence data recorded for this project yet."
             />
-          </Paper>
-        </div>
+          </Box>
+        </Paper>
 
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            DORA metrics
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2 }}>
+        <Paper variant="outlined">
+          <PanelHeader title="DORA metrics" />
+          <Box sx={{ p: 2 }}>
             <DoraSummary
               report={projectReport}
               {...(projectReport?.incidentRecoveryProxy !== undefined
                 ? { incidentRecoveryProxy: projectReport.incidentRecoveryProxy }
                 : {})}
             />
-          </Paper>
-        </div>
+          </Box>
+        </Paper>
 
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            Slowest workflows
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2 }}>
+        <Paper variant="outlined">
+          <PanelHeader title="Slowest workflows" />
+          <Box sx={{ p: 2 }}>
             <BottleneckSummary rows={slowestWorkflows} />
-          </Paper>
-        </div>
+          </Box>
+        </Paper>
 
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            This project&apos;s organisation
-          </Typography>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            A real rollup across every project in this organisation (tenant-isolated — never crosses
-            organisations). Rework-cycle count is not yet aggregated at organisation scope, always
-            shown as 0 here — a real, disclosed limitation.
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2 }}>
+        <Paper variant="outlined">
+          <PanelHeader title="This project's organisation" />
+          <Box sx={{ p: 2 }}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              A real rollup across every project in this organisation (tenant-isolated — never
+              crosses organisations). Rework-cycle count is not yet aggregated at organisation
+              scope, always shown as 0 here — a real, disclosed limitation.
+            </Typography>
             <QualitySummary
               report={organisationReport}
               emptyMessage="No engineering-intelligence data recorded for this organisation yet."
@@ -340,8 +341,8 @@ export function EngineeringIntelligencePage() {
                 Across {organisationReport.projectCount} project(s)
               </Typography>
             )}
-          </Paper>
-        </div>
+          </Box>
+        </Paper>
       </Stack>
     </section>
   );

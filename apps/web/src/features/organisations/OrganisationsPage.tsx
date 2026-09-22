@@ -7,6 +7,7 @@ import {
   List,
   ListItemButton,
   ListItemText,
+  Paper,
   Stack,
   TextField,
   Typography,
@@ -15,7 +16,16 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import { createOrganisation, updateOrganisation } from '../../api-client.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
+import { StatusChip } from '../../components/StatusChip.js';
 import { useOrganisationContext } from '../../organisation-context.js';
+
+function PanelHeader({ title }: { title: string }) {
+  return (
+    <Typography variant="subtitle1" sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+      {title}
+    </Typography>
+  );
+}
 
 /**
  * DEVOS-227: an inline, expand-in-place Settings affordance per row —
@@ -33,6 +43,7 @@ function OrganisationRow({
   organisationId,
   currentName,
   slug,
+  status,
   selected,
   onSelect,
   onSaved,
@@ -40,6 +51,7 @@ function OrganisationRow({
   organisationId: string;
   currentName: string;
   slug: string;
+  status: string;
   selected: boolean;
   onSelect: () => void;
   onSaved: () => void;
@@ -70,6 +82,7 @@ function OrganisationRow({
     <Box>
       <ListItemButton selected={selected} onClick={onSelect}>
         <ListItemText primary={`${currentName} (${slug})`} sx={{ flex: 1 }} />
+        <StatusChip status={status} />
         <IconButton
           aria-label={`Settings for ${currentName}`}
           size="small"
@@ -145,20 +158,26 @@ export function OrganisationsPage() {
       {error && <ErrorAlert message={`Failed to load organisations: ${error}`} />}
 
       {!loading && !error && (
-        <List dense>
-          {organisations.map((organisation) => (
-            <OrganisationRow
-              key={organisation.id}
-              organisationId={organisation.id}
-              currentName={organisation.name}
-              slug={organisation.slug}
-              selected={organisation.id === selectedOrganisationId}
-              onSelect={() => selectOrganisation(organisation.id)}
-              onSaved={refresh}
-            />
-          ))}
-          {organisations.length === 0 && <ListItemText primary="No organisations yet." />}
-        </List>
+        <Paper variant="outlined">
+          <PanelHeader title="Organisations" />
+          <List dense sx={{ py: 0 }}>
+            {organisations.map((organisation) => (
+              <OrganisationRow
+                key={organisation.id}
+                organisationId={organisation.id}
+                currentName={organisation.name}
+                slug={organisation.slug}
+                status={organisation.status}
+                selected={organisation.id === selectedOrganisationId}
+                onSelect={() => selectOrganisation(organisation.id)}
+                onSaved={refresh}
+              />
+            ))}
+            {organisations.length === 0 && (
+              <ListItemText primary="No organisations yet." sx={{ px: 2, py: 1 }} />
+            )}
+          </List>
+        </Paper>
       )}
 
       <Typography variant="h6" component="h3" sx={{ mt: 4 }} gutterBottom>

@@ -20,12 +20,14 @@ import {
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import { getHealth } from './api-client.js';
+import { AgentDetailPage } from './features/agents/AgentDetailPage.js';
 import { AgentsPage } from './features/agents/AgentsPage.js';
 import { ApprovalsPage } from './features/approvals/ApprovalsPage.js';
 import { CostPage } from './features/cost/CostPage.js';
 import { HomePage } from './features/home/HomePage.js';
 import { EngineeringIntelligencePage } from './features/engineering-intelligence/EngineeringIntelligencePage.js';
 import { GovernancePage } from './features/governance/GovernancePage.js';
+import { KnowledgeSourceDetailPage } from './features/knowledge/KnowledgeSourceDetailPage.js';
 import { KnowledgeSourcesPage } from './features/knowledge/KnowledgeSourcesPage.js';
 import { OrganisationsPage } from './features/organisations/OrganisationsPage.js';
 import { ProjectTypesPage } from './features/project-types/ProjectTypesPage.js';
@@ -356,7 +358,11 @@ export function App() {
           {/* DEVOS-206 scaffolding proof of concept for the /{area}/:id convention; replaced with real content by Sprint 31's DEVOS-213. */}
           <Route path="/work-items/:id" element={<WorkItemDetailPage />} />
           <Route path="/agents" element={<AgentsPage />} />
+          {/* DEVOS-230: the `/{area}/:id` convention's real Agent detail view. */}
+          <Route path="/agents/:id" element={<AgentDetailPage />} />
           <Route path="/knowledge" element={<KnowledgeSourcesPage />} />
+          {/* DEVOS-231: the `/{area}/:id` convention's real Knowledge Source detail view. */}
+          <Route path="/knowledge/:id" element={<KnowledgeSourceDetailPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/workflow-library" element={<WorkflowLibraryPage />} />
           <Route path="/runs" element={<RunsPage />} />

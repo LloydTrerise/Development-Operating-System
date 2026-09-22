@@ -8,8 +8,10 @@ import {
   createPolicy,
   createProjectTypeAgent,
   createProjectTypeWorkflow,
+  getAgent,
   getArtifactVersionById,
   getHealth,
+  getKnowledgeSource,
   getOrganisation,
   getOrganisationCostReport,
   getProjectCostSummary,
@@ -685,5 +687,55 @@ describe('api client', () => {
     expect(url).toContain('/api/v1/projects/project-1');
     expect(init.method).toBe('PATCH');
     expect(JSON.parse(init.body as string)).toEqual({ name: 'Renamed' });
+  });
+
+  // DEVOS-230: `GET /agents/:agentId` already existed, unmodified, with zero
+  // client wrapper — see specs/sprints/sprint-34/DEVOS-230.md's own
+  // grounding.
+  it('DEVOS-230: gets a single agent at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { id: 'agent-1', projectId: 'project-1', key: 'dev-agent', name: 'Dev Agent', status: 'ACTIVE' },
+        meta: { requestId: 'req-25' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getAgent('agent-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/agents/agent-1');
+  });
+
+  // DEVOS-231: `GET /knowledge-sources/:knowledgeSourceId` already existed,
+  // unmodified, with zero client wrapper — see
+  // specs/sprints/sprint-34/DEVOS-231.md's own grounding.
+  it('DEVOS-231: gets a single knowledge source at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'source-1',
+          projectId: 'project-1',
+          key: 'standard',
+          name: 'Coding Standard',
+          sourceType: 'STANDARD',
+          content: 'Use tabs.',
+          status: 'ACTIVE',
+          createdBy: 'user-1',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          sharedAcrossOrganisation: false,
+        },
+        meta: { requestId: 'req-26' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getKnowledgeSource('source-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/knowledge-sources/source-1');
   });
 });

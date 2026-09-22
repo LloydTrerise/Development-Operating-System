@@ -653,6 +653,12 @@ export function listAgents(projectId: string): Promise<ApiResult<Agent[]>> {
   return request<Agent[]>(`/api/v1/projects/${projectId}/agents`);
 }
 
+/** DEVOS-230: the real single-agent fetch backing `AgentDetailPage.tsx` — closes the
+ * previously-unwrapped `GET /agents/:agentId` route (existing, unmodified). */
+export function getAgent(agentId: string): Promise<ApiResult<Agent>> {
+  return request<Agent>(`/api/v1/agents/${agentId}`);
+}
+
 /** DEVOS-172: mirrors `apps/api/src/dto/agent.ts`'s `toAgentVersionDto` —
  * a real agent's own draft/published version, as opposed to
  * `ProjectTypeAgent` (a template, no version concept at all). */
@@ -1104,6 +1110,14 @@ export interface KnowledgeReference {
 
 export function listKnowledgeSources(projectId: string): Promise<ApiResult<KnowledgeSource[]>> {
   return request<KnowledgeSource[]>(`/api/v1/projects/${projectId}/knowledge-sources`);
+}
+
+/** DEVOS-231: the real single-source fetch backing `KnowledgeSourceDetailPage.tsx` — closes
+ * the previously-unwrapped `GET /knowledge-sources/:knowledgeSourceId` route (existing, unmodified). */
+export function getKnowledgeSource(
+  knowledgeSourceId: string,
+): Promise<ApiResult<KnowledgeSource>> {
+  return request<KnowledgeSource>(`/api/v1/knowledge-sources/${knowledgeSourceId}`);
 }
 
 export function createKnowledgeSource(

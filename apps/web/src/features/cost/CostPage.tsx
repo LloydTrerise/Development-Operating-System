@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  Box,
   LinearProgress,
   Paper,
   Stack,
@@ -25,6 +26,14 @@ import { useProjectContext } from '../../project-context.js';
 
 function formatUsd(value: number): string {
   return `$${value.toFixed(4)}`;
+}
+
+function PanelHeader({ title }: { title: string }) {
+  return (
+    <Typography variant="subtitle1" sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+      {title}
+    </Typography>
+  );
 }
 
 /** DEVOS-156: which attribution dimension the breakdown tables render. */
@@ -195,11 +204,9 @@ export function CostPage() {
       </ToggleButtonGroup>
 
       <Stack spacing={4}>
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            This project
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2 }}>
+        <Paper variant="outlined">
+          <PanelHeader title="This project" />
+          <Box sx={{ p: 2 }}>
             <Typography variant="body1" data-testid="project-cost-total">
               Total: {formatUsd(projectCost?.totalUsd ?? 0)}
               {projectCost?.budgetUsd !== undefined &&
@@ -216,27 +223,25 @@ export function CostPage() {
                 data-testid="project-budget-indicator"
               />
             )}
-          </Paper>
 
-          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-            Breakdown by {DIMENSION_LABELS[dimension].toLowerCase()}
-          </Typography>
-          <BreakdownTable
-            rows={rowsForDimension(projectCost, dimension)}
-            dimension={dimension}
-            emptyMessage="No cost recorded for this project yet."
-          />
-        </div>
+            <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+              Breakdown by {DIMENSION_LABELS[dimension].toLowerCase()}
+            </Typography>
+            <BreakdownTable
+              rows={rowsForDimension(projectCost, dimension)}
+              dimension={dimension}
+              emptyMessage="No cost recorded for this project yet."
+            />
+          </Box>
+        </Paper>
 
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            This project&apos;s organisation
-          </Typography>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            A real rollup across every project in this organisation (tenant-isolated — never crosses
-            organisations).
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2 }}>
+        <Paper variant="outlined">
+          <PanelHeader title="This project's organisation" />
+          <Box sx={{ p: 2 }}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              A real rollup across every project in this organisation (tenant-isolated — never
+              crosses organisations).
+            </Typography>
             <Typography variant="body1" data-testid="organisation-cost-total">
               Total: {formatUsd(organisationCost?.totalUsd ?? 0)}
               {organisationCost?.budgetUsd !== undefined &&
@@ -258,17 +263,17 @@ export function CostPage() {
                 data-testid="organisation-budget-indicator"
               />
             )}
-          </Paper>
 
-          <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
-            Breakdown by {DIMENSION_LABELS[dimension].toLowerCase()}
-          </Typography>
-          <BreakdownTable
-            rows={rowsForDimension(organisationCost, dimension)}
-            dimension={dimension}
-            emptyMessage="No cost recorded for this organisation yet."
-          />
-        </div>
+            <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>
+              Breakdown by {DIMENSION_LABELS[dimension].toLowerCase()}
+            </Typography>
+            <BreakdownTable
+              rows={rowsForDimension(organisationCost, dimension)}
+              dimension={dimension}
+              emptyMessage="No cost recorded for this organisation yet."
+            />
+          </Box>
+        </Paper>
       </Stack>
     </section>
   );

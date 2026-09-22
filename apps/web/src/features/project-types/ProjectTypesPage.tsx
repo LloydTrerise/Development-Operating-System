@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
   Button,
-  Divider,
   List,
   ListItemButton,
   ListItemText,
+  Paper,
   Stack,
   TextField,
   Typography,
@@ -19,7 +19,16 @@ import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
 import { ProjectTypeAgentsEditor } from '../../components/ProjectTypeAgentsEditor.js';
 import { ProjectTypeWorkflowsEditor } from '../../components/ProjectTypeWorkflowsEditor.js';
+import { StatusChip } from '../../components/StatusChip.js';
 import { useSession } from '../../session.js';
+
+function PanelHeader({ title }: { title: string }) {
+  return (
+    <Typography variant="subtitle1" sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}>
+      {title}
+    </Typography>
+  );
+}
 
 export function ProjectTypesPage() {
   const session = useSession();
@@ -116,21 +125,28 @@ export function ProjectTypesPage() {
       {error && <ErrorAlert message={`Failed to load project types: ${error}`} />}
 
       {!loading && !error && (
-        <List dense>
-          {projectTypes.map((projectType) => (
-            <ListItemButton
-              key={projectType.id}
-              selected={projectType.id === selectedId}
-              onClick={() => setSelectedId(projectType.id)}
-            >
-              <ListItemText
-                primary={`${projectType.name} (${projectType.key})`}
-                secondary={projectType.status}
-              />
-            </ListItemButton>
-          ))}
-          {projectTypes.length === 0 && <ListItemText primary="No project types yet." />}
-        </List>
+        <Paper variant="outlined">
+          <PanelHeader title="Project Types" />
+          <List dense sx={{ py: 0 }}>
+            {projectTypes.map((projectType) => (
+              <ListItemButton
+                key={projectType.id}
+                selected={projectType.id === selectedId}
+                onClick={() => setSelectedId(projectType.id)}
+                sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}
+              >
+                <ListItemText
+                  primary={`${projectType.name} (${projectType.key})`}
+                  sx={{ flex: 1 }}
+                />
+                <StatusChip status={projectType.status} />
+              </ListItemButton>
+            ))}
+            {projectTypes.length === 0 && (
+              <ListItemText primary="No project types yet." sx={{ px: 2, py: 1 }} />
+            )}
+          </List>
+        </Paper>
       )}
 
       <Typography variant="h6" component="h3" sx={{ mt: 4 }} gutterBottom>
@@ -169,12 +185,17 @@ export function ProjectTypesPage() {
       </Stack>
 
       {selected && (
-        <>
-          <Divider sx={{ my: 4 }} />
-          <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 3 }}>
-            <Typography variant="h5" component="h3">
+        <Paper variant="outlined" sx={{ mt: 4 }}>
+          <Stack
+            direction="row"
+            spacing={2}
+            alignItems="center"
+            sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Typography variant="subtitle1" sx={{ flex: 1 }}>
               {selected.name}
             </Typography>
+            <StatusChip status={selected.status} />
             <Button
               size="small"
               variant="outlined"
@@ -185,10 +206,11 @@ export function ProjectTypesPage() {
             </Button>
           </Stack>
 
-          <ProjectTypeWorkflowsEditor projectTypeId={selected.id} />
-          <Divider sx={{ my: 4 }} />
-          <ProjectTypeAgentsEditor projectTypeId={selected.id} />
-        </>
+          <Stack spacing={3} sx={{ p: 2 }}>
+            <ProjectTypeWorkflowsEditor projectTypeId={selected.id} />
+            <ProjectTypeAgentsEditor projectTypeId={selected.id} />
+          </Stack>
+        </Paper>
       )}
     </section>
   );
