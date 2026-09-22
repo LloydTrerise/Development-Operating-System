@@ -11,6 +11,8 @@ import {
   getOrganisation,
   getOrganisationCostReport,
   getProjectCostSummary,
+  getWorkItem,
+  listApprovalsForRun,
   listAuditRecordsForProject,
   listAuditRecordsForOrganisation,
   listOrganisations,
@@ -23,6 +25,7 @@ import {
   startRun,
   updateOrganisation,
   updateProjectType,
+  updateWorkItem,
 } from '../src/api-client.js';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -492,5 +495,63 @@ describe('api client', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/project-types/type-1/agents');
     expect(init.method).toBe('POST');
+  });
+
+  // DEVOS-213/DEVOS-216: `getWorkItem`/`updateWorkItem` had no client
+  // wrapper before Sprint 31, though the backend `GET`/`PATCH
+  // /work-items/:workItemId` routes already existed — see
+  // specs/sprints/sprint-31/DEVOS-213.md's own grounding.
+  it('DEVOS-213: gets a single work item at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { id: 'work-item-1', title: 'Fix the thing', status: 'OPEN', priority: 'MEDIUM' },
+        meta: { requestId: 'req-16' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getWorkItem('work-item-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/work-items/work-item-1');
+  });
+
+  it('DEVOS-213: updates a single work item by patching the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { id: 'work-item-1', title: 'Fix the thing', status: 'IN_PROGRESS', priority: 'MEDIUM' },
+        meta: { requestId: 'req-17' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await updateWorkItem('work-item-1', { status: 'IN_PROGRESS' });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/work-items/work-item-1');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ status: 'IN_PROGRESS' });
+  });
+
+  // DEVOS-215/DEVOS-216: `listApprovalsForRun` had no client wrapper before
+  // Sprint 31, though the backend `GET /runs/:runId/approvals` route
+  // already existed — see specs/sprints/sprint-31/DEVOS-215.md's own
+  // grounding.
+  it('DEVOS-215: lists a run\'s own approvals at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [{ id: 'approval-1', approvalType: 'PLANNING', status: 'PENDING' }],
+        meta: { requestId: 'req-18' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listApprovalsForRun('run-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/runs/run-1/approvals');
   });
 });

@@ -19,6 +19,10 @@ export function toApprovalDto(approval: Approval) {
     // configured a reliabilityReduction, and what it found — undefined
     // (omitted) for every approval that never configured one.
     reliabilityEvidence: approval.reliabilityEvidence,
+    // DEVOS-218: the real ABAC risk class carried on the domain object
+    // since the gap revisit (post-Sprint-16) but never exposed here —
+    // additive, undefined for every approval whose path never sets it.
+    riskClass: approval.riskClass,
   };
 }
 

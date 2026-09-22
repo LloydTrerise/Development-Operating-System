@@ -450,6 +450,26 @@ export function listWorkItems(projectId: string): Promise<ApiResult<WorkItem[]>>
   return request<WorkItem[]>(`/api/v1/projects/${projectId}/work-items`);
 }
 
+/** DEVOS-213: the real `getWorkItemForPrincipal`/`GET /work-items/:workItemId`
+ * route already existed with no client wrapper — see
+ * specs/sprints/sprint-31/DEVOS-213.md's own grounding. */
+export function getWorkItem(workItemId: string): Promise<ApiResult<WorkItem>> {
+  return request<WorkItem>(`/api/v1/work-items/${workItemId}`);
+}
+
+/** DEVOS-213: the real `updateWorkItem`/`PATCH /work-items/:workItemId` route
+ * already existed with no client wrapper. Only the fields the backend's own
+ * `UpdateWorkItemBody` accepts (`apps/api/src/dto/work-item.ts`). */
+export function updateWorkItem(
+  workItemId: string,
+  changes: { title?: string; description?: string; status?: string; priority?: string },
+): Promise<ApiResult<WorkItem>> {
+  return request<WorkItem>(`/api/v1/work-items/${workItemId}`, {
+    method: 'PATCH',
+    body: changes,
+  });
+}
+
 export function createWorkItem(
   projectId: string,
   input: { title: string; type?: string; priority?: string; description?: string },
@@ -706,10 +726,20 @@ export interface Approval {
     signal: 'MET' | 'UNMET' | 'INSUFFICIENT_SAMPLE';
     appliedReducedRequiredApprovers?: number;
   };
+  /** DEVOS-218: the real ABAC risk class, additive — undefined for every
+   * approval created on a path that never sets one. */
+  riskClass?: string;
 }
 
 export function listApprovalsForProject(projectId: string): Promise<ApiResult<Approval[]>> {
   return request<Approval[]>(`/api/v1/projects/${projectId}/approvals`);
+}
+
+/** DEVOS-215: the real `listApprovalsForRun`/`GET /runs/:runId/approvals`
+ * route already existed with no client wrapper — see
+ * specs/sprints/sprint-31/DEVOS-215.md's own grounding. */
+export function listApprovalsForRun(runId: string): Promise<ApiResult<Approval[]>> {
+  return request<Approval[]>(`/api/v1/runs/${runId}/approvals`);
 }
 
 export function approveApproval(

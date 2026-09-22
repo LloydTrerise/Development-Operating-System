@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import {
+  Box,
   Button,
   List,
   ListItem,
@@ -35,21 +36,36 @@ import { useOrganisationContext } from '../../organisation-context.js';
 import { useProjectContext } from '../../project-context.js';
 
 /**
- * DEVOS-090 — no wireframe exists anywhere in the spec corpus for this page
- * (the same "build to the task's own acceptance criterion" precedent
- * DEVOS-046/060/070/080 already established for un-wireframed UI work).
- * Three sections, each backed by a real, already-existing endpoint — no new
- * API surface was added beyond two new read-only client functions
- * (`listPoliciesForProject`, `listAuditRecordsForProject`) wrapping routes
- * that already existed and were already isolation-tested (DEVOS-084):
- *
- *  - Policies: every policy registered for the project, published or draft.
- *  - Approvals: reuses ApprovalsPage's own data source, summarised rather
- *    than duplicating its full decide-approval workflow.
- *  - Risk activity: `outcome === 'FAILURE'` audit records — a real, already
- *    -recorded signal (every policy denial, capability denial, and failed
- *    tool invocation writes exactly this), not a fabricated risk score.
+ * DEVOS-219: restyled into the mockup's 3-panel Governance layout (Policies,
+ * Risk activity, Audit trail — `Design/DevOS.dc.html` lines 650-713), plus a
+ * fourth Reliability-reduction-evidence panel the backlog's own acceptance
+ * text explicitly requires preserving ("already real, per §2.3... preserved
+ * and restyled, not rebuilt") even though the mockup's own Governance screen
+ * has no Approvals section at all — see specs/sprints/sprint-32/README.md.
+ * The generic full-approvals list DEVOS-090 originally put here is dropped,
+ * since DEVOS-218 now gives Approvals its own dedicated, richer page; only
+ * the narrow, real, backlog-mandated reliability-evidence subset remains.
  */
+function PanelHeader({ title, meta }: { title: string; meta?: string }) {
+  return (
+    <Stack
+      direction="row"
+      alignItems="center"
+      spacing={1}
+      sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}
+    >
+      <Typography variant="subtitle1" sx={{ flex: 1 }}>
+        {title}
+      </Typography>
+      {meta && (
+        <Typography variant="caption" color="text.secondary">
+          {meta}
+        </Typography>
+      )}
+    </Stack>
+  );
+}
+
 export function GovernancePage() {
   const { selectedProjectId, projects } = useProjectContext();
   const { selectedOrganisationId } = useOrganisationContext();
@@ -205,6 +221,7 @@ export function GovernancePage() {
       'targetType',
       'targetId',
       'outcome',
+      'correlationId',
       'createdAt',
     ];
     const rows = filteredComplianceRecords.map((record) =>
@@ -217,6 +234,7 @@ export function GovernancePage() {
         record.targetType,
         record.targetId,
         record.outcome,
+        record.correlationId ?? '',
         record.createdAt,
       ]
         .map((value) => `"${String(value).replace(/"/g, '""')}"`)
@@ -236,6 +254,10 @@ export function GovernancePage() {
     .filter((record) => record.outcome === 'FAILURE')
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
+  const reliabilityEvidenceApprovals = approvals.filter(
+    (approval) => approval.reliabilityEvidence,
+  );
+
   return (
     <section>
       <Typography variant="h4" component="h2" gutterBottom>
@@ -244,173 +266,121 @@ export function GovernancePage() {
 
       {loadError && <ErrorAlert message={`Failed to load governance data: ${loadError}`} />}
 
-      <Stack spacing={4}>
-        <PolicyAuthoringForm
-          projectId={selectedProjectId}
-          organisationId={projectOrganisationId ?? null}
-          onCreated={refresh}
-        />
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1.25fr) minmax(0, 1fr)' },
+          gridAutoRows: 'min-content',
+          gap: 1.5,
+        }}
+      >
+        <Paper variant="outlined" sx={{ gridRow: { md: 'span 2' } }}>
+          <PanelHeader
+            title="Policies"
+            meta={`${policies.length + organisationPolicies.length} total`}
+          />
+          <Box sx={{ p: 1.5 }}>
+            <PolicyAuthoringForm
+              projectId={selectedProjectId}
+              organisationId={projectOrganisationId ?? null}
+              onCreated={refresh}
+            />
 
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            Policies — this project
-          </Typography>
-          <List dense>
-            {policies.map((policy) => (
-              <Fragment key={policy.id}>
-                <ListItem disableGutters>
-                  <ListItemText
-                    primary={
-                      <>
-                        <strong>{policy.key}</strong> v{policy.version}
-                        {policy.publishedAt && ` — published ${policy.publishedAt}`}
-                      </>
-                    }
-                  />
-                  <StatusChip status={policy.status} />
-                  {policy.status === 'DRAFT' && (
-                    <>
-                      <Button
-                        size="small"
-                        onClick={() => void handlePreview(policy.id)}
-                        sx={{ ml: 1 }}
-                      >
-                        {previewingId === policy.id
-                          ? 'Hide preview'
-                          : 'Preview against recent activity'}
-                      </Button>
-                      <Button
-                        size="small"
-                        onClick={() => void handlePublish(policy.id)}
-                        disabled={publishingId === policy.id}
-                        sx={{ ml: 1 }}
-                      >
-                        Publish
-                      </Button>
-                    </>
-                  )}
-                </ListItem>
-                {previewingId === policy.id && (
-                  <PolicySimulationPreview loading={previewLoading} results={previewResults} />
-                )}
-              </Fragment>
-            ))}
-            {policies.length === 0 && (
-              <ListItem disableGutters>
-                <ListItemText primary="No policies registered for this project." />
-              </ListItem>
-            )}
-          </List>
-        </div>
-
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            Policies — this project&apos;s organisation
-          </Typography>
-          <List dense>
-            {organisationPolicies.map((policy) => (
-              <Fragment key={policy.id}>
-                <ListItem disableGutters>
-                  <ListItemText
-                    primary={
-                      <>
-                        <strong>{policy.key}</strong> v{policy.version}
-                        {policy.publishedAt && ` — published ${policy.publishedAt}`}
-                      </>
-                    }
-                    secondary="Organisation-wide — takes precedence over this project's own policies"
-                  />
-                  <StatusChip status={policy.status} />
-                  {policy.status === 'DRAFT' && (
-                    <>
-                      <Button
-                        size="small"
-                        onClick={() => void handlePreview(policy.id)}
-                        sx={{ ml: 1 }}
-                      >
-                        {previewingId === policy.id
-                          ? 'Hide preview'
-                          : 'Preview against recent activity'}
-                      </Button>
-                      <Button
-                        size="small"
-                        onClick={() => void handlePublish(policy.id)}
-                        disabled={publishingId === policy.id}
-                        sx={{ ml: 1 }}
-                      >
-                        Publish
-                      </Button>
-                    </>
-                  )}
-                </ListItem>
-                {previewingId === policy.id && (
-                  <PolicySimulationPreview loading={previewLoading} results={previewResults} />
-                )}
-              </Fragment>
-            ))}
-            {organisationPolicies.length === 0 && (
-              <ListItem disableGutters>
-                <ListItemText primary="No organisation-scoped policies registered." />
-              </ListItem>
-            )}
-          </List>
-        </div>
-
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            Approvals
-          </Typography>
-          <List dense>
-            {approvals.map((approval) => (
-              <ListItem key={approval.id} disableGutters>
-                <ListItemText
-                  primary={
-                    <>
-                      {approval.approvalType} — requires {approval.requiredApprovers} approver
-                      {approval.requiredApprovers === 1 ? '' : 's'}
-                    </>
-                  }
-                  secondary={
-                    <>
-                      {approval.decidedBy
-                        ? `decided by ${approval.decidedBy}`
-                        : `requested by ${approval.requestedBy}`}
-                      {approval.reliabilityEvidence && (
+            <Typography variant="subtitle2" sx={{ mt: 3 }} gutterBottom>
+              This project
+            </Typography>
+            <List dense disablePadding>
+              {policies.map((policy) => (
+                <Fragment key={policy.id}>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={
                         <>
-                          {' — reliability check: '}
-                          {approval.reliabilityEvidence.signal}
-                          {' (agent version '}
-                          {approval.reliabilityEvidence.agentVersionId}
-                          {')'}
-                          {approval.reliabilityEvidence.appliedReducedRequiredApprovers !==
-                            undefined &&
-                            ` — reduced to ${approval.reliabilityEvidence.appliedReducedRequiredApprovers} required approver${approval.reliabilityEvidence.appliedReducedRequiredApprovers === 1 ? '' : 's'}`}
+                          <code>{policy.key}</code> v{policy.version}
                         </>
-                      )}
-                    </>
-                  }
-                />
-                <StatusChip status={approval.status} />
-              </ListItem>
-            ))}
-            {approvals.length === 0 && (
-              <ListItem disableGutters>
-                <ListItemText primary="No approvals recorded for this project." />
-              </ListItem>
-            )}
-          </List>
-        </div>
+                      }
+                      secondary={policy.publishedAt && `published ${policy.publishedAt}`}
+                    />
+                    <StatusChip status={policy.status} />
+                    {policy.status === 'DRAFT' && (
+                      <>
+                        <Button size="small" onClick={() => void handlePreview(policy.id)} sx={{ ml: 1 }}>
+                          {previewingId === policy.id ? 'Hide preview' : 'Preview'}
+                        </Button>
+                        <Button
+                          size="small"
+                          onClick={() => void handlePublish(policy.id)}
+                          disabled={publishingId === policy.id}
+                          sx={{ ml: 1 }}
+                        >
+                          Publish
+                        </Button>
+                      </>
+                    )}
+                  </ListItem>
+                  {previewingId === policy.id && (
+                    <PolicySimulationPreview loading={previewLoading} results={previewResults} />
+                  )}
+                </Fragment>
+              ))}
+              {policies.length === 0 && (
+                <ListItem disableGutters>
+                  <ListItemText primary="No policies registered for this project." />
+                </ListItem>
+              )}
+            </List>
 
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            Risk activity
-          </Typography>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            Denied or failed security-significant actions, most recent first.
-          </Typography>
-          <List dense>
+            <Typography variant="subtitle2" sx={{ mt: 3 }} gutterBottom>
+              This project&apos;s organisation
+            </Typography>
+            <List dense disablePadding>
+              {organisationPolicies.map((policy) => (
+                <Fragment key={policy.id}>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={
+                        <>
+                          <code>{policy.key}</code> v{policy.version}
+                        </>
+                      }
+                      secondary="Organisation-wide — takes precedence over project policies"
+                    />
+                    <StatusChip status={policy.status} />
+                    {policy.status === 'DRAFT' && (
+                      <>
+                        <Button size="small" onClick={() => void handlePreview(policy.id)} sx={{ ml: 1 }}>
+                          {previewingId === policy.id ? 'Hide preview' : 'Preview'}
+                        </Button>
+                        <Button
+                          size="small"
+                          onClick={() => void handlePublish(policy.id)}
+                          disabled={publishingId === policy.id}
+                          sx={{ ml: 1 }}
+                        >
+                          Publish
+                        </Button>
+                      </>
+                    )}
+                  </ListItem>
+                  {previewingId === policy.id && (
+                    <PolicySimulationPreview loading={previewLoading} results={previewResults} />
+                  )}
+                </Fragment>
+              ))}
+              {organisationPolicies.length === 0 && (
+                <ListItem disableGutters>
+                  <ListItemText primary="No organisation-scoped policies registered." />
+                </ListItem>
+              )}
+            </List>
+          </Box>
+        </Paper>
+
+        <Paper variant="outlined">
+          <PanelHeader title="Risk activity" meta="denied/failed actions" />
+          <List dense disablePadding sx={{ maxHeight: 320, overflow: 'auto' }}>
             {riskActivity.map((record) => (
-              <ListItem key={record.id} disableGutters>
+              <ListItem key={record.id} disableGutters sx={{ px: 1.5 }}>
                 <ListItemText
                   primary={
                     <>
@@ -423,22 +393,61 @@ export function GovernancePage() {
               </ListItem>
             ))}
             {riskActivity.length === 0 && (
-              <ListItem disableGutters>
+              <ListItem disableGutters sx={{ px: 1.5 }}>
                 <ListItemText primary="No denied or failed activity recorded." />
               </ListItem>
             )}
           </List>
-        </div>
+        </Paper>
 
-        <div>
-          <Typography variant="h6" component="h3" gutterBottom>
-            Compliance report — this project&apos;s organisation
-          </Typography>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            Every real audit record across this organisation&apos;s own projects (tenant-isolated —
-            never crosses organisations).
-          </Typography>
-          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+        <Paper variant="outlined">
+          <PanelHeader
+            title="Reliability-reduction evidence"
+            meta={`${reliabilityEvidenceApprovals.length} checked`}
+          />
+          <List dense disablePadding sx={{ maxHeight: 320, overflow: 'auto' }}>
+            {reliabilityEvidenceApprovals.map((approval) => (
+              <ListItem key={approval.id} disableGutters sx={{ px: 1.5 }}>
+                <ListItemText
+                  primary={
+                    <>
+                      {approval.approvalType} — requires {approval.requiredApprovers} approver
+                      {approval.requiredApprovers === 1 ? '' : 's'}
+                    </>
+                  }
+                  secondary={
+                    <>
+                      {'reliability check: '}
+                      {approval.reliabilityEvidence!.signal}
+                      {' (agent version '}
+                      {approval.reliabilityEvidence!.agentVersionId}
+                      {')'}
+                      {approval.reliabilityEvidence!.appliedReducedRequiredApprovers !==
+                        undefined &&
+                        ` — reduced to ${approval.reliabilityEvidence!.appliedReducedRequiredApprovers}`}
+                    </>
+                  }
+                />
+                <StatusChip status={approval.status} />
+              </ListItem>
+            ))}
+            {reliabilityEvidenceApprovals.length === 0 && (
+              <ListItem disableGutters sx={{ px: 1.5 }}>
+                <ListItemText primary="No approval has checked a reliability reduction yet." />
+              </ListItem>
+            )}
+          </List>
+        </Paper>
+
+        <Paper variant="outlined" sx={{ gridColumn: { md: '1 / -1' } }}>
+          <PanelHeader title="Audit trail" meta="this project's organisation" />
+          <Stack
+            direction="row"
+            spacing={1}
+            flexWrap="wrap"
+            useFlexGap
+            sx={{ p: 1.5, borderBottom: 1, borderColor: 'divider' }}
+          >
             <TextField
               select
               label="Project"
@@ -495,38 +504,45 @@ export function GovernancePage() {
               Export CSV
             </Button>
           </Stack>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Project</TableCell>
-                <TableCell>Actor</TableCell>
-                <TableCell>Action</TableCell>
-                <TableCell>Outcome</TableCell>
-                <TableCell>When</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredComplianceRecords.map((record) => (
-                <TableRow key={record.id}>
-                  <TableCell>
-                    {projects.find((project) => project.id === record.projectId)?.name ??
-                      record.projectId}
-                  </TableCell>
-                  <TableCell>{record.actorId}</TableCell>
-                  <TableCell>{record.action}</TableCell>
-                  <TableCell>{record.outcome}</TableCell>
-                  <TableCell>{record.createdAt}</TableCell>
+          <Box sx={{ maxHeight: 420, overflow: 'auto' }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Time</TableCell>
+                  <TableCell>Actor</TableCell>
+                  <TableCell>Action</TableCell>
+                  <TableCell>Target</TableCell>
+                  <TableCell>Outcome</TableCell>
+                  <TableCell>Correlation</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {filteredComplianceRecords.length === 0 && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              No audit records match the current filters.
-            </Typography>
-          )}
-        </div>
-      </Stack>
+              </TableHead>
+              <TableBody>
+                {filteredComplianceRecords.map((record) => (
+                  <TableRow key={record.id}>
+                    <TableCell>{record.createdAt}</TableCell>
+                    <TableCell>{record.actorId}</TableCell>
+                    <TableCell>
+                      <code>{record.action}</code>
+                    </TableCell>
+                    <TableCell>
+                      {record.targetType} <code>{record.targetId}</code>
+                    </TableCell>
+                    <TableCell>{record.outcome}</TableCell>
+                    <TableCell>
+                      {record.correlationId ? <code>{record.correlationId}</code> : '—'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {filteredComplianceRecords.length === 0 && (
+              <Typography variant="body2" color="text.secondary" sx={{ p: 1.5 }}>
+                No audit records match the current filters.
+              </Typography>
+            )}
+          </Box>
+        </Paper>
+      </Box>
     </section>
   );
 }

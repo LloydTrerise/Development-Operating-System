@@ -2429,11 +2429,12 @@ describe('DEVOS-084: tenant isolation — policies, approvals, knowledge sources
   let projectId: string;
   let approvalDeps: ApprovalUseCaseDeps;
   let auditDeps: AuditUseCaseDeps;
+  let workflowDeps: ReturnType<typeof createInMemoryWorkflowDeps>;
 
   beforeAll(async () => {
     const projectDeps = createInMemoryProjectDeps();
     const workItemDeps = createInMemoryWorkItemDeps(projectDeps);
-    const workflowDeps = createInMemoryWorkflowDeps(projectDeps, workItemDeps);
+    workflowDeps = createInMemoryWorkflowDeps(projectDeps, workItemDeps);
     const artifactDeps = createInMemoryArtifactDeps(
       projectDeps,
       await mkdtemp(path.join(tmpdir(), 'devos-api-isolation-')),
@@ -2546,6 +2547,57 @@ describe('DEVOS-084: tenant isolation — policies, approvals, knowledge sources
     expect(decideResponse.status).toBe(404);
   });
 
+  // DEVOS-216: `GET /runs/:runId/approvals` already existed
+  // (apps/api/src/routes/approvals.ts) and was already unit-tested at the
+  // application layer (packages/application/tests/approvals.test.ts), but
+  // had no route-level HTTP test — found during Sprint 31's own conversion
+  // grounding (specs/sprints/sprint-31/DEVOS-216.md).
+  it('DEVOS-216: lists only the given run\'s own approvals at the route level, and denies a non-member', async () => {
+    const now = new Date().toISOString();
+    const runId = 'devos-216-run' as Approval['workflowRunId'];
+    const otherRunId = 'devos-216-other-run' as Approval['workflowRunId'];
+
+    await workflowDeps.workflowRuns.create({
+      id: runId,
+      projectId,
+      workflowVersionId: 'devos-216-version',
+      workItemId: 'devos-216-work-item',
+      status: 'RUNNING',
+      input: {},
+      createdAt: now,
+      updatedAt: now,
+    } as WorkflowRun);
+
+    await approvalDeps.approvals.create({
+      id: 'devos-216-own-approval' as Approval['id'],
+      projectId: projectId as Approval['projectId'],
+      workflowRunId: runId,
+      approvalType: 'PLANNING',
+      status: 'PENDING',
+      requestedBy: 'alice',
+      evidenceReference: { artifactVersionIds: [], scopeHash: 'd'.repeat(64) },
+      requestedAt: now,
+    });
+    await approvalDeps.approvals.create({
+      id: 'devos-216-other-approval' as Approval['id'],
+      projectId: projectId as Approval['projectId'],
+      workflowRunId: otherRunId,
+      approvalType: 'PLANNING',
+      status: 'PENDING',
+      requestedBy: 'alice',
+      evidenceReference: { artifactVersionIds: [], scopeHash: 'e'.repeat(64) },
+      requestedAt: now,
+    });
+
+    const response = await authed(`/api/v1/runs/${runId}/approvals`, 'alice');
+    expect(response.status).toBe(200);
+    const { data } = (await response.json()) as { data: Array<Record<string, unknown>> };
+    expect(data.map((approval) => approval.id)).toEqual(['devos-216-own-approval']);
+
+    const deniedResponse = await authed(`/api/v1/runs/${runId}/approvals`, 'mallory');
+    expect(deniedResponse.status).toBe(404);
+  });
+
   it('DEVOS-200: surfaces reliabilityEvidence and requiredApprovers on the approval listing DTO when present, and omits reliabilityEvidence when absent', async () => {
     const now = new Date().toISOString();
     await approvalDeps.approvals.create({
@@ -2595,6 +2647,44 @@ describe('DEVOS-084: tenant isolation — policies, approvals, knowledge sources
     const withoutReliability = data.find((row) => row.id === 'devos-200-without-reliability');
     expect(withoutReliability?.requiredApprovers).toBe(2);
     expect(withoutReliability?.reliabilityEvidence).toBeUndefined();
+  });
+
+  // DEVOS-218/DEVOS-220: `riskClass` was a real domain field never surfaced
+  // on the approval listing DTO before this sprint — mirrors DEVOS-200's
+  // own precedent test for its own additive DTO field.
+  it('DEVOS-218: surfaces riskClass on the approval listing DTO when present, and omits it when absent', async () => {
+    const now = new Date().toISOString();
+    await approvalDeps.approvals.create({
+      id: 'devos-218-with-risk-class' as Approval['id'],
+      projectId: projectId as Approval['projectId'],
+      workflowRunId: 'devos-218-run' as Approval['workflowRunId'],
+      approvalType: 'RELEASE',
+      status: 'PENDING',
+      requestedBy: 'alice',
+      evidenceReference: { artifactVersionIds: [], scopeHash: 'f'.repeat(64) },
+      requestedAt: now,
+      riskClass: 'R3',
+    });
+    await approvalDeps.approvals.create({
+      id: 'devos-218-without-risk-class' as Approval['id'],
+      projectId: projectId as Approval['projectId'],
+      workflowRunId: 'devos-218-run-2' as Approval['workflowRunId'],
+      approvalType: 'PLANNING',
+      status: 'PENDING',
+      requestedBy: 'alice',
+      evidenceReference: { artifactVersionIds: [], scopeHash: 'a1'.repeat(32) },
+      requestedAt: now,
+    });
+
+    const response = await authed(`/api/v1/projects/${projectId}/approvals`, 'alice');
+    expect(response.status).toBe(200);
+    const { data } = (await response.json()) as { data: Array<Record<string, unknown>> };
+
+    const withRiskClass = data.find((row) => row.id === 'devos-218-with-risk-class');
+    expect(withRiskClass?.riskClass).toBe('R3');
+
+    const withoutRiskClass = data.find((row) => row.id === 'devos-218-without-risk-class');
+    expect(withoutRiskClass?.riskClass).toBeUndefined();
   });
 
   it('denies a non-member from reading the audit trail for another project', async () => {
