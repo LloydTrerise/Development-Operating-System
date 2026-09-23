@@ -40,6 +40,7 @@ import { ProjectDetailPage } from './features/projects/ProjectDetailPage.js';
 import { ProjectsPage } from './features/projects/ProjectsPage.js';
 import { RunDetailPage } from './features/runs/RunDetailPage.js';
 import { RunsPage } from './features/runs/RunsPage.js';
+import { NotificationBell } from './features/notifications/NotificationBell.js';
 import { CommandPalette } from './features/search/CommandPalette.js';
 import { GlobalSearch } from './features/search/GlobalSearch.js';
 import { WorkItemDetailPage } from './features/work-items/WorkItemDetailPage.js';
@@ -337,6 +338,7 @@ export function App() {
           >
             {mode === 'light' ? <DarkModeIcon /> : <LightModeIcon />}
           </IconButton>
+          <NotificationBell />
         </Toolbar>
       </AppBar>
       <Drawer

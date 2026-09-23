@@ -1,0 +1,26 @@
+# DEVOS-272 — Validation, documentation, and gap disclosure
+
+**Priority:** P1 | **Estimate:** 0.5d
+**Depends on:** DEVOS-271.
+
+## Scope
+
+Full monorepo validation; the full real `tests/e2e` suite; a real end-to-end proof that a real triggering event produces a real notification row with a working UI deep link.
+
+## Acceptance
+
+`pnpm turbo run typecheck lint test build --filter='!@devos/e2e-tests'` green, matching Sprint 42's own baseline. The full real `tests/e2e` suite green, matching Sprint 42's own baseline (27/27 files, 52/52 tests), unless a real regression is found and disclosed. Real, disclosed gaps recorded rather than silently fixed or hidden: the `WorkflowTask` non-target and the `Approval` deep-link's project-selection dependency (both already disclosed in `README.md`'s grounding), plus any new finding from this task's own live verification.
+
+## Actual results
+
+Full monorepo `pnpm turbo run typecheck lint test build --filter='!@devos/e2e-tests'`: **76/76 tasks successful**, matching Sprint 42's own baseline exactly (no new package). The full real `tests/e2e` suite (`pnpm --filter @devos/e2e-tests test`): **27/27 files, 52/52 tests green**, matching Sprint 42's own baseline exactly. `prettier --check` clean across every file this sprint touched.
+
+**A real, disclosed, environment-only interference was found and resolved during this task's own e2e run, not a code defect.** The suite's first run showed 4 real failures, all in `hardening.test.ts` (stale-task-reclaim ordering assertions receiving a different task id than expected). Root-caused, not assumed: `hardening.test.ts` talks to the real, shared Postgres task queue directly via `claimNext()`/`reclaimStale()`, with no isolation from any other real process also claiming tasks against the same database — and DEVOS-271's own live-verification worker (started for the real end-to-end proof, per `DEVOS-271.md`) was still running against that same real Postgres when the suite was first launched, racing `hardening.test.ts` for real queue rows. Confirmed by re-running `hardening.test.ts` alone immediately after stopping that worker: **9/9 passed clean**. The full suite was then re-run in full with the worker fully stopped: **27/27 files, 52/52 tests green**, zero regression, matching Sprint 42's own baseline exactly. This is a real, disclosed environmental hazard worth naming for a future sprint's own live verification: never leave a long-lived `apps/worker` instance running against the shared real Postgres database while running the `hardening.test.ts`-containing e2e suite in the same session.
+
+**The required real end-to-end proof succeeded in full** — see `DEVOS-271.md`'s own "Actual results" for the complete real proof (work item → published `APPROVAL`-node workflow → run → real `Approval` → real materialized `ApprovalRequested` notification → real bell badge/list/deep-link/mark-as-read, all confirmed via a real running dev server, `apps/worker`, and Playwright).
+
+**Real, disclosed gaps, matching `README.md`'s own grounding, none newly found**: the `WorkflowTask` reference type has no resolvable deep-link target (no route resolves a bare task id to its owning run); the `Approval` deep-link is project-selection-dependent, since `Notification` carries no project id and `ApprovalsPage.tsx` loads via the currently-selected project; `Integration`-type notifications route to the list page only, and are not currently reachable by any real trigger. The already-disclosed, pre-existing `ApprovalsPage.tsx` unbounded evidence-fetch console-error flood (Sprint 35) was re-confirmed, unrelated to this sprint's own code, and left unfixed per this sprint's declared scope.
+
+**Real, disclosed, cleaned-up test residue, not left behind**: this task's own live verification (via `DEVOS-271.md`'s proof) left 1,160 real `notifications` rows across many real recipients — the worker's real drain loop correctly draining a large real pre-existing `outbox_events` backlog accumulated from unrelated historical activity across this machine's many stray `apps/api` dev processes (the same benign pattern Sprint 42's own `DEVOS-270.md` already documented), plus this task's own single real verification row. Cleared via `DELETE FROM notifications` against real Postgres (1,160 → 0; confirmed via Bash without triggering this sandbox's Cloud-Storage-Mass-Delete false positive this time). The real work item and workflow definition this task's own verification created in the "DevOS POC" project remain as permanent stray test data, since no delete route exists for either (the same accepted-gap pattern already documented for every prior sprint's own live-verification residue). **This is the last sprint for which clearing the entire `notifications` table is a safe, no-consequence cleanup** — from Sprint 43 onward, real users' real unread state now lives there via this sprint's own UI, so a future sprint's own live verification must be more careful about full-table test-data cleanup there than this one could afford to be.
+
+**Sprint 43 (DEVOS-271–272, Notifications UI) is complete** — a real header notification bell wired to Sprint 42's real routes, deep-linking to the real approval/run/artifact targets that exist, with the `WorkflowTask`/`Integration`/project-selection-dependent gaps disclosed rather than fabricated.

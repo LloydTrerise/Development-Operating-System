@@ -1,4 +1,4 @@
-import type { ApiErrorResponse, ApiResponse } from '@devos/contracts';
+import type { ApiErrorResponse, ApiResponse, EventType } from '@devos/contracts';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
 
@@ -1461,4 +1461,32 @@ export function installKnowledgeSource(
 /** DEVOS-171: the real, worker-sourced bottleneck ranking, proxied via `apps/api`. Returns an empty array (not an error) when the worker's metrics bridge isn't configured. */
 export function getSlowestWorkflows(projectId: string): Promise<ApiResult<SlowestWorkflowRow[]>> {
   return request<SlowestWorkflowRow[]>(`/api/v1/projects/${projectId}/slowest-workflows`);
+}
+
+/** DEVOS-271: mirrors `apps/api/src/dto/notifications.ts`'s `toNotificationDto`
+ * shape exactly. `type` is the real `EventType` that fired; `referenceType`/
+ * `referenceId` mirror the triggering envelope's own `aggregateType`/
+ * `aggregateId` (Sprint 42's `Notification` entity, unchanged). */
+export interface Notification {
+  id: string;
+  recipientPrincipalId: string;
+  type: EventType;
+  referenceType: string;
+  referenceId: string;
+  read: boolean;
+  createdAt: string;
+  readAt: string | null;
+}
+
+/** DEVOS-271: the current principal's own notifications only — the real
+ * `GET /notifications` route (Sprint 42's DEVOS-269) needed no client
+ * wrapper until this sprint. */
+export function listNotifications(): Promise<ApiResult<Notification[]>> {
+  return request<Notification[]>('/api/v1/notifications');
+}
+
+export function markNotificationRead(notificationId: string): Promise<ApiResult<Notification>> {
+  return request<Notification>(`/api/v1/notifications/${notificationId}/read`, {
+    method: 'PATCH',
+  });
 }

@@ -31,6 +31,7 @@ import {
   listAuditRecordsForOrganisation,
   listIntegrations,
   listMembers,
+  listNotifications,
   listOrganisationMembers,
   listOrganisations,
   listPoliciesForOrganisation,
@@ -41,6 +42,7 @@ import {
   listSharedKnowledgeSources,
   listToolCapabilities,
   listWorkflowsForOrganisation,
+  markNotificationRead,
   publishPolicy,
   removeMember,
   removeOrganisationMember,
@@ -1260,5 +1262,60 @@ describe('api client', () => {
     expect(result.ok).toBe(true);
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/organisations/org-1/workflow-library');
+  });
+
+  // DEVOS-271: the first-ever wrappers for the real Sprint 42 notification
+  // routes, deliberately deferred by that sprint's own backend-only scope.
+  it("DEVOS-271: lists the current principal's own notifications at the real route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [
+          {
+            id: 'notification-1',
+            recipientPrincipalId: 'seed-user',
+            type: 'ApprovalRequested',
+            referenceType: 'Approval',
+            referenceId: 'approval-1',
+            read: false,
+            createdAt: '2026-01-01T00:00:00.000Z',
+            readAt: null,
+          },
+        ],
+        meta: { requestId: 'req-45' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listNotifications();
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/notifications');
+  });
+
+  it('DEVOS-271: marks a notification read at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'notification-1',
+          recipientPrincipalId: 'seed-user',
+          type: 'ApprovalRequested',
+          referenceType: 'Approval',
+          referenceId: 'approval-1',
+          read: true,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          readAt: '2026-01-01T01:00:00.000Z',
+        },
+        meta: { requestId: 'req-46' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await markNotificationRead('notification-1');
+
+    expect(result.ok).toBe(true);
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/notifications/notification-1/read');
+    expect(options.method).toBe('PATCH');
   });
 });
