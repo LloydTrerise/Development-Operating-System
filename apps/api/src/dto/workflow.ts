@@ -1,6 +1,6 @@
 import type { WorkflowDefinition as WorkflowGraph } from '@devos/contracts';
 import type { WorkflowDefinition, WorkflowVersion } from '@devos/domain';
-import type { WorkflowDefinitionSummary } from '@devos/application';
+import type { WorkflowDefinitionSummary, WorkflowLibraryEntry } from '@devos/application';
 import { BadRequestError } from '../http/errors.js';
 
 export function toWorkflowDefinitionDto(definition: WorkflowDefinition) {
@@ -20,6 +20,20 @@ export function toWorkflowDefinitionSummaryDto(summary: WorkflowDefinitionSummar
     ...toWorkflowDefinitionDto(summary),
     latestVersionStatus: summary.latestVersionStatus,
     versionCount: summary.versionCount,
+  };
+}
+
+/** Sprint 41 gap closure: the Workflow Library's org-scoped aggregate row —
+ * reuses `toWorkflowDefinitionDto` unchanged, adding the same
+ * `latestVersionStatus`/`versionCount` fields `toWorkflowDefinitionSummaryDto`
+ * already returns, plus real per-status run counts (classification into
+ * succeeded/failed/in-progress stays a frontend concern, unchanged). */
+export function toWorkflowLibraryEntryDto(entry: WorkflowLibraryEntry) {
+  return {
+    ...toWorkflowDefinitionDto(entry.definition),
+    latestVersionStatus: entry.latestVersionStatus,
+    versionCount: entry.versionCount,
+    runStatusCounts: entry.runStatusCounts,
   };
 }
 

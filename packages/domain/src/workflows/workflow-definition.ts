@@ -1,4 +1,4 @@
-import type { ProjectId, WorkflowId } from '@devos/contracts';
+import type { OrganisationId, ProjectId, WorkflowId } from '@devos/contracts';
 
 export interface WorkflowDefinition {
   id: WorkflowId;
@@ -23,4 +23,14 @@ export interface WorkflowDefinitionRepository {
    * repository's own initial interface.
    */
   searchForProject?: (projectId: ProjectId, query: string) => Promise<WorkflowDefinition[]>;
+  /**
+   * Sprint 41 gap closure: every definition across every project in an
+   * organisation, via a real join to `projects` — replaces
+   * `WorkflowLibraryPage.tsx`'s own client-side
+   * `Promise.all(projects.map(listWorkflows))` fan-out, which never resolves
+   * against the real seeded organisation's thousands of accumulated
+   * projects. Optional, mirroring `searchForProject`'s own established
+   * convention for widening this repository.
+   */
+  listForOrganisation?: (organisationId: OrganisationId) => Promise<WorkflowDefinition[]>;
 }

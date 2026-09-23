@@ -48,6 +48,19 @@ export function createWorkflowDefinitionRepository(
       return rows.map(toDomain);
     },
 
+    // Sprint 41 gap closure: a real join against `projects` — one query
+    // for every definition in the organisation, replacing the N per-project
+    // calls `WorkflowLibraryPage.tsx` used to make.
+    async listForOrganisation(organisationId) {
+      const rows = await db
+        .selectFrom('workflow_definitions')
+        .innerJoin('projects', 'projects.id', 'workflow_definitions.project_id')
+        .where('projects.organisation_id', '=', organisationId)
+        .selectAll('workflow_definitions')
+        .execute();
+      return rows.map(toDomain);
+    },
+
     async create(definition) {
       await db
         .insertInto('workflow_definitions')

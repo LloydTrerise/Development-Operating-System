@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -26,21 +26,20 @@ import {
   createWorkflow,
   getWorkflowVersionByNumber,
   listProjectTypes,
-  listWorkflowRunsForDefinition,
   listWorkflowVersions,
-  listWorkflows,
+  listWorkflowsForOrganisation,
   listWorkItems,
   startRunFromVersion,
   type Project,
   type ProjectType,
   type WorkflowDefinitionSummary,
-  type WorkflowRun,
   type WorkflowVersionDto,
   type WorkItem,
 } from '../../api-client.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
 import { StatusChip } from '../../components/StatusChip.js';
+import { useOrganisationContext } from '../../organisation-context.js';
 import { useProjectContext } from '../../project-context.js';
 
 /** DEVOS-223: the same local panel-header convention `GovernancePage.tsx`'s
@@ -78,35 +77,49 @@ interface RunHealth {
   inProgress: number;
 }
 
-function summarizeRunHealth(runs: WorkflowRun[]): RunHealth {
+/** Sprint 41 gap closure: classification into succeeded/failed/in-progress
+ * stays a frontend concern (`RUN_TERMINAL_STATUSES`, the same set
+ * `RunsPage.tsx` already established) — the backend's new aggregate route
+ * returns only raw per-status counts, not a pre-classified verdict. */
+function summarizeRunHealthFromCounts(counts: Record<string, number>): RunHealth {
+  let total = 0;
   let succeeded = 0;
   let failed = 0;
   let inProgress = 0;
-  for (const run of runs) {
-    if (!RUN_TERMINAL_STATUSES.has(run.status)) {
-      inProgress += 1;
-    } else if (run.status === 'COMPLETED') {
-      succeeded += 1;
+  for (const [status, count] of Object.entries(counts)) {
+    total += count;
+    if (!RUN_TERMINAL_STATUSES.has(status)) {
+      inProgress += count;
+    } else if (status === 'COMPLETED') {
+      succeeded += count;
     } else {
-      failed += 1;
+      failed += count;
     }
   }
-  return { total: runs.length, succeeded, failed, inProgress };
+  return { total, succeeded, failed, inProgress };
 }
 
 /**
  * DEVOS-135 (Sprint 14): the library page the sprint's own grounding
  * confirmed did not exist — search/filter across every project's real
- * workflows, a real run-health summary (`listWorkflowRunsForDefinition` +
- * `RUN_TERMINAL_STATUSES`, the same terminal-status set `RunsPage.tsx`
- * already established), version history, and a "clone into new draft"
- * action built on the existing, unmodified `createWorkflowDefinition` use
- * case (via the new `createWorkflow` client wrapper).
+ * workflows, a real run-health summary, version history, and a "clone into
+ * new draft" action built on the existing, unmodified
+ * `createWorkflowDefinition` use case (via the new `createWorkflow` client
+ * wrapper). Sprint 41 gap closure: both the workflow list and the run-health
+ * summary are now sourced from one real, org-scoped aggregate route
+ * (`listWorkflowsForOrganisation`) instead of this page's own former
+ * `Promise.all(projects.map(...))`/`Promise.all(rows.map(...))` fan-outs,
+ * which never resolved against the real seeded organisation's thousands of
+ * accumulated projects — see `specs/sprints/sprint-41/README.md`'s gap-
+ * closure addendum.
  */
 export function WorkflowLibraryPage() {
   const { projects } = useProjectContext();
+  const { selectedOrganisationId } = useOrganisationContext();
   const navigate = useNavigate();
   const { selectProject } = useProjectContext();
+  const [searchParams] = useSearchParams();
+  const linkedWorkflowId = searchParams.get('workflowId');
 
   const [projectTypes, setProjectTypes] = useState<ProjectType[]>([]);
   const [rows, setRows] = useState<LibraryRow[]>([]);
@@ -145,64 +158,45 @@ export function WorkflowLibraryPage() {
   }, []);
 
   useEffect(() => {
-    if (projects.length === 0) {
+    if (!selectedOrganisationId) {
       setRows([]);
+      setRunHealth({});
       return;
     }
     let cancelled = false;
     setLoading(true);
 
-    Promise.all(projects.map((project) => listWorkflows(project.id))).then((results) => {
+    listWorkflowsForOrganisation(selectedOrganisationId).then((result) => {
       if (cancelled) return;
       setLoading(false);
 
-      const firstError = results.find((result) => !result.ok);
-      if (firstError && !firstError.ok) {
-        setError(firstError.error.message);
+      if (!result.ok) {
+        setError(result.error.message);
         return;
       }
       setError(null);
 
+      const projectById = new Map(projects.map((project) => [project.id, project]));
       const nextRows: LibraryRow[] = [];
-      results.forEach((result, index) => {
-        if (!result.ok) return;
-        const project = projects[index]!;
-        for (const definition of result.data) {
-          nextRows.push({ project, definition });
-        }
-      });
-      setRows(nextRows);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projects, refreshToken]);
-
-  useEffect(() => {
-    if (rows.length === 0) return;
-    let cancelled = false;
-
-    Promise.all(
-      rows.map((row) =>
-        listWorkflowRunsForDefinition(row.definition.id).then((result) => ({
-          id: row.definition.id,
-          health: result.ok ? summarizeRunHealth(result.data) : null,
-        })),
-      ),
-    ).then((results) => {
-      if (cancelled) return;
-      const next: Record<string, RunHealth> = {};
-      for (const { id, health } of results) {
-        if (health) next[id] = health;
+      const nextRunHealth: Record<string, RunHealth> = {};
+      for (const entry of result.data) {
+        const project = projectById.get(entry.projectId);
+        // Every real entry's projectId belongs to an org project the
+        // caller's already-loaded, org-filtered `projects` list also
+        // carries — this only skips a genuinely transient render before
+        // that list finishes its own separate fetch.
+        if (!project) continue;
+        nextRows.push({ project, definition: entry });
+        nextRunHealth[entry.id] = summarizeRunHealthFromCounts(entry.runStatusCounts);
       }
-      setRunHealth(next);
+      setRows(nextRows);
+      setRunHealth(nextRunHealth);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [rows]);
+  }, [selectedOrganisationId, projects, refreshToken]);
 
   const projectTypeNameById = useMemo(
     () => new Map(projectTypes.map((type) => [type.id, type.name])),
@@ -226,6 +220,28 @@ export function WorkflowLibraryPage() {
     });
   }, [rows, searchText, projectFilter, typeFilter, statusFilter]);
 
+  // Sprint 41 gap closure: the real, org-scoped aggregate route this page
+  // now uses can return thousands of real rows (16,021 against the real
+  // seeded organisation) — confirmed by live verification that rendering
+  // every one of them in this plain, un-virtualized `<Table>` (each row
+  // also carrying its own "clone into new draft" project picker, itself up
+  // to ~4,500 real `MenuItem`s) freezes the browser tab for minutes, a real
+  // client-side consequence the backend fix alone didn't address. Capped
+  // with a real total-count header, mirroring Sprint 30's own established
+  // precedent for exactly this shape of problem (Home dashboard's unbounded
+  // list). A `?workflowId=` deep link is always kept visible regardless of
+  // the cap, so DEVOS-264's own scroll-to-highlight behavior still works.
+  const MAX_VISIBLE_ROWS = 200;
+  const visibleRows = useMemo(() => {
+    if (filteredRows.length <= MAX_VISIBLE_ROWS) return filteredRows;
+    const capped = filteredRows.slice(0, MAX_VISIBLE_ROWS);
+    if (!linkedWorkflowId || capped.some((row) => row.definition.id === linkedWorkflowId)) {
+      return capped;
+    }
+    const linkedRow = filteredRows.find((row) => row.definition.id === linkedWorkflowId);
+    return linkedRow ? [linkedRow, ...capped.slice(0, MAX_VISIBLE_ROWS - 1)] : capped;
+  }, [filteredRows, linkedWorkflowId]);
+
   async function toggleExpanded(definition: WorkflowDefinitionSummary) {
     if (expandedId === definition.id) {
       setExpandedId(null);
@@ -239,6 +255,24 @@ export function WorkflowLibraryPage() {
       }
     }
   }
+
+  // DEVOS-264: a `?workflowId=` deep link (from the Search UI/Command
+  // Palette, since a workflow definition has no dedicated `/{area}/:id`
+  // route) expands and scrolls the matching row into view, mirroring
+  // ApprovalsPage.tsx's `?approvalId=` convention adapted to this page's
+  // plain-table shape.
+  useEffect(() => {
+    if (!linkedWorkflowId) return;
+    const row = rows.find((candidate) => candidate.definition.id === linkedWorkflowId);
+    if (!row) return;
+
+    if (expandedId !== linkedWorkflowId) {
+      void toggleExpanded(row.definition);
+    }
+    document
+      .getElementById(`workflow-row-${linkedWorkflowId}`)
+      ?.scrollIntoView({ block: 'center' });
+  }, [linkedWorkflowId, rows]);
 
   function openInEditor(project: Project) {
     selectProject(project.id);
@@ -383,7 +417,11 @@ export function WorkflowLibraryPage() {
         <Paper variant="outlined">
           <PanelHeader
             title="Every workflow"
-            meta={`${filteredRows.length} of ${rows.length} shown`}
+            meta={
+              visibleRows.length < filteredRows.length
+                ? `Showing ${visibleRows.length} of ${filteredRows.length} matching (${rows.length} total) — refine filters to narrow results`
+                : `${filteredRows.length} of ${rows.length} shown`
+            }
           />
           <Table size="small">
             <TableHead>
@@ -399,12 +437,19 @@ export function WorkflowLibraryPage() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {filteredRows.map((row) => {
+              {visibleRows.map((row) => {
                 const health = runHealth[row.definition.id];
                 const isExpanded = expandedId === row.definition.id;
                 return (
                   <Fragment key={row.definition.id}>
-                    <TableRow>
+                    <TableRow
+                      id={`workflow-row-${row.definition.id}`}
+                      sx={
+                        linkedWorkflowId === row.definition.id
+                          ? { outline: '2px solid', outlineColor: 'primary.main' }
+                          : undefined
+                      }
+                    >
                       <TableCell>
                         <IconButton size="small" onClick={() => toggleExpanded(row.definition)}>
                           {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}

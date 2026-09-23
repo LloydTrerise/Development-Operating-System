@@ -273,7 +273,7 @@ export function ApprovalsPage() {
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 0.5 }}>
                   Run <code>{selected.workflowRunId}</code> —{' '}
-                  <RouterLink to="/runs">view runs</RouterLink>
+                  <RouterLink to={`/runs/${selected.workflowRunId}`}>view run</RouterLink>
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 0.5 }}>
                   Requires {selected.requiredApprovers} approver

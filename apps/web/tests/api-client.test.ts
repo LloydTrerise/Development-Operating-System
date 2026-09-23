@@ -40,9 +40,11 @@ import {
   listSharedAgentVersions,
   listSharedKnowledgeSources,
   listToolCapabilities,
+  listWorkflowsForOrganisation,
   publishPolicy,
   removeMember,
   removeOrganisationMember,
+  searchProject,
   setToolCapabilityStatus,
   shareAgentVersion,
   simulatePolicy,
@@ -1203,5 +1205,60 @@ describe('api client', () => {
     expect(result.ok).toBe(true);
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/projects/project-1/system-health');
+  });
+
+  // DEVOS-264: the first-ever wrapper for the real Sprint 40 search route,
+  // deliberately deferred by that sprint's own backend-only scope.
+  it('DEVOS-264: searches a project at the real cross-entity search route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          projectId: 'project-1',
+          query: 'dash board',
+          workItems: [],
+          artifacts: [],
+          workflows: [],
+          agents: [],
+        },
+        meta: { requestId: 'req-43' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await searchProject('project-1', 'dash board');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/search?q=dash%20board');
+  });
+
+  // Sprint 41 gap closure: the real, org-scoped aggregate route replacing
+  // WorkflowLibraryPage.tsx's own former per-project fan-out.
+  it('fetches the org-scoped workflow library at the real aggregate route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [
+          {
+            id: 'workflow-1',
+            projectId: 'project-1',
+            key: 'wf-one',
+            name: 'Workflow One',
+            latestVersionStatus: 'PUBLISHED',
+            versionCount: 2,
+            runStatusCounts: { COMPLETED: 3, FAILED: 1 },
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        meta: { requestId: 'req-44' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listWorkflowsForOrganisation('org-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/workflow-library');
   });
 });

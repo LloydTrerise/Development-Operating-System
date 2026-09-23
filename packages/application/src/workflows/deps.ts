@@ -9,7 +9,10 @@ import type {
   ContextManifestRepository,
   ListWorkflowRunsForDefinition,
   MembershipRepository,
+  OrganisationRepository,
   ProjectRepository,
+  SummarizeWorkflowRunStatusCountsForOrganisation,
+  SummarizeWorkflowVersionsForDefinitions,
   ToolCapabilityRepository,
   ToolInvocationRepository,
   WorkflowDefinition,
@@ -149,4 +152,20 @@ export interface ListWorkflowRunsForDefinitionDeps {
   memberships: MembershipRepository;
   workflowDefinitions: WorkflowDefinitionRepository;
   listRunsForDefinition: ListWorkflowRunsForDefinition;
+}
+
+/**
+ * Sprint 41 gap closure: the Workflow Library page's own real, org-scoped
+ * aggregate read — organisation membership (not project membership) is the
+ * right gate since the page deliberately spans every project in the
+ * organisation, mirroring `getOrganisationCostReport`'s own
+ * `resolveOrganisationMembership` gating exactly. A separate flat interface,
+ * same precedent as `ListWorkflowRunsForDefinitionDeps` above.
+ */
+export interface WorkflowLibraryUseCaseDeps {
+  organisations: OrganisationRepository;
+  memberships: MembershipRepository;
+  workflowDefinitions: WorkflowDefinitionRepository;
+  summarizeVersionsForDefinitions: SummarizeWorkflowVersionsForDefinitions;
+  summarizeRunStatusCountsForOrganisation: SummarizeWorkflowRunStatusCountsForOrganisation;
 }

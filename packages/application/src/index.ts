@@ -147,6 +147,7 @@ export * from './workflows/list-tasks-for-run.js';
 export * from './workflows/list-workflow-definitions.js';
 export * from './workflows/list-workflow-runs-for-definition.js';
 export * from './workflows/list-workflow-versions.js';
+export * from './workflows/list-workflows-for-organisation.js';
 export * from './workflows/publish-workflow-version.js';
 export * from './workflows/run-creation.js';
 export * from './workflows/start-run-from-active-version.js';

@@ -28,3 +28,24 @@ export interface WorkflowVersionRepository {
   updateDefinition: (id: WorkflowVersionId, definition: WorkflowGraph) => Promise<void>;
   publish: (id: WorkflowVersionId, publishedAt: string) => Promise<void>;
 }
+
+/**
+ * Sprint 41 gap closure: `WorkflowDefinitionSummary`'s `latestVersionStatus`/
+ * `versionCount` (DEVOS-135), computed for many definitions in one real
+ * aggregate query (a Postgres `DISTINCT ON` + window `COUNT(...) OVER
+ * (PARTITION BY ...)`) instead of one `getLatestForDefinition` +
+ * `listForDefinition` round-trip per definition. Deliberately a standalone
+ * function type, not a new `WorkflowVersionRepository` method — mirrors
+ * `ListWorkflowRunsForDefinition`'s own established precedent (a separate
+ * flat port for a narrowly-scoped, cross-definition read) so every existing
+ * `WorkflowVersionRepository` fake stays valid unchanged.
+ */
+export interface WorkflowVersionSummary {
+  workflowDefinitionId: WorkflowId;
+  latestStatus: WorkflowVersionStatus;
+  versionCount: number;
+}
+
+export type SummarizeWorkflowVersionsForDefinitions = (
+  workflowDefinitionIds: WorkflowId[],
+) => Promise<WorkflowVersionSummary[]>;

@@ -1,4 +1,5 @@
 import type {
+  OrganisationId,
   ProjectId,
   WorkflowId,
   WorkflowRunId,
@@ -51,3 +52,22 @@ export interface WorkflowRunRepository {
 export type ListWorkflowRunsForDefinition = (
   workflowDefinitionId: WorkflowId,
 ) => Promise<WorkflowRun[]>;
+
+/**
+ * Sprint 41 gap closure: `WorkflowLibraryPage.tsx`'s own run-health summary
+ * (`summarizeRunHealth`), computed for every definition across an entire
+ * organisation in one real grouped-aggregate query instead of one
+ * `ListWorkflowRunsForDefinition` round-trip per definition (which, like the
+ * page's own project fan-out, does not scale to thousands of real
+ * definitions). Deliberately a standalone function type, same precedent as
+ * `ListWorkflowRunsForDefinition` itself.
+ */
+export interface WorkflowRunStatusCount {
+  workflowDefinitionId: WorkflowId;
+  status: WorkflowRunStatus;
+  count: number;
+}
+
+export type SummarizeWorkflowRunStatusCountsForOrganisation = (
+  organisationId: OrganisationId,
+) => Promise<WorkflowRunStatusCount[]>;

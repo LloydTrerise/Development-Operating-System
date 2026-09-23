@@ -242,7 +242,7 @@ export function ArtifactViewerPage() {
                   {provenance.workflowRunId && (
                     <Typography variant="body2">
                       Workflow run <code>{provenance.workflowRunId}</code> —{' '}
-                      <RouterLink to="/runs">view runs</RouterLink>
+                      <RouterLink to={`/runs/${provenance.workflowRunId}`}>view run</RouterLink>
                     </Typography>
                   )}
                   {provenance.workflowTaskId && (

@@ -1,11 +1,17 @@
 import type {
   ProjectId,
+  WorkflowId,
   WorkflowRunId,
   WorkflowRunStatus,
   WorkflowVersionId,
   WorkItemId,
 } from '@devos/contracts';
-import type { ListWorkflowRunsForDefinition, WorkflowRun, WorkflowRunRepository } from '@devos/domain';
+import type {
+  ListWorkflowRunsForDefinition,
+  SummarizeWorkflowRunStatusCountsForOrganisation,
+  WorkflowRun,
+  WorkflowRunRepository,
+} from '@devos/domain';
 import type { WorkflowRunsTable } from '../database.js';
 import type { QueryExecutor } from './base.js';
 
@@ -96,5 +102,41 @@ export function createWorkflowRunsForDefinitionLister(
       .orderBy('workflow_runs.created_at', 'desc')
       .execute();
     return rows.map(toDomain);
+  };
+}
+
+/**
+ * Sprint 41 gap closure: run counts grouped by (workflow_definition_id,
+ * status) for an entire organisation in one query, mirroring
+ * `costBreakdownByWorkflowForOrganisation`'s own `workflow_runs -> projects`
+ * join shape (`agent-executions.ts`) — `workflow_runs.project_id` already
+ * carries the organisation-scoping join, no `workflow_definitions` join
+ * needed for that part. Classification into succeeded/failed/in-progress is
+ * deliberately left to the caller (mirrors `RUN_TERMINAL_STATUSES`, an
+ * existing frontend-owned concept) rather than duplicating that business
+ * rule server-side.
+ */
+export function createWorkflowRunStatusCountsSummarizer(
+  db: QueryExecutor,
+): SummarizeWorkflowRunStatusCountsForOrganisation {
+  return async (organisationId) => {
+    const rows = await db
+      .selectFrom('workflow_runs')
+      .innerJoin('projects', 'projects.id', 'workflow_runs.project_id')
+      .innerJoin('workflow_versions', 'workflow_versions.id', 'workflow_runs.workflow_version_id')
+      .where('projects.organisation_id', '=', organisationId)
+      .select((eb) => [
+        'workflow_versions.workflow_definition_id as workflow_definition_id',
+        'workflow_runs.status as status',
+        eb.fn.count<string>('workflow_runs.id').as('count'),
+      ])
+      .groupBy(['workflow_versions.workflow_definition_id', 'workflow_runs.status'])
+      .execute();
+
+    return rows.map((row) => ({
+      workflowDefinitionId: row.workflow_definition_id as WorkflowId,
+      status: row.status as WorkflowRunStatus,
+      count: Number(row.count),
+    }));
   };
 }

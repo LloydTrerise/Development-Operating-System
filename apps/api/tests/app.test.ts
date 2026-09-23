@@ -21,6 +21,7 @@ import type {
   SystemHealthUseCaseDeps,
   ToolInvocationSummaryUseCaseDeps,
   ToolUseCaseDeps,
+  WorkflowLibraryUseCaseDeps,
   WorkItemUseCaseDeps,
   WorkflowUseCaseDeps,
 } from '@devos/application';
@@ -343,6 +344,15 @@ function createInMemoryWorkflowDeps(
           (d.name.toLowerCase().includes(query.toLowerCase()) ||
             (d.description ?? '').toLowerCase().includes(query.toLowerCase())),
       ),
+    // Sprint 41 gap closure: the real repository joins to `projects`; the
+    // fake mirrors that via `projectDeps.projects.listForOrganisation`
+    // (already exercised by the cost-report tests) rather than a second
+    // organisation-keyed store.
+    listForOrganisation: async (organisationId) => {
+      const projects = await projectDeps.projects.listForOrganisation(organisationId);
+      const projectIds = new Set(projects.map((project) => project.id));
+      return [...definitions.values()].filter((d) => projectIds.has(d.projectId));
+    },
   };
 
   const workflowVersions: WorkflowVersionRepository = {
@@ -601,6 +611,56 @@ function createInMemorySearchDeps(
     artifacts: artifactDeps.artifacts,
     workflowDefinitions: workflowDeps.workflowDefinitions,
     agents: agentDeps.agents,
+  };
+}
+
+/**
+ * Sprint 41 gap closure: the real repositories run one aggregate Postgres
+ * query per summarizer; the fake mirrors the same semantics by walking the
+ * in-memory `workflowVersions`/`listRunsForDefinition` this same
+ * `workflowDeps` object already exposes, per-definition — correct
+ * aggregation logic, not a claim about the real query's own performance
+ * characteristics (which live only in the real database-layer
+ * implementation, unexercised by this in-memory route test).
+ */
+function createInMemoryWorkflowLibraryDeps(
+  organisationDeps: OrganisationUseCaseDeps,
+  workflowDeps: WorkflowUseCaseDeps & { listRunsForDefinition: ListWorkflowRunsForDefinition },
+): WorkflowLibraryUseCaseDeps {
+  return {
+    organisations: organisationDeps.organisations,
+    memberships: organisationDeps.memberships,
+    workflowDefinitions: workflowDeps.workflowDefinitions,
+    summarizeVersionsForDefinitions: async (definitionIds) => {
+      const summaries = [];
+      for (const definitionId of definitionIds) {
+        const versions = await workflowDeps.workflowVersions.listForDefinition(definitionId);
+        if (versions.length === 0) continue;
+        const latest = versions.reduce((max, version) =>
+          version.version > max.version ? version : max,
+        );
+        summaries.push({
+          workflowDefinitionId: definitionId,
+          latestStatus: latest.status,
+          versionCount: versions.length,
+        });
+      }
+      return summaries;
+    },
+    summarizeRunStatusCountsForOrganisation: async (organisationId) => {
+      const definitions =
+        (await workflowDeps.workflowDefinitions.listForOrganisation?.(organisationId)) ?? [];
+      const counts = [];
+      for (const definition of definitions) {
+        const runs = await workflowDeps.listRunsForDefinition(definition.id);
+        const byStatus = new Map<string, number>();
+        for (const run of runs) byStatus.set(run.status, (byStatus.get(run.status) ?? 0) + 1);
+        for (const [status, count] of byStatus) {
+          counts.push({ workflowDefinitionId: definition.id, status, count });
+        }
+      }
+      return counts;
+    },
   };
 }
 
@@ -3701,6 +3761,118 @@ describe('cross-entity search route (DEVOS-262)', () => {
     const project = (await projectResponse.json()).data;
 
     const response = await authed(`/api/v1/projects/${project.id}/search?q=dashboard`, 'mallory');
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('workflow library route (Sprint 41 gap closure)', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const organisationDeps = createInMemoryOrganisationDeps(projectDeps);
+    const workItemDeps = createInMemoryWorkItemDeps(projectDeps);
+    const workflowDeps = createInMemoryWorkflowDeps(projectDeps, workItemDeps);
+    const workflowLibraryDeps = createInMemoryWorkflowLibraryDeps(organisationDeps, workflowDeps);
+    const started = await startServer({
+      projectDeps,
+      organisationDeps,
+      workItemDeps,
+      workflowDeps,
+      workflowLibraryDeps,
+      listRunsForDefinition: workflowDeps.listRunsForDefinition,
+    });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('aggregates real workflow definitions, latest-version status, and version count across every project in the organisation', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Library Org', slug: `library-org-${Math.random()}` }),
+    });
+    const organisation = (await orgResponse.json()).data;
+
+    const projectResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Library Project',
+        slug: `library-project-${Math.random()}`,
+        organisationId: organisation.id,
+      }),
+    });
+    const project = (await projectResponse.json()).data;
+
+    await authed(`/api/v1/projects/${project.id}/workflows`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        key: 'library-workflow',
+        name: 'Library Workflow',
+        definition: { name: 'Library Workflow', nodes: [{ id: 'a', type: 'TASK' }], edges: [] },
+      }),
+    });
+
+    const response = await authed(
+      `/api/v1/organisations/${organisation.id}/workflow-library`,
+      'alice',
+    );
+    expect(response.status).toBe(200);
+    const entries = (await response.json()).data;
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].name).toBe('Library Workflow');
+    expect(entries[0].projectId).toBe(project.id);
+    expect(entries[0].latestVersionStatus).toBe('DRAFT');
+    expect(entries[0].versionCount).toBe(1);
+    expect(entries[0].runStatusCounts).toEqual({});
+  });
+
+  it('returns an empty array for an organisation with zero workflow definitions', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Empty Org', slug: `empty-org-${Math.random()}` }),
+    });
+    const organisation = (await orgResponse.json()).data;
+
+    const response = await authed(
+      `/api/v1/organisations/${organisation.id}/workflow-library`,
+      'alice',
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).data).toEqual([]);
+  });
+
+  it('404s a non-member', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'bob', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Private Library Org',
+        slug: `private-library-${Math.random()}`,
+      }),
+    });
+    const organisation = (await orgResponse.json()).data;
+
+    const response = await authed(
+      `/api/v1/organisations/${organisation.id}/workflow-library`,
+      'mallory',
+    );
     expect(response.status).toBe(404);
   });
 });

@@ -1,5 +1,9 @@
 import type { WorkflowId, WorkflowVersionId, WorkflowVersionStatus } from '@devos/contracts';
-import type { WorkflowVersion, WorkflowVersionRepository } from '@devos/domain';
+import type {
+  SummarizeWorkflowVersionsForDefinitions,
+  WorkflowVersion,
+  WorkflowVersionRepository,
+} from '@devos/domain';
 import type { WorkflowVersionsTable } from '../database.js';
 import type { QueryExecutor } from './base.js';
 
@@ -89,5 +93,47 @@ export function createWorkflowVersionRepository(db: QueryExecutor): WorkflowVers
         .where('id', '=', id)
         .execute();
     },
+  };
+}
+
+/**
+ * Sprint 41 gap closure: one query for every definition's latest version
+ * status + version count, via `DISTINCT ON` (picks the highest-`version`
+ * row per definition, per the `ORDER BY` below) combined with a `COUNT(...)
+ * OVER (PARTITION BY ...)` window function (computed before the `DISTINCT
+ * ON` de-duplication, so it still reflects every version, not just the
+ * latest row). Replaces `listWorkflowDefinitionsForProject`'s own
+ * per-definition `getLatestForDefinition`/`listForDefinition` round-trips,
+ * which do not scale to thousands of real definitions. See
+ * `SummarizeWorkflowVersionsForDefinitions`'s own doc comment (`@devos/domain`)
+ * for why this is a standalone function, not a repository method.
+ */
+export function createWorkflowVersionSummarizer(
+  db: QueryExecutor,
+): SummarizeWorkflowVersionsForDefinitions {
+  return async (workflowDefinitionIds) => {
+    if (workflowDefinitionIds.length === 0) return [];
+
+    const rows = await db
+      .selectFrom('workflow_versions')
+      .select((eb) => [
+        'workflow_definition_id',
+        'status',
+        eb.fn
+          .count<string>('id')
+          .over((ob) => ob.partitionBy('workflow_definition_id'))
+          .as('version_count'),
+      ])
+      .where('workflow_definition_id', 'in', workflowDefinitionIds)
+      .distinctOn('workflow_definition_id')
+      .orderBy('workflow_definition_id')
+      .orderBy('version', 'desc')
+      .execute();
+
+    return rows.map((row) => ({
+      workflowDefinitionId: row.workflow_definition_id as WorkflowId,
+      latestStatus: row.status as WorkflowVersionStatus,
+      versionCount: Number(row.version_count),
+    }));
   };
 }

@@ -596,6 +596,25 @@ export function listWorkflows(projectId: string): Promise<ApiResult<WorkflowDefi
   return request<WorkflowDefinitionSummary[]>(`/api/v1/projects/${projectId}/workflows`);
 }
 
+/** Sprint 41 gap closure: every workflow definition across every project in
+ * the organisation, in one real aggregate query — replaces
+ * `WorkflowLibraryPage.tsx`'s own former `Promise.all(projects.map(listWorkflows))`
+ * fan-out, which never resolved against the real seeded organisation's
+ * thousands of accumulated projects. `runStatusCounts` is raw, un-classified
+ * per-status counts — `RUN_TERMINAL_STATUSES` (below) still does the
+ * succeeded/failed/in-progress classification client-side, unchanged. */
+export interface WorkflowLibraryEntry extends WorkflowDefinitionSummary {
+  runStatusCounts: Record<string, number>;
+}
+
+export function listWorkflowsForOrganisation(
+  organisationId: string,
+): Promise<ApiResult<WorkflowLibraryEntry[]>> {
+  return request<WorkflowLibraryEntry[]>(
+    `/api/v1/organisations/${organisationId}/workflow-library`,
+  );
+}
+
 /** DEVOS-135: the real `createWorkflowDefinition` use case had no client
  * wrapper anywhere — every existing `WorkflowDefinition` reaches a project
  * only via the project-type clone pipeline at project-creation time. The
@@ -1014,6 +1033,28 @@ export interface SystemHealth {
 
 export function getProjectSystemHealth(projectId: string): Promise<ApiResult<SystemHealth>> {
   return request<SystemHealth>(`/api/v1/projects/${projectId}/system-health`);
+}
+
+/** DEVOS-262/264: mirrors the route's own DTO shape exactly (`toProjectSearchResultsDto`)
+ * — plain arrays of each entity's own already-existing DTO, not a flattened/re-ranked
+ * single list. The workflow entries use the single-definition DTO shape
+ * (`WorkflowDefinitionSummary`'s two extra fields are optional, so no new type is needed). */
+export interface ProjectSearchResults {
+  projectId: string;
+  query: string;
+  workItems: WorkItem[];
+  artifacts: Artifact[];
+  workflows: WorkflowDefinitionSummary[];
+  agents: Agent[];
+}
+
+export function searchProject(
+  projectId: string,
+  query: string,
+): Promise<ApiResult<ProjectSearchResults>> {
+  return request<ProjectSearchResults>(
+    `/api/v1/projects/${projectId}/search?q=${encodeURIComponent(query)}`,
+  );
 }
 
 export const RUN_TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);

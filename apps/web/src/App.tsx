@@ -38,7 +38,10 @@ import { OrganisationsPage } from './features/organisations/OrganisationsPage.js
 import { ProjectTypesPage } from './features/project-types/ProjectTypesPage.js';
 import { ProjectDetailPage } from './features/projects/ProjectDetailPage.js';
 import { ProjectsPage } from './features/projects/ProjectsPage.js';
+import { RunDetailPage } from './features/runs/RunDetailPage.js';
 import { RunsPage } from './features/runs/RunsPage.js';
+import { CommandPalette } from './features/search/CommandPalette.js';
+import { GlobalSearch } from './features/search/GlobalSearch.js';
 import { WorkItemDetailPage } from './features/work-items/WorkItemDetailPage.js';
 import { WorkItemsPage } from './features/work-items/WorkItemsPage.js';
 import { WorkflowLibraryPage } from './features/workflow-library/WorkflowLibraryPage.js';
@@ -281,6 +284,7 @@ function SessionStatus() {
 export function App() {
   const { mode, toggleMode } = useThemeMode();
   const [apiStatus, setApiStatus] = useState<ApiStatus>('checking');
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -298,6 +302,20 @@ export function App() {
     };
   }, []);
 
+  // DEVOS-265: the first global keyboard shortcut in this codebase — Cmd+K
+  // on macOS, Ctrl+K elsewhere, preventDefault()'d so it doesn't collide
+  // with any browser/OS default binding.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen(true);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
     <Box sx={{ display: 'flex' }}>
       <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
@@ -307,6 +325,7 @@ export function App() {
           </Typography>
           <OrganisationSelector />
           <ProjectSelector />
+          <GlobalSearch />
           <Typography data-testid="api-status" variant="body2" component="span">
             API: {apiStatus}
           </Typography>
@@ -378,6 +397,9 @@ export function App() {
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/workflow-library" element={<WorkflowLibraryPage />} />
           <Route path="/runs" element={<RunsPage />} />
+          {/* Sprint 41 gap closure: the `/{area}/:id` convention's real Run
+              detail view — `GET /runs/:runId` already existed, unwired. */}
+          <Route path="/runs/:id" element={<RunDetailPage />} />
           <Route path="/approvals" element={<ApprovalsPage />} />
           <Route path="/governance" element={<GovernancePage />} />
           <Route path="/cost" element={<CostPage />} />
@@ -390,6 +412,7 @@ export function App() {
           <Route path="/integrations" element={<IntegrationsPage />} />
         </Routes>
       </Box>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </Box>
   );
 }

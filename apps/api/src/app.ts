@@ -41,8 +41,10 @@ import {
   createWorkflowRunRepository,
   createWorkflowRunStarter,
   createWorkflowRunsForDefinitionLister,
+  createWorkflowRunStatusCountsSummarizer,
   createWorkflowTaskRepository,
   createWorkflowVersionRepository,
+  createWorkflowVersionSummarizer,
   type DatabaseClient,
 } from '@devos/database';
 import {
@@ -70,6 +72,7 @@ import type {
   SystemHealthUseCaseDeps,
   ToolInvocationSummaryUseCaseDeps,
   ToolUseCaseDeps,
+  WorkflowLibraryUseCaseDeps,
   WorkItemUseCaseDeps,
   WorkflowUseCaseDeps,
 } from '@devos/application';
@@ -108,6 +111,7 @@ import { createToolCapabilityRoutes } from './routes/tool-capabilities.js';
 import { createToolInvocationSummaryRoutes } from './routes/tool-invocation-summaries.js';
 import { createWorkItemRoutes } from './routes/work-items.js';
 import { createWorkflowRoutes } from './routes/workflows.js';
+import { createWorkflowLibraryRoutes } from './routes/workflow-library.js';
 import { createWorkflowRunRoutes } from './routes/workflow-runs.js';
 
 const API_PREFIX = '/api/v1';
@@ -225,6 +229,7 @@ export interface CreateAppOptions {
   toolDeps?: ToolUseCaseDeps;
   systemHealthDeps?: SystemHealthUseCaseDeps;
   searchDeps?: SearchUseCaseDeps;
+  workflowLibraryDeps?: WorkflowLibraryUseCaseDeps;
   /** DEVOS-091: overridable so tests can exercise a real 429 without firing 60+ requests. */
   mutationRateLimiter?: RateLimiter;
   /** DEVOS-135: overridable the same way `database` itself is — a real
@@ -446,6 +451,13 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     workflowDefinitions: workflowDeps.workflowDefinitions,
     agents: agentDeps.agents,
   };
+  const workflowLibraryDeps: WorkflowLibraryUseCaseDeps = options.workflowLibraryDeps ?? {
+    organisations: organisationDeps.organisations,
+    memberships: projectDeps.memberships,
+    workflowDefinitions: workflowDeps.workflowDefinitions,
+    summarizeVersionsForDefinitions: createWorkflowVersionSummarizer(database.db),
+    summarizeRunStatusCountsForOrganisation: createWorkflowRunStatusCountsSummarizer(database.db),
+  };
 
   const routes: Route[] = [
     ...createHealthRoutes(API_PREFIX, database),
@@ -483,6 +495,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createToolCapabilityRoutes(API_PREFIX, toolDeps),
     ...createSystemHealthRoutes(API_PREFIX, systemHealthDeps, database),
     ...createSearchRoutes(API_PREFIX, searchDeps),
+    ...createWorkflowLibraryRoutes(API_PREFIX, workflowLibraryDeps),
   ];
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
