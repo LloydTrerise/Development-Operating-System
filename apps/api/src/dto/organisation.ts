@@ -8,6 +8,7 @@ export function toOrganisationDto(organisation: Organisation) {
     slug: organisation.slug,
     status: organisation.status,
     budgetUsd: organisation.budgetUsd,
+    ownerPrincipalId: organisation.ownerPrincipalId,
     createdAt: organisation.createdAt,
     updatedAt: organisation.updatedAt,
   };
@@ -62,4 +63,21 @@ export function parseUpdateOrganisationBody(body: unknown): UpdateOrganisationBo
     ...(status !== undefined ? { status } : {}),
     ...(budgetUsd !== undefined ? { budgetUsd } : {}),
   };
+}
+
+export interface TransferOwnershipBody {
+  principalId: string;
+}
+
+/** DEVOS-293: `PATCH /organisations/:id/members/:userId` mirrors
+ * `parseRoleBody`'s bare `{ role }` shape — this route needs the target
+ * principal instead, so it gets its own small parser. */
+export function parseTransferOwnershipBody(body: unknown): TransferOwnershipBody {
+  const { principalId } = asRecord(body);
+
+  if (typeof principalId !== 'string' || principalId.trim().length === 0) {
+    throw new BadRequestError('principalId is required.');
+  }
+
+  return { principalId };
 }

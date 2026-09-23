@@ -11,13 +11,22 @@ export interface AddOrganisationMemberInput {
 }
 
 /** DEVOS-254: mirrors `projects/add-member.ts` exactly, at organisation
- * scope (`projectId: null`). */
+ * scope (`projectId: null`).
+ *
+ * DEVOS-290: `ORGANISATION_ADMIN` is the only valid org-level role now
+ * (decision §9.3 drops the org-level `MEMBER` concept entirely) — rejects
+ * anything else rather than silently accepting a role this scope no longer
+ * has a meaning for. */
 export async function addOrganisationMember(
   deps: OrganisationUseCaseDeps,
   requesterPrincipalId: string,
   organisationId: OrganisationId,
   input: AddOrganisationMemberInput,
 ): Promise<Membership> {
+  if (input.role !== 'ORGANISATION_ADMIN') {
+    throw new ValidationError('Organisation membership only supports the ORGANISATION_ADMIN role.');
+  }
+
   const organisation = await deps.organisations.getById(organisationId);
   if (!organisation) throw new NotFoundError('Organisation');
 

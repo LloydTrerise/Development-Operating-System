@@ -7,6 +7,7 @@ import {
   listOrganisationMembers,
   listOrganisationsForPrincipal,
   removeOrganisationMember,
+  transferOrganisationOwnership,
   updateOrganisation,
   NotFoundError as UseCaseNotFoundError,
   type OrganisationUseCaseDeps,
@@ -14,6 +15,7 @@ import {
 import { parseAddMemberBody, parseRoleBody, toMembershipDto } from '../dto/project.js';
 import {
   parseCreateOrganisationBody,
+  parseTransferOwnershipBody,
   parseUpdateOrganisationBody,
   toOrganisationDto,
 } from '../dto/organisation.js';
@@ -135,6 +137,22 @@ export function createOrganisationRoutes(prefix: string, deps: OrganisationUseCa
           role,
         );
         return toMembershipDto(membership);
+      },
+    },
+    {
+      method: 'POST',
+      pattern: `${prefix}/organisations/:organisationId/transfer-ownership`,
+      protected: true,
+      handler: async ({ principal, params, body }) => {
+        const user = requirePrincipal(principal);
+        const input = parseTransferOwnershipBody(body);
+        const organisation = await transferOrganisationOwnership(
+          deps,
+          user.id,
+          params.organisationId as OrganisationId,
+          input.principalId,
+        );
+        return toOrganisationDto(organisation);
       },
     },
     {

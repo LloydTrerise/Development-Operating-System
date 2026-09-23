@@ -4,7 +4,8 @@ import { canManageMembers } from '@devos/domain';
 import { ForbiddenError, NotFoundError } from '../errors.js';
 import type { OrganisationUseCaseDeps } from './deps.js';
 import {
-  assertNotLastOrganisationOwner,
+  assertNotLastOrganisationAdmin,
+  assertNotRemovingCurrentOwner,
   resolveOrganisationMembership,
 } from './membership-access.js';
 
@@ -28,9 +29,8 @@ export async function removeOrganisationMember(
   );
   if (!target) throw new NotFoundError('Membership');
 
-  if (target.role === 'OWNER') {
-    await assertNotLastOrganisationOwner(deps, organisationId, target.id);
-  }
+  assertNotRemovingCurrentOwner(organisation, target);
+  await assertNotLastOrganisationAdmin(deps, organisationId, target.id);
 
   await deps.memberships.remove(target.id);
 

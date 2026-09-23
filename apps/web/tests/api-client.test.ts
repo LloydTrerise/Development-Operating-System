@@ -4,7 +4,6 @@ import {
   addMember,
   addOrganisationMember,
   changeMemberRole,
-  changeOrganisationMemberRole,
   createOrganisation,
   createOrganisationPolicy,
   createPolicy,
@@ -52,6 +51,7 @@ import {
   simulatePolicy,
   startRun,
   startRunFromVersion,
+  transferOrganisationOwnership,
   updateOrganisation,
   updateProject,
   updateProjectType,
@@ -1069,7 +1069,9 @@ describe('api client', () => {
   it("DEVOS-255: lists an organisation's members at the real route", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(200, {
-        data: [{ id: 'membership-1', projectId: null, userId: 'user-1', role: 'OWNER' }],
+        data: [
+          { id: 'membership-1', projectId: null, userId: 'user-1', role: 'ORGANISATION_ADMIN' },
+        ],
         meta: { requestId: 'req-36' },
       }),
     );
@@ -1082,40 +1084,52 @@ describe('api client', () => {
     expect(url).toContain('/api/v1/organisations/org-1/members');
   });
 
-  it('DEVOS-255: adds an organisation member by principal id at the real route', async () => {
+  it('DEVOS-255/DEVOS-290: adds an organisation member by principal id at the real route', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(200, {
-        data: { id: 'membership-2', projectId: null, userId: 'user-2', role: 'MEMBER' },
+        data: { id: 'membership-2', projectId: null, userId: 'user-2', role: 'ORGANISATION_ADMIN' },
         meta: { requestId: 'req-37' },
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await addOrganisationMember('org-1', { userId: 'user-2', role: 'MEMBER' });
+    const result = await addOrganisationMember('org-1', {
+      userId: 'user-2',
+      role: 'ORGANISATION_ADMIN',
+    });
 
     expect(result.ok).toBe(true);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/organisations/org-1/members');
     expect(init.method).toBe('POST');
-    expect(JSON.parse(init.body as string)).toEqual({ userId: 'user-2', role: 'MEMBER' });
+    expect(JSON.parse(init.body as string)).toEqual({
+      userId: 'user-2',
+      role: 'ORGANISATION_ADMIN',
+    });
   });
 
-  it("DEVOS-255: changes an organisation member's role at the real route", async () => {
+  it('DEVOS-290/293: transfers organisation ownership at the real route', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(200, {
-        data: { id: 'membership-2', projectId: null, userId: 'user-2', role: 'OWNER' },
+        data: {
+          id: 'org-1',
+          name: 'Acme',
+          slug: 'acme',
+          status: 'ACTIVE',
+          ownerPrincipalId: 'user-2',
+        },
         meta: { requestId: 'req-38' },
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await changeOrganisationMemberRole('org-1', 'user-2', 'OWNER');
+    const result = await transferOrganisationOwnership('org-1', 'user-2');
 
     expect(result.ok).toBe(true);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/api/v1/organisations/org-1/members/user-2');
-    expect(init.method).toBe('PATCH');
-    expect(JSON.parse(init.body as string)).toEqual({ role: 'OWNER' });
+    expect(url).toContain('/api/v1/organisations/org-1/transfer-ownership');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ principalId: 'user-2' });
   });
 
   it('DEVOS-255: removes an organisation member at the real route', async () => {

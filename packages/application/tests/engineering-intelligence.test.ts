@@ -166,6 +166,7 @@ function buildDeps(overrides: {
     list: async () => [organisation],
     create: async () => {},
     update: async () => {},
+    setOwnerPrincipalId: async () => {},
   };
 
   const artifacts: ArtifactRepository = {

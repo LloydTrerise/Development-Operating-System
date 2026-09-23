@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { listOrganisations, type Organisation } from './api-client.js';
 import { useSession } from './session.js';
 
@@ -20,6 +28,16 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  // DEVOS-293: a background `refresh()` (e.g. after adding/removing a
+  // member, renaming, or transferring ownership) must not re-hide the
+  // already-rendered list — `OrganisationsPage.tsx` only renders its
+  // `<List>` while `!loading`, so toggling `loading` back to `true` on
+  // every refresh was unmounting (and losing the local expand/collapse
+  // state of) every `OrganisationRow`, real, disclosed, pre-existing bug
+  // found live-verifying DEVOS-293's own new "transfer ownership" action
+  // (present since DEVOS-227/255, since a rename/add-member `onSaved()`
+  // call already triggered the exact same collapse before this fix).
+  const hasLoadedOnce = useRef(false);
 
   // DEVOS-BUILD-STATE.md verification-debt item 13: `session.status === 'loading'` while a real Auth0 login is
   // still resolving (dev-identity/unauthenticated resolve synchronously, so
@@ -32,11 +50,12 @@ export function OrganisationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (session.status === 'loading') return;
     let cancelled = false;
-    setLoading(true);
+    if (!hasLoadedOnce.current) setLoading(true);
 
     listOrganisations().then((result) => {
       if (cancelled) return;
       setLoading(false);
+      hasLoadedOnce.current = true;
 
       if (!result.ok) {
         setError(result.error.message);

@@ -16,6 +16,12 @@ export async function addMember(
   projectId: ProjectId,
   input: AddMemberInput,
 ): Promise<Membership> {
+  // DEVOS-290: ORGANISATION_ADMIN only ever exists on an org-level
+  // (projectId: null) membership row — never a project-level one.
+  if (input.role === 'ORGANISATION_ADMIN') {
+    throw new ValidationError('ORGANISATION_ADMIN is not a valid project-level role.');
+  }
+
   const project = await deps.projects.getById(projectId);
   if (!project) throw new NotFoundError('Project');
 

@@ -282,6 +282,11 @@ function createInMemoryOrganisationDeps(projectDeps: ProjectUseCaseDeps): Organi
       if (!existing) return;
       organisations.set(id, { ...existing, ...changes, updatedAt });
     },
+    setOwnerPrincipalId: async (id, ownerPrincipalId, updatedAt) => {
+      const existing = organisations.get(id);
+      if (!existing) return;
+      organisations.set(id, { ...existing, ownerPrincipalId, updatedAt });
+    },
   };
 
   return {
@@ -3051,51 +3056,53 @@ describe('organisation routes', () => {
     expect(project.organisationId).toBe(organisation.id);
   });
 
-  it('DEVOS-254: allows the org-level OWNER to add/list/change-role/remove an org member', async () => {
+  it('DEVOS-254/DEVOS-290: allows the org owner to add/list/remove a co-admin, and to transfer ownership', async () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'Member Org', slug: 'member-org' }),
     });
     const organisation = (await orgResponse.json()).data;
+    expect(organisation.ownerPrincipalId).toBe('alice');
 
     const addResponse = await authed(`/api/v1/organisations/${organisation.id}/members`, 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId: 'bob', role: 'MEMBER' }),
+      body: JSON.stringify({ userId: 'bob', role: 'ORGANISATION_ADMIN' }),
     });
     expect(addResponse.status).toBe(200);
     expect((await addResponse.json()).data).toMatchObject({
       projectId: null,
       userId: 'bob',
-      role: 'MEMBER',
+      role: 'ORGANISATION_ADMIN',
     });
 
     const listResponse = await authed(`/api/v1/organisations/${organisation.id}/members`, 'alice');
     const members = (await listResponse.json()).data;
     expect(members.some((m: { userId: string }) => m.userId === 'bob')).toBe(true);
 
-    const roleResponse = await authed(
-      `/api/v1/organisations/${organisation.id}/members/bob`,
+    const transferResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/transfer-ownership`,
       'alice',
       {
-        method: 'PATCH',
+        method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ role: 'OWNER' }),
+        body: JSON.stringify({ principalId: 'bob' }),
       },
     );
-    expect(roleResponse.status).toBe(200);
-    expect((await roleResponse.json()).data.role).toBe('OWNER');
+    expect(transferResponse.status).toBe(200);
+    expect((await transferResponse.json()).data.ownerPrincipalId).toBe('bob');
 
+    // alice is no longer the owner, so she can now be removed by bob.
     const removeResponse = await authed(
-      `/api/v1/organisations/${organisation.id}/members/bob`,
-      'alice',
+      `/api/v1/organisations/${organisation.id}/members/alice`,
+      'bob',
       { method: 'DELETE' },
     );
     expect(removeResponse.status).toBe(200);
   });
 
-  it('DEVOS-254: denies a non-OWNER from adding an org member and prevents removing the last OWNER', async () => {
+  it('DEVOS-254/DEVOS-290: rejects a non-ORGANISATION_ADMIN role, denies a non-member, and prevents removing the last admin or the current owner', async () => {
     const orgResponse = await authed('/api/v1/organisations', 'carol', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3103,29 +3110,53 @@ describe('organisation routes', () => {
     });
     const organisation = (await orgResponse.json()).data;
 
-    await authed(`/api/v1/organisations/${organisation.id}/members`, 'carol', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId: 'dave', role: 'MEMBER' }),
-    });
-
-    const deniedResponse = await authed(
+    const rejectedRoleResponse = await authed(
       `/api/v1/organisations/${organisation.id}/members`,
-      'dave',
+      'carol',
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ userId: 'erin', role: 'MEMBER' }),
+        body: JSON.stringify({ userId: 'dave', role: 'MEMBER' }),
       },
     );
-    expect(deniedResponse.status).toBe(403);
+    expect(rejectedRoleResponse.status).toBe(400);
 
-    const lastOwnerResponse = await authed(
+    const addResponse = await authed(`/api/v1/organisations/${organisation.id}/members`, 'carol', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'dave', role: 'ORGANISATION_ADMIN' }),
+    });
+    expect(addResponse.status).toBe(200);
+
+    const deniedResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/members`,
+      'erin',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'frank', role: 'ORGANISATION_ADMIN' }),
+      },
+    );
+    expect(deniedResponse.status).toBe(404);
+
+    // carol is still the owner even though dave is also an admin now.
+    const ownerRemovalResponse = await authed(
       `/api/v1/organisations/${organisation.id}/members/carol`,
       'carol',
       { method: 'DELETE' },
     );
-    expect(lastOwnerResponse.status).toBe(400);
+    expect(ownerRemovalResponse.status).toBe(400);
+
+    await authed(`/api/v1/organisations/${organisation.id}/members/dave`, 'carol', {
+      method: 'DELETE',
+    });
+
+    const lastAdminResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/members/carol`,
+      'carol',
+      { method: 'DELETE' },
+    );
+    expect(lastAdminResponse.status).toBe(400);
   });
 });
 

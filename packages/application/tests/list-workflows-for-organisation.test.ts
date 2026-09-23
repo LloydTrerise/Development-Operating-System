@@ -33,6 +33,7 @@ function createInMemoryDeps() {
       organisationsStore.set(organisation.id, organisation);
     },
     update: async () => {},
+    setOwnerPrincipalId: async () => {},
   };
 
   const memberships: MembershipRepository = {

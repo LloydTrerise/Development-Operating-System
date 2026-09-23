@@ -46,6 +46,11 @@ function createInMemoryDeps() {
       if (!existing) return;
       organisationsStore.set(id, { ...existing, ...changes, updatedAt });
     },
+    setOwnerPrincipalId: async (id, ownerPrincipalId, updatedAt) => {
+      const existing = organisationsStore.get(id);
+      if (!existing) return;
+      organisationsStore.set(id, { ...existing, ownerPrincipalId, updatedAt });
+    },
   };
 
   const projectRepository: ProjectRepository = {

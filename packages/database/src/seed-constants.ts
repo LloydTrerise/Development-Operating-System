@@ -4,6 +4,13 @@ export const SEED_ORGANISATION_ID = '00000000-0000-4000-8000-000000000001';
 export const SEED_PROJECT_ID = '00000000-0000-4000-8000-000000000002';
 export const SEED_MEMBERSHIP_ID = '00000000-0000-4000-8000-000000000003';
 export const SEED_PRINCIPAL_ID = 'seed-user';
+/** DEVOS-290: an org-level (`project_id: null`) `ORGANISATION_ADMIN`
+ * membership for `SEED_PRINCIPAL_ID`, and the organisation's own
+ * `owner_principal_id` — without this, a fresh `migrate`+`seed` database (no
+ * prior history for migration `0048`'s own backfill to find) would leave
+ * the seeded organisation genuinely ownerless, the same class of gap
+ * DEVOS-284/286 already found and closed for `principals`. */
+export const SEED_ORGANISATION_ADMIN_MEMBERSHIP_ID = '00000000-0000-4000-8000-000000000034';
 
 export const SEED_WORKFLOW_DEFINITION_ID = '00000000-0000-4000-8000-000000000004';
 export const SEED_WORKFLOW_VERSION_ID = '00000000-0000-4000-8000-000000000005';

@@ -27,6 +27,7 @@ import {
   SEED_INCIDENT_RESPONSE_WORKFLOW_GRAPH,
   SEED_INCIDENT_RESPONSE_WORKFLOW_KEY,
   SEED_MEMBERSHIP_ID,
+  SEED_ORGANISATION_ADMIN_MEMBERSHIP_ID,
   SEED_ORGANISATION_ID,
   SEED_PLANNING_AGENT_CONFIGURATION,
   SEED_PLANNING_AGENT_ID,
@@ -210,6 +211,35 @@ async function main(): Promise<void> {
       updated_at: now,
     })
     .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
+
+  // DEVOS-290: an org-level ORGANISATION_ADMIN membership for the seeded
+  // human principal, plus the organisation's own owner_principal_id — see
+  // SEED_ORGANISATION_ADMIN_MEMBERSHIP_ID's own doc comment. The FK on
+  // organisations.owner_principal_id requires the principal row to already
+  // exist, which it does (inserted above); setting it via UPDATE here
+  // (rather than on the earlier `insertInto('organisations')` call) mirrors
+  // the same real ordering fix `createOrganisation` (application layer)
+  // needed for the identical reason.
+  await db
+    .insertInto('memberships')
+    .values({
+      id: SEED_ORGANISATION_ADMIN_MEMBERSHIP_ID,
+      organisation_id: SEED_ORGANISATION_ID,
+      project_id: null,
+      principal_id: SEED_PRINCIPAL_ID,
+      role: 'ORGANISATION_ADMIN',
+      status: 'ACTIVE',
+      created_at: now,
+      updated_at: now,
+    })
+    .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
+
+  await db
+    .updateTable('organisations')
+    .set({ owner_principal_id: SEED_PRINCIPAL_ID, updated_at: now })
+    .where('id', '=', SEED_ORGANISATION_ID)
     .execute();
 
   await db

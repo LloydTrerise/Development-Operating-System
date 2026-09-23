@@ -40,6 +40,9 @@ export interface Organisation {
   name: string;
   slug: string;
   status: string;
+  /** DEVOS-290: the single transferable owner among the organisation's
+   * ORGANISATION_ADMIN co-admin pool. */
+  ownerPrincipalId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -369,12 +372,16 @@ export function updateProject(
 /** Mirrors `apps/api/src/dto/project.ts`'s `toMembershipDto`. `projectId` is
  * `string | null` (widened for DEVOS-255) — `null` for an org-level
  * membership (`GET/POST /organisations/:id/members`), a real, correct shape
- * that just had no caller before this sprint. */
+ * that just had no caller before this sprint. `role` is widened to include
+ * `ORGANISATION_ADMIN` (DEVOS-290) — only ever set on an org-level row;
+ * `addMember`/`changeMemberRole` (project-scoped) keep their own narrower
+ * `'OWNER' | 'MEMBER'` parameter types below since the backend rejects
+ * `ORGANISATION_ADMIN` at project scope. */
 export interface Membership {
   id: string;
   projectId: string | null;
   userId: string;
-  role: 'OWNER' | 'MEMBER';
+  role: 'OWNER' | 'MEMBER' | 'ORGANISATION_ADMIN';
   status: string;
 }
 
@@ -419,29 +426,22 @@ export function removeMember(
 
 /** DEVOS-255: organisation-scoped equivalents of the four wrappers above,
  * against `GET/POST /organisations/:id/members`, `PATCH/DELETE
- * /organisations/:id/members/:userId` (DEVOS-254, new). */
+ * /organisations/:id/members/:userId` (DEVOS-254, new).
+ *
+ * DEVOS-290: `ORGANISATION_ADMIN` is the only role the backend accepts at
+ * organisation scope now (decision §9.3 drops the org-level `MEMBER`
+ * concept). */
 export function listOrganisationMembers(organisationId: string): Promise<ApiResult<Membership[]>> {
   return request<Membership[]>(`/api/v1/organisations/${organisationId}/members`);
 }
 
 export function addOrganisationMember(
   organisationId: string,
-  input: { userId: string; role: 'OWNER' | 'MEMBER' },
+  input: { userId: string; role: 'ORGANISATION_ADMIN' },
 ): Promise<ApiResult<Membership>> {
   return request<Membership>(`/api/v1/organisations/${organisationId}/members`, {
     method: 'POST',
     body: input,
-  });
-}
-
-export function changeOrganisationMemberRole(
-  organisationId: string,
-  userId: string,
-  role: 'OWNER' | 'MEMBER',
-): Promise<ApiResult<Membership>> {
-  return request<Membership>(`/api/v1/organisations/${organisationId}/members/${userId}`, {
-    method: 'PATCH',
-    body: { role },
   });
 }
 
@@ -455,6 +455,19 @@ export function removeOrganisationMember(
       method: 'DELETE',
     },
   );
+}
+
+/** DEVOS-293: `POST /organisations/:id/transfer-ownership` (DEVOS-290,
+ * new) — transferable only by the current owner, to an existing
+ * `ORGANISATION_ADMIN` co-admin. */
+export function transferOrganisationOwnership(
+  organisationId: string,
+  principalId: string,
+): Promise<ApiResult<Organisation>> {
+  return request<Organisation>(`/api/v1/organisations/${organisationId}/transfer-ownership`, {
+    method: 'POST',
+    body: { principalId },
+  });
 }
 
 export function listProjectTypes(): Promise<ApiResult<ProjectType[]>> {

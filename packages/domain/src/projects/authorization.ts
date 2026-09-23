@@ -1,17 +1,30 @@
+import { hasProjectPermission } from '../access-control/permission-catalogue.js';
 import type { MembershipRole } from './membership.js';
 
+/**
+ * DEVOS-289 (Sprint 47, `specs/DEVOS-ACCESS-CONTROL-MODEL-BACKLOG.md` §6.2):
+ * every function below is now catalogue-driven — it consults the real
+ * `ACCESS_ROLE`/`PERMISSION`/`ROLE_PERMISSION` rows migration `0047` seeds
+ * (via `hasProjectPermission`'s in-memory cache, see
+ * `../access-control/permission-catalogue.js`'s own doc comment for why a
+ * cache rather than a widened async signature) instead of a bare
+ * `role === 'OWNER'` literal. Every exported function keeps its exact
+ * original name and signature, so every existing call site (18 files) and
+ * this module's own pre-existing `packages/domain/tests/authorization.test.ts`
+ * are unaffected — the default catalogue reproduces today's grants exactly.
+ */
 export function canManageMembers(role: MembershipRole): boolean {
-  return role === 'OWNER';
+  return hasProjectPermission(role, 'project.manage_members');
 }
 
 export function canUpdateProject(role: MembershipRole): boolean {
-  return role === 'OWNER';
+  return hasProjectPermission(role, 'project.update');
 }
 
-/** DEVOS: Organisations & Project Types — same OWNER-only bar as every
- * other consequential action in this file, applied one scope level up. */
+/** DEVOS: Organisations & Project Types — same bar as every other
+ * consequential action in this file, applied one scope level up. */
 export function canUpdateOrganisation(role: MembershipRole): boolean {
-  return role === 'OWNER';
+  return hasProjectPermission(role, 'organisation.update');
 }
 
 /**
@@ -21,28 +34,28 @@ export function canUpdateOrganisation(role: MembershipRole): boolean {
  * with every other consequential project action below.
  */
 export function canDecideApproval(role: MembershipRole): boolean {
-  return role === 'OWNER';
+  return hasProjectPermission(role, 'approval.decide');
 }
 
 export function canPublishPolicy(role: MembershipRole): boolean {
-  return role === 'OWNER';
+  return hasProjectPermission(role, 'policy.publish');
 }
 
 export function canRegisterIntegration(role: MembershipRole): boolean {
-  return role === 'OWNER';
+  return hasProjectPermission(role, 'integration.register');
 }
 
 export function canPublishAgent(role: MembershipRole): boolean {
-  return role === 'OWNER';
+  return hasProjectPermission(role, 'agent.publish');
 }
 
 export function canPublishWorkflow(role: MembershipRole): boolean {
-  return role === 'OWNER';
+  return hasProjectPermission(role, 'workflow.publish');
 }
 
 /** DEVOS-256: enabling/disabling a tool capability is a consequential,
  * project-wide action (it changes what every agent/workflow in the project
- * may invoke) — same OWNER-only bar as every other action in this file. */
+ * may invoke) — same bar as every other action in this file. */
 export function canManageToolCapabilities(role: MembershipRole): boolean {
-  return role === 'OWNER';
+  return hasProjectPermission(role, 'tool_capability.manage');
 }

@@ -2,16 +2,19 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   ensureUserIdentityForLogin,
+  loadAccessControlCatalogueFromRepository,
   ForbiddenError as UseCaseForbiddenError,
   NotFoundError as UseCaseNotFoundError,
   ValidationError as UseCaseValidationError,
   type EnsureUserIdentityDeps,
+  type LoadAccessControlCatalogueDeps,
 } from '@devos/application';
 import { loadConfig, type DevosConfig } from '@devos/config';
 import type { ApiError, ApiErrorResponse, ApiResponse } from '@devos/contracts';
 import type { ListWorkflowRunsForDefinition } from '@devos/domain';
 import { Redis } from 'ioredis';
 import {
+  createAccessControlRepository,
   createAgentDraftCreator,
   createAgentExecutionRepository,
   createAgentRepository,
@@ -24,6 +27,7 @@ import {
   createAuditRecordRepository,
   createContextManifestRepository,
   createDatabaseClient,
+  createEffectiveProjectIdsForPrincipalLister,
   createHumanProfileRepository,
   createIntegrationRepository,
   createKnowledgeReferenceRepository,
@@ -218,6 +222,11 @@ export interface CreateAppOptions {
   database?: DatabaseClient;
   authProvider?: AuthProvider;
   userIdentityDeps?: EnsureUserIdentityDeps;
+  /** DEVOS-289: overridable so tests can exercise
+   * `loadAccessControlCatalogueFromRepository` against an in-memory fake
+   * instead of a real (here, fake/null) database connection — mirrors
+   * `userIdentityDeps`'s own established shape. */
+  accessControlDeps?: LoadAccessControlCatalogueDeps;
   projectDeps?: ProjectUseCaseDeps;
   workItemDeps?: WorkItemUseCaseDeps;
   workflowDeps?: WorkflowUseCaseDeps;
@@ -302,6 +311,18 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     (redisClient !== undefined
       ? createRedisRateLimiter(redisClient, 60, 10_000)
       : createRateLimiter(60, 10_000));
+  // DEVOS-289: fire-and-forget, mirroring DEVOS-285's own
+  // `ensureUserIdentityForLogin` precedent — safe because
+  // `permission-catalogue.ts`'s own hardcoded default already matches these
+  // real seeded values exactly, so a slow or failed load never changes
+  // observable authorization behavior. Always attempted (not gated behind
+  // any config check, unlike the OIDC-only `userIdentityDeps` above) since
+  // access control should load in every environment with a real database.
+  void loadAccessControlCatalogueFromRepository(
+    options.accessControlDeps ?? { accessControl: createAccessControlRepository(database.db) },
+  ).catch((error: unknown) => {
+    console.error('Failed to load access control catalogue', error);
+  });
   const auditRecordRepository = createAuditRecordRepository(database.db);
   const projectTypeRepository = createProjectTypeRepository(database.db);
   const projectTypeWorkflowRepository = createProjectTypeWorkflowRepository(database.db);
@@ -314,6 +335,9 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     projectTypeWorkflows: projectTypeWorkflowRepository,
     projectTypeAgents: projectTypeAgentRepository,
     createProjectWithClones: createProjectWithClonesCreator(database.db),
+    // DEVOS-292: real, single-query effective access via the
+    // `effective_project_access` view.
+    listEffectiveProjectIdsForPrincipal: createEffectiveProjectIdsForPrincipalLister(database.db),
   };
   const workItemDeps: WorkItemUseCaseDeps = options.workItemDeps ?? {
     projects: projectDeps.projects,

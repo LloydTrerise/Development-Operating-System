@@ -1,3 +1,4 @@
+export * from './access-control/load-access-control-catalogue.js';
 export * from './agents/create-agent.js';
 export * from './agents/create-new-agent-version.js';
 export * from './agents/deps.js';
@@ -59,6 +60,7 @@ export * from './organisations/list-members.js';
 export * from './organisations/list-organisations-for-principal.js';
 export * from './organisations/membership-access.js';
 export * from './organisations/remove-member.js';
+export * from './organisations/transfer-organisation-ownership.js';
 export * from './organisations/update-organisation.js';
 export * from './policy/create-organisation-policy.js';
 export * from './policy/create-policy.js';

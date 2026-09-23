@@ -2,15 +2,13 @@ import { useEffect, useState, type FormEvent } from 'react';
 import {
   Box,
   Button,
+  Chip,
   Collapse,
-  FormControl,
   IconButton,
   List,
   ListItemButton,
   ListItemText,
-  MenuItem,
   Paper,
-  Select,
   Stack,
   TextField,
   Typography,
@@ -18,12 +16,13 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import PeopleIcon from '@mui/icons-material/People';
 import SettingsIcon from '@mui/icons-material/Settings';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import {
   addOrganisationMember,
-  changeOrganisationMemberRole,
   createOrganisation,
   listOrganisationMembers,
   removeOrganisationMember,
+  transferOrganisationOwnership,
   updateOrganisation,
   type Membership,
 } from '../../api-client.js';
@@ -31,8 +30,7 @@ import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
 import { StatusChip } from '../../components/StatusChip.js';
 import { useOrganisationContext } from '../../organisation-context.js';
-
-const ROLES = ['OWNER', 'MEMBER'] as const;
+import { useSession } from '../../session.js';
 
 function PanelHeader({ title }: { title: string }) {
   return (
@@ -43,14 +41,30 @@ function PanelHeader({ title }: { title: string }) {
 }
 
 /**
- * DEVOS-255: reuses `ProjectDetailPage.tsx`'s Members panel interactions
- * (DEVOS-226) — list, add by principal ID, change role, remove — but as a
+ * DEVOS-255/DEVOS-293: reuses `ProjectDetailPage.tsx`'s Members panel
+ * interactions (DEVOS-226) — list, add by principal ID, remove — but as a
  * second inline-expand toggle on `OrganisationRow`, matching that row's own
  * existing Settings-toggle pattern (DEVOS-227) rather than a route-based
  * detail page, since `OrganisationsPage.tsx` has no `/organisations/:id`
  * route (deliberately deferred — see this file's own DEVOS-227 grounding).
+ *
+ * DEVOS-290/293: there is only one org-level role now (`ORGANISATION_ADMIN`,
+ * decision §9.3 drops org-level `MEMBER`), so the role picker is gone —
+ * every add is an `ORGANISATION_ADMIN`. The single transferable
+ * `ownerPrincipalId` gets its own "Owner" chip, and only the current owner
+ * sees a "Transfer ownership" action on the other co-admin rows.
  */
-function MembersPanel({ organisationId }: { organisationId: string }) {
+function MembersPanel({
+  organisationId,
+  ownerPrincipalId,
+  currentPrincipalId,
+  onOwnershipChanged,
+}: {
+  organisationId: string;
+  ownerPrincipalId: string | undefined;
+  currentPrincipalId: string;
+  onOwnershipChanged: () => void;
+}) {
   const [members, setMembers] = useState<Membership[]>([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
@@ -58,8 +72,10 @@ function MembersPanel({ organisationId }: { organisationId: string }) {
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
   const [newUserId, setNewUserId] = useState('');
-  const [newRole, setNewRole] = useState<(typeof ROLES)[number]>('MEMBER');
   const [adding, setAdding] = useState(false);
+
+  const isCurrentUserOwner =
+    ownerPrincipalId !== undefined && ownerPrincipalId === currentPrincipalId;
 
   function refresh() {
     setLoading(true);
@@ -85,7 +101,7 @@ function MembersPanel({ organisationId }: { organisationId: string }) {
     setActionError(null);
     const result = await addOrganisationMember(organisationId, {
       userId: newUserId.trim(),
-      role: newRole,
+      role: 'ORGANISATION_ADMIN',
     });
     setAdding(false);
     if (!result.ok) {
@@ -96,16 +112,16 @@ function MembersPanel({ organisationId }: { organisationId: string }) {
     refresh();
   }
 
-  async function handleChangeRole(userId: string, role: (typeof ROLES)[number]) {
+  async function handleTransferOwnership(userId: string) {
     setBusyUserId(userId);
     setActionError(null);
-    const result = await changeOrganisationMemberRole(organisationId, userId, role);
+    const result = await transferOrganisationOwnership(organisationId, userId);
     setBusyUserId(null);
     if (!result.ok) {
       setActionError(result.error.message);
       return;
     }
-    refresh();
+    onOwnershipChanged();
   }
 
   async function handleRemove(userId: string) {
@@ -128,45 +144,44 @@ function MembersPanel({ organisationId }: { organisationId: string }) {
 
       {!loading && !listError && (
         <Stack spacing={0.5} sx={{ mb: 1.5 }}>
-          {members.map((member) => (
-            <Stack
-              key={member.id}
-              direction="row"
-              alignItems="center"
-              spacing={2}
-              sx={{ py: 0.5, borderBottom: 1, borderColor: 'divider' }}
-            >
-              <Typography variant="body2" sx={{ flex: 1, fontFamily: 'monospace' }}>
-                {member.userId}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {member.status}
-              </Typography>
-              <FormControl size="small" sx={{ minWidth: 110 }}>
-                <Select<string>
-                  value={member.role}
-                  disabled={busyUserId === member.userId}
-                  onChange={(event) =>
-                    handleChangeRole(member.userId, event.target.value as (typeof ROLES)[number])
-                  }
-                >
-                  {ROLES.map((role) => (
-                    <MenuItem key={role} value={role}>
-                      {role}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <IconButton
-                aria-label={`Remove ${member.userId}`}
-                size="small"
-                disabled={busyUserId === member.userId}
-                onClick={() => handleRemove(member.userId)}
+          {members.map((member) => {
+            const isOwner = member.userId === ownerPrincipalId;
+            return (
+              <Stack
+                key={member.id}
+                direction="row"
+                alignItems="center"
+                spacing={2}
+                sx={{ py: 0.5, borderBottom: 1, borderColor: 'divider' }}
               >
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-            </Stack>
-          ))}
+                <Typography variant="body2" sx={{ flex: 1, fontFamily: 'monospace' }}>
+                  {member.userId}
+                </Typography>
+                {isOwner && <Chip label="Owner" size="small" color="primary" variant="outlined" />}
+                <Typography variant="caption" color="text.secondary">
+                  {member.status}
+                </Typography>
+                {isCurrentUserOwner && !isOwner && (
+                  <IconButton
+                    aria-label={`Transfer ownership to ${member.userId}`}
+                    size="small"
+                    disabled={busyUserId === member.userId}
+                    onClick={() => handleTransferOwnership(member.userId)}
+                  >
+                    <SwapHorizIcon fontSize="small" />
+                  </IconButton>
+                )}
+                <IconButton
+                  aria-label={`Remove ${member.userId}`}
+                  size="small"
+                  disabled={isOwner || busyUserId === member.userId}
+                  onClick={() => handleRemove(member.userId)}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Stack>
+            );
+          })}
           {members.length === 0 && (
             <Typography variant="body2" color="text.secondary">
               No organisation-level members yet.
@@ -181,28 +196,16 @@ function MembersPanel({ organisationId }: { organisationId: string }) {
           size="small"
           value={newUserId}
           onChange={(event) => setNewUserId(event.target.value)}
-          helperText="No user directory exists — add by exact principal id."
+          helperText="No user directory exists — add by exact principal id, as an admin."
           sx={{ minWidth: 260 }}
         />
-        <FormControl size="small" sx={{ minWidth: 110 }}>
-          <Select<string>
-            value={newRole}
-            onChange={(event) => setNewRole(event.target.value as (typeof ROLES)[number])}
-          >
-            {ROLES.map((role) => (
-              <MenuItem key={role} value={role}>
-                {role}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
         <Button
           type="submit"
           variant="outlined"
           size="small"
           disabled={adding || !newUserId.trim()}
         >
-          {adding ? 'Adding…' : 'Add member'}
+          {adding ? 'Adding…' : 'Add admin'}
         </Button>
       </Stack>
     </Box>
@@ -226,6 +229,8 @@ function OrganisationRow({
   currentName,
   slug,
   status,
+  ownerPrincipalId,
+  currentPrincipalId,
   selected,
   onSelect,
   onSaved,
@@ -234,6 +239,8 @@ function OrganisationRow({
   currentName: string;
   slug: string;
   status: string;
+  ownerPrincipalId: string | undefined;
+  currentPrincipalId: string;
   selected: boolean;
   onSelect: () => void;
   onSaved: () => void;
@@ -288,7 +295,12 @@ function OrganisationRow({
         </IconButton>
       </ListItemButton>
       <Collapse in={membersOpen} unmountOnExit>
-        <MembersPanel organisationId={organisationId} />
+        <MembersPanel
+          organisationId={organisationId}
+          ownerPrincipalId={ownerPrincipalId}
+          currentPrincipalId={currentPrincipalId}
+          onOwnershipChanged={onSaved}
+        />
       </Collapse>
       <Collapse in={open} unmountOnExit>
         <Box
@@ -320,6 +332,8 @@ function OrganisationRow({
 export function OrganisationsPage() {
   const { organisations, selectedOrganisationId, selectOrganisation, loading, error, refresh } =
     useOrganisationContext();
+  const session = useSession();
+  const currentPrincipalId = 'principalId' in session ? session.principalId : '';
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -364,6 +378,8 @@ export function OrganisationsPage() {
                 currentName={organisation.name}
                 slug={organisation.slug}
                 status={organisation.status}
+                ownerPrincipalId={organisation.ownerPrincipalId}
+                currentPrincipalId={currentPrincipalId}
                 selected={organisation.id === selectedOrganisationId}
                 onSelect={() => selectOrganisation(organisation.id)}
                 onSaved={refresh}

@@ -1,3 +1,6 @@
+export * from './access-control/access-role.js';
+export * from './access-control/effective-project-access.js';
+export * from './access-control/permission-catalogue.js';
 export * from './agents/agent-execution.js';
 export * from './agents/agent-version.js';
 export * from './agents/agent.js';

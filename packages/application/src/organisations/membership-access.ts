@@ -44,20 +44,45 @@ export async function resolveOrganisationMembership(
 
 /**
  * DEVOS-254: mirrors `projects/membership-access.ts`'s `assertNotLastOwner`
- * exactly, at organisation scope — guards against removing or demoting the
- * last org-level (`projectId: null`) `OWNER` membership.
+ * exactly, at organisation scope — guards against removing the last
+ * org-level (`projectId: null`) `ORGANISATION_ADMIN` membership (renamed
+ * from `OWNER`/`assertNotLastOrganisationOwner` by DEVOS-290, since
+ * `ORGANISATION_ADMIN` is the only org-level role that exists now, decision
+ * §9.3).
  */
-export async function assertNotLastOrganisationOwner(
+export async function assertNotLastOrganisationAdmin(
   deps: OrganisationMembershipAccessDeps,
   organisationId: OrganisationId,
   excludingMembershipId: Membership['id'],
 ): Promise<void> {
   const members = (await deps.memberships.listForOrganisation?.(organisationId)) ?? [];
-  const otherOwners = members.filter(
-    (member) => member.role === 'OWNER' && member.id !== excludingMembershipId,
+  const otherAdmins = members.filter(
+    (member) => member.role === 'ORGANISATION_ADMIN' && member.id !== excludingMembershipId,
   );
 
-  if (otherOwners.length === 0) {
-    throw new ValidationError('Cannot remove the last owner of an organisation.');
+  if (otherAdmins.length === 0) {
+    throw new ValidationError('Cannot remove the last admin of an organisation.');
+  }
+}
+
+/**
+ * DEVOS-290: the single transferable `owner_principal_id` must never be
+ * removed from the co-admin pool it belongs to without first transferring
+ * ownership to someone else — distinct from, and checked in addition to,
+ * `assertNotLastOrganisationAdmin` (a co-admin pool of three could lose its
+ * *current owner* member while two other admins remain, which
+ * `assertNotLastOrganisationAdmin` alone would not catch).
+ */
+export function assertNotRemovingCurrentOwner(
+  organisation: { ownerPrincipalId?: string },
+  target: Membership,
+): void {
+  if (
+    organisation.ownerPrincipalId !== undefined &&
+    organisation.ownerPrincipalId === target.principalId
+  ) {
+    throw new ValidationError(
+      'Cannot remove or demote the current owner — transfer ownership first.',
+    );
   }
 }

@@ -1,6 +1,18 @@
 import type { MembershipId, OrganisationId, ProjectId } from '@devos/contracts';
 
-export const membershipRoles = ['OWNER', 'MEMBER'] as const;
+/**
+ * DEVOS-290: `ORGANISATION_ADMIN` only ever appears on an org-level
+ * (`projectId: null`) membership row — the replacement for Sprint 39's
+ * org-level `OWNER`/`MEMBER` rows (§9.3 drops the org-level `MEMBER`
+ * concept entirely; org-level `OWNER` rows migrate to `ORGANISATION_ADMIN`,
+ * see migration `0048`). `OWNER`/`MEMBER` remain the only valid roles at
+ * project scope — `packages/application/src/projects/add-member.ts` and
+ * `change-member-role.ts` reject `ORGANISATION_ADMIN`, and
+ * `packages/application/src/organisations/add-member.ts`/
+ * `change-member-role.ts` reject anything else, per each scope's own
+ * validation.
+ */
+export const membershipRoles = ['OWNER', 'MEMBER', 'ORGANISATION_ADMIN'] as const;
 export type MembershipRole = (typeof membershipRoles)[number];
 
 export interface Membership {

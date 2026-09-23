@@ -1,15 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import type { AuditId, MembershipId, OrganisationId } from '@devos/contracts';
 import { canManageMembers, type Membership, type MembershipRole } from '@devos/domain';
-import { ForbiddenError, NotFoundError } from '../errors.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../errors.js';
 import type { OrganisationUseCaseDeps } from './deps.js';
-import {
-  assertNotLastOrganisationOwner,
-  resolveOrganisationMembership,
-} from './membership-access.js';
+import { resolveOrganisationMembership } from './membership-access.js';
 
 /** DEVOS-254: mirrors `projects/change-member-role.ts` exactly, at
- * organisation scope. */
+ * organisation scope.
+ *
+ * DEVOS-290: `ORGANISATION_ADMIN` is the only valid org-level role now
+ * (decision §9.3) — there is no other role left to change to or from, so
+ * this becomes an idempotent confirmation, kept for API/DTO continuity with
+ * `projects/change-member-role.ts`'s identical shape rather than removed
+ * outright. */
 export async function changeOrganisationMemberRole(
   deps: OrganisationUseCaseDeps,
   requesterPrincipalId: string,
@@ -17,6 +20,10 @@ export async function changeOrganisationMemberRole(
   targetMembershipId: MembershipId,
   role: MembershipRole,
 ): Promise<Membership> {
+  if (role !== 'ORGANISATION_ADMIN') {
+    throw new ValidationError('Organisation membership only supports the ORGANISATION_ADMIN role.');
+  }
+
   const organisation = await deps.organisations.getById(organisationId);
   if (!organisation) throw new NotFoundError('Organisation');
 
@@ -28,10 +35,6 @@ export async function changeOrganisationMemberRole(
     (membership) => membership.id === targetMembershipId,
   );
   if (!target) throw new NotFoundError('Membership');
-
-  if (target.role === 'OWNER' && role !== 'OWNER') {
-    await assertNotLastOrganisationOwner(deps, organisationId, target.id);
-  }
 
   const previousRole = target.role;
   const updatedAt = new Date().toISOString();

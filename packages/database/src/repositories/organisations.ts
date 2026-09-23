@@ -10,6 +10,7 @@ function toDomain(row: OrganisationsTable): Organisation {
     slug: row.slug,
     status: row.status,
     ...(row.budget_usd !== null ? { budgetUsd: Number(row.budget_usd) } : {}),
+    ...(row.owner_principal_id !== null ? { ownerPrincipalId: row.owner_principal_id } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -40,6 +41,7 @@ export function createOrganisationRepository(db: QueryExecutor): OrganisationRep
           slug: organisation.slug,
           status: organisation.status,
           budget_usd: organisation.budgetUsd?.toString() ?? null,
+          owner_principal_id: organisation.ownerPrincipalId ?? null,
           created_at: organisation.createdAt,
           updated_at: organisation.updatedAt,
         })
@@ -55,6 +57,14 @@ export function createOrganisationRepository(db: QueryExecutor): OrganisationRep
           ...(changes.budgetUsd !== undefined ? { budget_usd: changes.budgetUsd.toString() } : {}),
           updated_at: updatedAt,
         })
+        .where('id', '=', id)
+        .execute();
+    },
+
+    async setOwnerPrincipalId(id, ownerPrincipalId, updatedAt) {
+      await db
+        .updateTable('organisations')
+        .set({ owner_principal_id: ownerPrincipalId, updated_at: updatedAt })
         .where('id', '=', id)
         .execute();
     },

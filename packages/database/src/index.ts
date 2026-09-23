@@ -1,5 +1,7 @@
 export * from './client.js';
 export * from './database.js';
+export * from './repositories/access-control.js';
+export * from './repositories/effective-project-access.js';
 export * from './repositories/agent-executions.js';
 export * from './repositories/agent-versions.js';
 export * from './repositories/agents.js';

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AuditId, MembershipId, ProjectId } from '@devos/contracts';
 import { canManageMembers, type Membership, type MembershipRole } from '@devos/domain';
-import { ForbiddenError, NotFoundError } from '../errors.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../errors.js';
 import type { ProjectUseCaseDeps } from './deps.js';
 import { assertNotLastOwner, resolveMembership } from './membership-access.js';
 
@@ -12,6 +12,12 @@ export async function changeMemberRole(
   targetMembershipId: MembershipId,
   role: MembershipRole,
 ): Promise<Membership> {
+  // DEVOS-290: ORGANISATION_ADMIN only ever exists on an org-level
+  // (projectId: null) membership row — never a project-level one.
+  if (role === 'ORGANISATION_ADMIN') {
+    throw new ValidationError('ORGANISATION_ADMIN is not a valid project-level role.');
+  }
+
   const project = await deps.projects.getById(projectId);
   if (!project) throw new NotFoundError('Project');
 

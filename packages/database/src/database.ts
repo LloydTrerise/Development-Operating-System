@@ -4,6 +4,9 @@ export interface OrganisationsTable {
   slug: string;
   status: string;
   budget_usd: string | null;
+  /** DEVOS-290 (migration `0048`): nullable only for the theoretical
+   * ownerless-org edge case that migration's own backfill discloses. */
+  owner_principal_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -371,6 +374,35 @@ export interface UserIdentitiesTable {
   created_at: string;
 }
 
+/** DEVOS-288 (migration `0047`): seeded, real catalogue backing
+ * `packages/domain/src/access-control/permission-catalogue.ts`. */
+export interface AccessRolesTable {
+  id: string;
+  scope_type: string;
+  key: string;
+  name: string;
+  created_at: string;
+}
+
+export interface PermissionsTable {
+  id: string;
+  key: string;
+  name: string;
+  created_at: string;
+}
+
+export interface RolePermissionsTable {
+  access_role_id: string;
+  permission_id: string;
+}
+
+/** DEVOS-291 (migration `0049`): a real Postgres VIEW, not a table — Kysely
+ * types a view identically to a table for query-building purposes. */
+export interface EffectiveProjectAccessView {
+  principal_id: string;
+  project_id: string;
+}
+
 export interface IntegrationsTable {
   id: string;
   project_id: string;
@@ -415,4 +447,8 @@ export interface Database {
   principals: PrincipalsTable;
   human_profiles: HumanProfilesTable;
   user_identities: UserIdentitiesTable;
+  access_roles: AccessRolesTable;
+  permissions: PermissionsTable;
+  role_permissions: RolePermissionsTable;
+  effective_project_access: EffectiveProjectAccessView;
 }

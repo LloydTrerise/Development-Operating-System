@@ -775,6 +775,7 @@ describe('runAgentTask', () => {
         list: async () => [organisation],
         create: async () => {},
         update: async () => {},
+        setOwnerPrincipalId: async () => {},
       };
       const auditRecords: AuditRecord[] = [];
       const auditRecordRepository: AuditRecordRepository = {
@@ -1016,7 +1017,7 @@ describe('runAgentTask', () => {
       );
     });
 
-    it('changes nothing else when deps.knowledgeReferences is omitted — today\'s exact existing behaviour', async () => {
+    it("changes nothing else when deps.knowledgeReferences is omitted — today's exact existing behaviour", async () => {
       const scenario = buildScenario();
       const { knowledgeSources } = withActiveKnowledgeSource(scenario);
       const modelAdapter: AgentModelAdapter = {
