@@ -348,6 +348,29 @@ export interface ToolInvocationsTable {
   created_at: string;
 }
 
+export interface PrincipalsTable {
+  id: string;
+  principal_type: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HumanProfilesTable {
+  principal_id: string;
+  email: string | null;
+  display_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserIdentitiesTable {
+  id: string;
+  principal_id: string;
+  provider: string;
+  provider_subject: string;
+  created_at: string;
+}
+
 export interface IntegrationsTable {
   id: string;
   project_id: string;
@@ -389,4 +412,7 @@ export interface Database {
   tool_capabilities: ToolCapabilitiesTable;
   tool_invocations: ToolInvocationsTable;
   integrations: IntegrationsTable;
+  principals: PrincipalsTable;
+  human_profiles: HumanProfilesTable;
+  user_identities: UserIdentitiesTable;
 }

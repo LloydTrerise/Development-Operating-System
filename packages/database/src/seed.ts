@@ -150,6 +150,38 @@ async function main(): Promise<void> {
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
 
+  // DEVOS-284: seed.ts inserts memberships directly (bypassing
+  // createMembershipRepository, per this file's own established convention
+  // for compound/fixed-id seed rows), so it separately seeds the same
+  // PRINCIPAL(+HUMAN_PROFILE) invariant that repository now maintains for
+  // every membership created through the application layer — a fresh
+  // database (migrate + seed, no prior history) would otherwise never
+  // backfill 'seed-user' via migration 0045, since that migration's own
+  // backfill only sees data that already exists at migration time.
+  // 'devos-agent-runtime' is deliberately excluded — a system actor, not a
+  // human, per DEVOS-284's own scope (see migration 0045's doc comment).
+  await db
+    .insertInto('principals')
+    .values({
+      id: SEED_PRINCIPAL_ID,
+      principal_type: 'HUMAN',
+      created_at: now,
+      updated_at: now,
+    })
+    .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
+  await db
+    .insertInto('human_profiles')
+    .values({
+      principal_id: SEED_PRINCIPAL_ID,
+      email: null,
+      display_name: null,
+      created_at: now,
+      updated_at: now,
+    })
+    .onConflict((oc) => oc.column('principal_id').doNothing())
+    .execute();
+
   await db
     .insertInto('memberships')
     .values({

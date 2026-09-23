@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
+  ensureUserIdentityForLogin,
   ForbiddenError as UseCaseForbiddenError,
   NotFoundError as UseCaseNotFoundError,
   ValidationError as UseCaseValidationError,
+  type EnsureUserIdentityDeps,
 } from '@devos/application';
 import { loadConfig, type DevosConfig } from '@devos/config';
 import type { ApiError, ApiErrorResponse, ApiResponse } from '@devos/contracts';
@@ -22,6 +24,7 @@ import {
   createAuditRecordRepository,
   createContextManifestRepository,
   createDatabaseClient,
+  createHumanProfileRepository,
   createIntegrationRepository,
   createKnowledgeReferenceRepository,
   createKnowledgeSourceRepository,
@@ -29,6 +32,7 @@ import {
   createNotificationRepository,
   createOrganisationRepository,
   createPolicyRepository,
+  createPrincipalRepository,
   createProjectRepository,
   createProjectTypeAgentRepository,
   createProjectTypeRepository,
@@ -36,6 +40,7 @@ import {
   createProjectWithClonesCreator,
   createToolCapabilityRepository,
   createToolInvocationRepository,
+  createUserIdentityRepository,
   createWorkItemRepository,
   createWorkflowDefinitionRepository,
   createWorkflowDraftCreator,
@@ -212,6 +217,7 @@ export interface CreateAppOptions {
   env?: NodeJS.ProcessEnv;
   database?: DatabaseClient;
   authProvider?: AuthProvider;
+  userIdentityDeps?: EnsureUserIdentityDeps;
   projectDeps?: ProjectUseCaseDeps;
   workItemDeps?: WorkItemUseCaseDeps;
   workflowDeps?: WorkflowUseCaseDeps;
@@ -251,11 +257,30 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   // AUTH_ISSUER_URL/AUTH_AUDIENCE are configured; `createLocalAuthProvider`
   // remains the default otherwise (local dev, and every existing test that
   // never sets those two variables), per this task's own scope.
+  const isOidcAuthActive =
+    config.auth.issuerUrl !== undefined && config.auth.audience !== undefined;
   const authProvider =
     options.authProvider ??
     (config.auth.issuerUrl !== undefined && config.auth.audience !== undefined
       ? createOidcAuthProvider({ issuerUrl: config.auth.issuerUrl, audience: config.auth.audience })
       : createLocalAuthProvider());
+  // DEVOS-285: real USER_IDENTITY (+PRINCIPAL/HUMAN_PROFILE) recording for
+  // every successfully-authenticated real OIDC request — deliberately
+  // constructed only when a real OIDC provider is actually active (never
+  // for `createLocalAuthProvider`'s dev-mode bearer-token-as-id path,
+  // see its own doc comment), so every existing test (none of which sets
+  // AUTH_ISSUER_URL/AUTH_AUDIENCE) never reaches this code at all — the
+  // same "zero change to any existing route's behavior" property DEVOS-284/
+  // 286 both require (`specs/DEVOS-ACCESS-CONTROL-MODEL-BACKLOG.md` §6.1).
+  const userIdentityDeps: EnsureUserIdentityDeps | undefined =
+    options.userIdentityDeps ??
+    (isOidcAuthActive
+      ? {
+          principals: createPrincipalRepository(database.db),
+          humanProfiles: createHumanProfileRepository(database.db),
+          userIdentities: createUserIdentityRepository(database.db),
+        }
+      : undefined);
   // DEVOS-091: only mutating requests count as "expensive" for rate-limiting
   // purposes — a read has no write/agent/tool-invocation cost behind it.
   // 60 requests per 10s per principal is generous enough not to interfere
@@ -528,6 +553,18 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
 
       const principal = await authProvider.authenticate(req.headers.authorization);
       if (match.route.protected && principal === null) throw new AuthenticationError();
+
+      // DEVOS-285: best-effort — a USER_IDENTITY recording failure must
+      // never fail the real request it rode in on; only reachable when a
+      // real OIDC provider is configured (`userIdentityDeps` is otherwise
+      // `undefined`), so every existing test is unaffected.
+      if (principal !== null && userIdentityDeps !== undefined) {
+        void ensureUserIdentityForLogin(userIdentityDeps, principal, 'oidc').catch(
+          (error: unknown) => {
+            console.error('Failed to record user identity', error);
+          },
+        );
+      }
 
       const isMutatingMethod =
         req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE';

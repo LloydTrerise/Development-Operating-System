@@ -25,8 +25,17 @@ import type {
   WorkflowLibraryUseCaseDeps,
   WorkItemUseCaseDeps,
   WorkflowUseCaseDeps,
+  EnsureUserIdentityDeps,
 } from '@devos/application';
 import type { DatabaseClient } from '@devos/database';
+import type {
+  HumanProfile,
+  HumanProfileRepository,
+  Principal,
+  PrincipalRepository,
+  UserIdentity,
+  UserIdentityRepository,
+} from '@devos/domain';
 import {
   SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
   type Agent,
@@ -4002,5 +4011,103 @@ describe('workflow library route (Sprint 41 gap closure)', () => {
       'mallory',
     );
     expect(response.status).toBe(404);
+  });
+});
+
+function createInMemoryUserIdentityDeps(): EnsureUserIdentityDeps & {
+  principalsStore: Principal[];
+  humanProfilesStore: HumanProfile[];
+  userIdentitiesStore: UserIdentity[];
+} {
+  const principalsStore: Principal[] = [];
+  const humanProfilesStore: HumanProfile[] = [];
+  const userIdentitiesStore: UserIdentity[] = [];
+
+  const principals: PrincipalRepository = {
+    getById: async (id) => principalsStore.find((p) => p.id === id) ?? null,
+    create: async (principal) => {
+      principalsStore.push(principal);
+    },
+  };
+  const humanProfiles: HumanProfileRepository = {
+    getByPrincipalId: async (principalId) =>
+      humanProfilesStore.find((p) => p.principalId === principalId) ?? null,
+    create: async (profile) => {
+      humanProfilesStore.push(profile);
+    },
+  };
+  const userIdentities: UserIdentityRepository = {
+    getByProviderSubject: async (provider, providerSubject) =>
+      userIdentitiesStore.find(
+        (i) => i.provider === provider && i.providerSubject === providerSubject,
+      ) ?? null,
+    create: async (identity) => {
+      userIdentitiesStore.push(identity);
+    },
+  };
+
+  return {
+    principals,
+    humanProfiles,
+    userIdentities,
+    principalsStore,
+    humanProfilesStore,
+    userIdentitiesStore,
+  };
+}
+
+describe('user identity recording (DEVOS-285)', () => {
+  it('records a real USER_IDENTITY for an authenticated request when wired', async () => {
+    const userIdentityDeps = createInMemoryUserIdentityDeps();
+    const started = await startServer({ userIdentityDeps });
+
+    try {
+      await fetch(`${started.baseUrl}/api/v1/health`, {
+        headers: { authorization: 'Bearer devos-285-test-user' },
+      });
+      // DEVOS-285's own hook is fire-and-forget (must never block/fail the
+      // real request it rode in on) — give its microtask a turn to settle.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(userIdentityDeps.userIdentitiesStore).toHaveLength(1);
+      expect(userIdentityDeps.userIdentitiesStore[0]).toMatchObject({
+        principalId: 'devos-285-test-user',
+        provider: 'oidc',
+        providerSubject: 'devos-285-test-user',
+      });
+      expect(userIdentityDeps.principalsStore[0]).toMatchObject({
+        id: 'devos-285-test-user',
+        principalType: 'HUMAN',
+      });
+    } finally {
+      started.server.close();
+    }
+  });
+
+  it('never touches USER_IDENTITY for an unauthenticated request', async () => {
+    const userIdentityDeps = createInMemoryUserIdentityDeps();
+    const started = await startServer({ userIdentityDeps });
+
+    try {
+      await fetch(`${started.baseUrl}/api/v1/health`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(userIdentityDeps.userIdentitiesStore).toHaveLength(0);
+    } finally {
+      started.server.close();
+    }
+  });
+
+  it('does not record USER_IDENTITY when no real OIDC provider is wired (the default, every other test in this suite)', async () => {
+    const started = await startServer();
+
+    try {
+      const response = await fetch(`${started.baseUrl}/api/v1/health`, {
+        headers: { authorization: 'Bearer devos-285-unwired-user' },
+      });
+      expect(response.status).toBe(200);
+    } finally {
+      started.server.close();
+    }
   });
 });

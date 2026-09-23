@@ -29,6 +29,7 @@ export type ProjectTypeId = Brand<string, 'ProjectTypeId'>;
 export type ProjectTypeWorkflowId = Brand<string, 'ProjectTypeWorkflowId'>;
 export type ProjectTypeAgentId = Brand<string, 'ProjectTypeAgentId'>;
 export type NotificationId = Brand<string, 'NotificationId'>;
+export type UserIdentityId = Brand<string, 'UserIdentityId'>;
 
 export type UUID = string;
 

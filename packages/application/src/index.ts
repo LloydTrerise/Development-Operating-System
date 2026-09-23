@@ -68,6 +68,8 @@ export * from './policy/list-organisation-policies.js';
 export * from './policy/list-policies.js';
 export * from './policy/publish-policy.js';
 export * from './policy/simulate-policy.js';
+export * from './principals/ensure-human-principal.js';
+export * from './principals/ensure-user-identity.js';
 export * from './project-types/create-project-type-agent.js';
 export * from './project-types/create-project-type-workflow.js';
 export * from './project-types/create-project-type.js';

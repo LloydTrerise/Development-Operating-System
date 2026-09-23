@@ -66,6 +66,38 @@ export function createMembershipRepository(db: QueryExecutor): MembershipReposit
     },
 
     async create(membership) {
+      // DEVOS-286: every membership.principal_id this codebase writes going
+      // forward resolves through a real PRINCIPAL(+HUMAN_PROFILE) row from
+      // the moment of creation, closing the gap DEVOS-284's own migration
+      // backfill only closed retroactively — get-or-create, real writes
+      // against the same real tables that migration populated, not a
+      // parallel mechanism. `seed.ts`'s own direct inserts bypass this
+      // repository (this codebase's established convention — see
+      // `create-project-with-clones.ts`), so it separately seeds the same
+      // invariant for its own fixed seed principals.
+      const now = new Date().toISOString();
+      await db
+        .insertInto('principals')
+        .values({
+          id: membership.principalId,
+          principal_type: 'HUMAN',
+          created_at: now,
+          updated_at: now,
+        })
+        .onConflict((oc) => oc.column('id').doNothing())
+        .execute();
+      await db
+        .insertInto('human_profiles')
+        .values({
+          principal_id: membership.principalId,
+          email: null,
+          display_name: null,
+          created_at: now,
+          updated_at: now,
+        })
+        .onConflict((oc) => oc.column('principal_id').doNothing())
+        .execute();
+
       await db
         .insertInto('memberships')
         .values({
