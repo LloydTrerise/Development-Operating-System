@@ -26,6 +26,7 @@ import {
   createKnowledgeReferenceRepository,
   createKnowledgeSourceRepository,
   createMembershipRepository,
+  createNotificationRepository,
   createOrganisationRepository,
   createPolicyRepository,
   createProjectRepository,
@@ -63,6 +64,7 @@ import type {
   EngineeringIntelligenceUseCaseDeps,
   IntegrationUseCaseDeps,
   KnowledgeUseCaseDeps,
+  NotificationUseCaseDeps,
   OrganisationUseCaseDeps,
   PolicyUseCaseDeps,
   ProjectTypeUseCaseDeps,
@@ -100,6 +102,7 @@ import { createHealthRoutes } from './routes/health.js';
 import { createIntegrationRoutes } from './routes/integrations.js';
 import { createKnowledgeSourceRoutes } from './routes/knowledge-sources.js';
 import { createMeRoutes } from './routes/me.js';
+import { createNotificationRoutes } from './routes/notifications.js';
 import { createOrganisationRoutes } from './routes/organisations.js';
 import { createPolicyRoutes } from './routes/policies.js';
 import { createProjectTypeRoutes } from './routes/project-types.js';
@@ -229,6 +232,7 @@ export interface CreateAppOptions {
   toolDeps?: ToolUseCaseDeps;
   systemHealthDeps?: SystemHealthUseCaseDeps;
   searchDeps?: SearchUseCaseDeps;
+  notificationDeps?: NotificationUseCaseDeps;
   workflowLibraryDeps?: WorkflowLibraryUseCaseDeps;
   /** DEVOS-091: overridable so tests can exercise a real 429 without firing 60+ requests. */
   mutationRateLimiter?: RateLimiter;
@@ -451,6 +455,9 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     workflowDefinitions: workflowDeps.workflowDefinitions,
     agents: agentDeps.agents,
   };
+  const notificationDeps: NotificationUseCaseDeps = options.notificationDeps ?? {
+    notifications: createNotificationRepository(database.db),
+  };
   const workflowLibraryDeps: WorkflowLibraryUseCaseDeps = options.workflowLibraryDeps ?? {
     organisations: organisationDeps.organisations,
     memberships: projectDeps.memberships,
@@ -495,6 +502,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createToolCapabilityRoutes(API_PREFIX, toolDeps),
     ...createSystemHealthRoutes(API_PREFIX, systemHealthDeps, database),
     ...createSearchRoutes(API_PREFIX, searchDeps),
+    ...createNotificationRoutes(API_PREFIX, notificationDeps),
     ...createWorkflowLibraryRoutes(API_PREFIX, workflowLibraryDeps),
   ];
 

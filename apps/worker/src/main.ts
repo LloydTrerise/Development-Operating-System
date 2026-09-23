@@ -1,4 +1,5 @@
 import {
+  createNotificationEventSink,
   runApprovalTask,
   runConditionTask,
   runDiscoveryTask,
@@ -37,7 +38,9 @@ import {
   createKnowledgeReferenceRepository,
   createKnowledgeSourceRepository,
   createMembershipRepository,
+  createNotificationRepository,
   createOrganisationRepository,
+  createOutboxEventRepository,
   createPolicyRepository,
   createPostgresTaskQueue,
   createProjectRepository,
@@ -51,6 +54,7 @@ import {
   createWorkflowVersionRepository,
   createWorkItemCloser,
   createWorkItemRepository,
+  publishPendingEvents,
 } from '@devos/database';
 import {
   createEnvCredentialResolver,
@@ -172,6 +176,11 @@ const approvalTaskDeps: ApprovalTaskHandlerDeps = {
   // DEVOS-199: resolves a node's own reliabilityReduction against real
   // captured reliability evidence (DEVOS-198) when configured.
   artifacts: createArtifactRepository(database.db),
+  // DEVOS-270 gap closure: real ApprovalRequested outbox events for this
+  // node-scoped approval path too, closing the real gap found proving
+  // Sprint 42's own notification feature end-to-end — the legacy whole-run
+  // gates already wrote this event; this handler never did until now.
+  outboxEvents: createOutboxEventRepository(database.db),
 };
 dispatcher.registerHandler('APPROVAL', (task) => runApprovalTask(approvalTaskDeps, task));
 
@@ -328,6 +337,31 @@ if (metricsSnapshotIntervalMs > 0) {
 }
 
 /**
+ * DEVOS-268: the outbox's own drain function (`publishPendingEvents()`,
+ * Sprint 1) has never had a real caller until now — this is its first real
+ * periodic consumer, mirroring `metricsSnapshotTimer`'s exact shape just
+ * above (unconditional `setInterval`, configurable/disable-at-0, `.unref()`,
+ * cleared in `shutdown()`). The sink materializes each drained event into
+ * one `Notification` row per real project member (see
+ * `createNotificationEventSink`'s own doc comment for the recipient rule).
+ */
+const notificationDrainIntervalMs = Number(process.env.NOTIFICATION_DRAIN_INTERVAL_MS ?? 5_000);
+let notificationDrainTimer: NodeJS.Timeout | undefined;
+if (notificationDrainIntervalMs > 0) {
+  const outboxEvents = createOutboxEventRepository(database.db);
+  const notificationSink = createNotificationEventSink({
+    notifications: createNotificationRepository(database.db),
+    memberships: createMembershipRepository(database.db),
+  });
+  notificationDrainTimer = setInterval(() => {
+    void publishPendingEvents(outboxEvents, notificationSink).catch((error: unknown) => {
+      console.error('DevOS worker notification drain failed', error);
+    });
+  }, notificationDrainIntervalMs);
+  notificationDrainTimer.unref();
+}
+
+/**
  * DEVOS-117: the real external side of the same seam — a real, self-hosted
  * Prometheus (`infrastructure/docker/docker-compose.yml`) scrapes this real
  * `GET /metrics` endpoint on its own schedule, additive alongside (not
@@ -357,6 +391,7 @@ if (metricsServer) {
 async function shutdown(signal: string): Promise<void> {
   console.log(`DevOS worker received ${signal}, shutting down gracefully`);
   if (metricsSnapshotTimer) clearInterval(metricsSnapshotTimer);
+  if (notificationDrainTimer) clearInterval(notificationDrainTimer);
   console.log('DevOS worker final metrics snapshot', JSON.stringify(metrics.snapshot()));
   if (metricsServer) await new Promise<void>((resolve) => metricsServer.close(() => resolve()));
   await dispatcher.stop();

@@ -21,6 +21,7 @@ export * from './repositories/knowledge-sources.js';
 export * from './repositories/event-envelope.js';
 export * from './repositories/integrations.js';
 export * from './repositories/memberships.js';
+export * from './repositories/notifications.js';
 export * from './repositories/organisations.js';
 export * from './repositories/outbox-events.js';
 export * from './repositories/policies.js';

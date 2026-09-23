@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { OrganisationId } from '@devos/contracts';
+import type { EventEnvelope, OrganisationId } from '@devos/contracts';
 import type {
   Approval,
   ApprovalRepository,
   ArtifactEvidenceRow,
   ArtifactVersion,
   ArtifactVersionRepository,
+  OutboxEventRepository,
   Policy,
   PolicyRepository,
   Project,
@@ -73,12 +74,14 @@ function makeDeps(
     organisationId?: OrganisationId;
     organisationPolicies?: Policy[];
     artifacts?: ArtifactEvidenceReader;
+    withOutboxEvents?: boolean;
   } = {},
-): ApprovalTaskHandlerDeps & { createdApprovals: Approval[] } {
+): ApprovalTaskHandlerDeps & { createdApprovals: Approval[]; publishedEvents: EventEnvelope[] } {
   const siblingTasks = options.siblingTasks ?? [];
   const artifactVersions = options.artifactVersions ?? [];
   const approvals = [...(options.approvals ?? [])];
   const createdApprovals: Approval[] = [];
+  const publishedEvents: EventEnvelope[] = [];
 
   const workflowRuns: WorkflowRunRepository = {
     getById: async (id) => (id === run.id ? run : null),
@@ -185,6 +188,17 @@ function makeDeps(
       }
     : undefined;
 
+  const outboxEvents: OutboxEventRepository | undefined = options.withOutboxEvents
+    ? {
+        create: async (_organisationId, envelope) => {
+          publishedEvents.push(envelope);
+        },
+        listUnpublished: async () => [],
+        markPublished: async () => {},
+        recordFailure: async () => {},
+      }
+    : undefined;
+
   return {
     workflowRuns,
     workflowVersions,
@@ -194,13 +208,15 @@ function makeDeps(
     ...(projects ? { projects } : {}),
     ...(policies ? { policies } : {}),
     ...(options.artifacts ? { artifacts: options.artifacts } : {}),
+    ...(outboxEvents ? { outboxEvents } : {}),
     createdApprovals,
+    publishedEvents,
   };
 }
 
 describe('runApprovalTask', () => {
   describe('Gap revisit: a created approval carries real ABAC context', () => {
-    it('populates workflowId/workflowVersion from the run\'s own real workflow version on every created approval', async () => {
+    it("populates workflowId/workflowVersion from the run's own real workflow version on every created approval", async () => {
       const run = makeRun();
       const task = makeTask(run, 'gate');
       const deps = makeDeps(run, undefined);
@@ -324,9 +340,7 @@ describe('runApprovalTask', () => {
       reviewDecisions: Array<'PASS' | 'CHANGES_REQUIRED'>,
     ): ArtifactEvidenceReader {
       const codeChangeIds = reviewDecisions.map(() => randomUUID());
-      const codeChangeEvidence = codeChangeIds.map((id) =>
-        evidenceRow({ agentVersionId }, id),
-      );
+      const codeChangeEvidence = codeChangeIds.map((id) => evidenceRow({ agentVersionId }, id));
       const reviewEvidence = reviewDecisions.map((decision, index) =>
         evidenceRow({ decision, derivedFromArtifactId: codeChangeIds[index] }),
       );
@@ -451,7 +465,9 @@ describe('runApprovalTask', () => {
           signal: 'UNMET',
         },
       });
-      expect(deps.createdApprovals[0]?.reliabilityEvidence?.appliedReducedRequiredApprovers).toBeUndefined();
+      expect(
+        deps.createdApprovals[0]?.reliabilityEvidence?.appliedReducedRequiredApprovers,
+      ).toBeUndefined();
     });
 
     it('leaves requiredApprovers unchanged and records INSUFFICIENT_SAMPLE when fewer reviews exist than minSampleSize', async () => {
@@ -533,6 +549,78 @@ describe('runApprovalTask', () => {
     expect(created?.approvalType).toBe('gate');
     expect(output.approvalId).toBe(created?.id);
     expect(typeof output.waitUntil).toBe('string');
+  });
+
+  describe('DEVOS-270 gap closure: real ApprovalRequested outbox event', () => {
+    it('writes a real ApprovalRequested envelope when outboxEvents and projects are both supplied', async () => {
+      const run = makeRun();
+      const organisationId = randomUUID() as OrganisationId;
+      const task = makeTask(run, 'gate');
+      const deps = makeDeps(run, undefined, { organisationId, withOutboxEvents: true });
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.publishedEvents).toHaveLength(1);
+      const envelope = deps.publishedEvents[0];
+      expect(envelope).toMatchObject({
+        type: 'ApprovalRequested',
+        aggregateType: 'Approval',
+        aggregateId: deps.createdApprovals[0]?.id,
+        projectId: run.projectId,
+        payload: { workflowRunId: run.id, approvalType: 'gate' },
+      });
+    });
+
+    it('does not write an event when outboxEvents is not supplied (backward compatible)', async () => {
+      const run = makeRun();
+      const organisationId = randomUUID() as OrganisationId;
+      const task = makeTask(run, 'gate');
+      const deps = makeDeps(run, undefined, { organisationId });
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.publishedEvents).toHaveLength(0);
+      expect(deps.createdApprovals).toHaveLength(1);
+    });
+
+    it('does not write an event when projects is not supplied, even with outboxEvents present', async () => {
+      const run = makeRun();
+      const task = makeTask(run, 'gate');
+      const deps = makeDeps(run, undefined, { withOutboxEvents: true });
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.publishedEvents).toHaveLength(0);
+      expect(deps.createdApprovals).toHaveLength(1);
+    });
+
+    it('does not write a second event on a repeat poll of an already-created pending approval', async () => {
+      const run = makeRun();
+      const organisationId = randomUUID() as OrganisationId;
+      const approvalId = randomUUID() as Approval['id'];
+      const pending: Approval = {
+        id: approvalId,
+        projectId: run.projectId,
+        workflowRunId: run.id,
+        approvalType: 'gate',
+        status: 'PENDING',
+        requestedBy: 'devos-worker',
+        evidenceReference: { artifactVersionIds: [], scopeHash: 'hash' },
+        requestedAt: now,
+        requiredApprovers: 1,
+        enforceSeparationOfDuties: false,
+      };
+      const task = makeTask(run, 'gate');
+      const deps = makeDeps(run, undefined, {
+        approvals: [pending],
+        organisationId,
+        withOutboxEvents: true,
+      });
+
+      await runApprovalTask(deps, task);
+
+      expect(deps.publishedEvents).toHaveLength(0);
+    });
   });
 
   it('namespaces approvalType with the node key when config.approvalType is set', async () => {

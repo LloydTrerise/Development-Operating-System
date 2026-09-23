@@ -264,6 +264,17 @@ export interface KnowledgeReferencesTable {
   created_at: string;
 }
 
+export interface NotificationsTable {
+  id: string;
+  recipient_principal_id: string;
+  type: string;
+  reference_type: string;
+  reference_id: string;
+  read: boolean;
+  created_at: string;
+  read_at: string | null;
+}
+
 export interface PoliciesTable {
   id: string;
   organisation_id: string;
@@ -371,6 +382,7 @@ export interface Database {
   audit_records: AuditRecordsTable;
   knowledge_sources: KnowledgeSourcesTable;
   knowledge_references: KnowledgeReferencesTable;
+  notifications: NotificationsTable;
   policies: PoliciesTable;
   approvals: ApprovalsTable;
   approval_decisions: ApprovalDecisionsTable;

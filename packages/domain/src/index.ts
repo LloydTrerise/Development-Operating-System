@@ -18,6 +18,7 @@ export * from './events/outbox-event.js';
 export * from './integrations/integration.js';
 export * from './knowledge/knowledge-reference.js';
 export * from './knowledge/knowledge-source.js';
+export * from './notifications/notification.js';
 export * from './organisations/organisation.js';
 export * from './policy/policy.js';
 export * from './project-types/project-type-agent.js';

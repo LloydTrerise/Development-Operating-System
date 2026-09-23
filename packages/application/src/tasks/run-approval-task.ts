@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { OrganisationId, ToolCapabilityRiskClass } from '@devos/contracts';
+import type { EventEnvelope, OrganisationId, ToolCapabilityRiskClass } from '@devos/contracts';
 import type {
   Approval,
   ApprovalRepository,
   ArtifactVersionRepository,
+  OutboxEventRepository,
   PolicyRepository,
   ProjectRepository,
   WorkflowRun,
@@ -42,6 +43,19 @@ export interface ApprovalTaskHandlerDeps {
    * optional-dependency pattern.
    */
   artifacts?: ArtifactEvidenceReader;
+  /**
+   * DEVOS-270 (Sprint 42 gap closure): a real, disclosed, pre-existing gap
+   * found while proving Sprint 42's own notification feature end-to-end —
+   * unlike the two legacy whole-run approval gates
+   * (`packages/database/src/repositories/task-queue.ts`), this node-scoped
+   * `APPROVAL` handler never wrote an `ApprovalRequested` outbox event at
+   * all, so DEVOS-268's real notification drain loop could never fire for
+   * it. Optional, mirroring `projects`/`policies`/`artifacts`'s own
+   * established optional-dependency convention on this same interface — a
+   * caller that omits it (or omits `projects`, needed to resolve the
+   * organisation id) gets exactly the prior, unchanged behavior.
+   */
+  outboxEvents?: OutboxEventRepository;
 }
 
 interface ApprovalNodeConfig {
@@ -85,8 +99,16 @@ async function resolvePolicyTieredRequirements(
   organisationId: OrganisationId,
   approvalType: string,
   riskClass: ToolCapabilityRiskClass | undefined,
-): Promise<{ requiredApprovers: number; enforceSeparationOfDuties: boolean; requiredRejections: number }> {
-  const defaults = { requiredApprovers: 1, enforceSeparationOfDuties: false, requiredRejections: 1 };
+): Promise<{
+  requiredApprovers: number;
+  enforceSeparationOfDuties: boolean;
+  requiredRejections: number;
+}> {
+  const defaults = {
+    requiredApprovers: 1,
+    enforceSeparationOfDuties: false,
+    requiredRejections: 1,
+  };
   if (!riskClass || !deps.policies) return defaults;
 
   const policies = await deps.policies.listForOrganisation(organisationId);
@@ -284,15 +306,19 @@ export async function runApprovalTask(
     // resolved from `run.projectId` directly so it works whether or not
     // `deps.projects` is supplied.
     const project = deps.projects ? await deps.projects.getById(run.projectId) : null;
-    const { requiredApprovers, enforceSeparationOfDuties, requiredRejections, reliabilityEvidence } =
-      await resolveApprovalRequirements(
-        deps,
-        project?.organisationId,
-        run.projectId,
-        approvalType,
-        config?.riskClass,
-        config?.reliabilityReduction,
-      );
+    const {
+      requiredApprovers,
+      enforceSeparationOfDuties,
+      requiredRejections,
+      reliabilityEvidence,
+    } = await resolveApprovalRequirements(
+      deps,
+      project?.organisationId,
+      run.projectId,
+      approvalType,
+      config?.riskClass,
+      config?.reliabilityReduction,
+    );
     const created: Approval = {
       id: randomUUID() as Approval['id'],
       projectId: run.projectId,
@@ -317,6 +343,27 @@ export async function runApprovalTask(
       requiredRejections,
     };
     await deps.approvals.create(created);
+
+    // DEVOS-270 gap closure: mirrors the legacy whole-run gates' own
+    // `ApprovalRequested` envelope shape exactly (`aggregateType: 'Approval'`,
+    // `payload: { workflowRunId, approvalType }`) so a notification looks
+    // identical regardless of which approval mechanism produced it. A
+    // no-op, not an error, when either dependency is unavailable — matches
+    // this handler's own established optional-dependency style throughout.
+    if (deps.outboxEvents && project) {
+      const envelope: EventEnvelope = {
+        id: randomUUID() as EventEnvelope['id'],
+        type: 'ApprovalRequested',
+        version: 1,
+        aggregateType: 'Approval',
+        aggregateId: created.id,
+        projectId: run.projectId,
+        correlationId: randomUUID(),
+        occurredAt: now,
+        payload: { workflowRunId: run.id, approvalType },
+      };
+      await deps.outboxEvents.create(project.organisationId, envelope);
+    }
 
     const waitUntil = new Date(Date.now() + pollIntervalSeconds * 1000).toISOString();
     return { approvalId: created.id, waitUntil };

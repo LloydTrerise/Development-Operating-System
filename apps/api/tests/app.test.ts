@@ -12,6 +12,7 @@ import type {
   CreateProjectWithClones,
   IntegrationUseCaseDeps,
   KnowledgeUseCaseDeps,
+  NotificationUseCaseDeps,
   OrganisationUseCaseDeps,
   PolicyUseCaseDeps,
   ProjectTypeUseCaseDeps,
@@ -51,6 +52,8 @@ import {
   type ListWorkflowRunsForDefinition,
   type Membership,
   type MembershipRepository,
+  type Notification,
+  type NotificationRepository,
   type Organisation,
   type OrganisationRepository,
   type Policy,
@@ -612,6 +615,30 @@ function createInMemorySearchDeps(
     workflowDefinitions: workflowDeps.workflowDefinitions,
     agents: agentDeps.agents,
   };
+}
+
+/** DEVOS-269: a simple array-backed fake — no route in this sprint creates a
+ * notification (that's DEVOS-268's own worker-side materialization loop,
+ * out of this route test's scope), so tests seed `store` directly. */
+function createInMemoryNotificationDeps(): NotificationUseCaseDeps & {
+  store: Notification[];
+} {
+  const store: Notification[] = [];
+  const notifications: NotificationRepository = {
+    create: async (notification) => {
+      store.push(notification);
+    },
+    getById: async (id) => store.find((n) => n.id === id) ?? null,
+    listForPrincipal: async (principalId) =>
+      store.filter((n) => n.recipientPrincipalId === principalId),
+    markRead: async (id, readAt) => {
+      const existing = store.find((n) => n.id === id);
+      if (!existing) return;
+      existing.read = true;
+      existing.readAt = readAt;
+    },
+  };
+  return { notifications, store };
 }
 
 /**
@@ -3761,6 +3788,107 @@ describe('cross-entity search route (DEVOS-262)', () => {
     const project = (await projectResponse.json()).data;
 
     const response = await authed(`/api/v1/projects/${project.id}/search?q=dashboard`, 'mallory');
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('notification routes (DEVOS-269)', () => {
+  let server: Server;
+  let baseUrl: string;
+  let notificationDeps: ReturnType<typeof createInMemoryNotificationDeps>;
+
+  beforeAll(async () => {
+    notificationDeps = createInMemoryNotificationDeps();
+    const started = await startServer({ notificationDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it("lists only the requesting principal's own notifications", async () => {
+    const now = new Date().toISOString();
+    notificationDeps.store.push(
+      {
+        id: randomUUID() as Notification['id'],
+        recipientPrincipalId: 'alice',
+        type: 'ApprovalRequested',
+        referenceType: 'Approval',
+        referenceId: randomUUID(),
+        read: false,
+        createdAt: now,
+      },
+      {
+        id: randomUUID() as Notification['id'],
+        recipientPrincipalId: 'bob',
+        type: 'WorkflowRunFailed',
+        referenceType: 'WorkflowRun',
+        referenceId: randomUUID(),
+        read: false,
+        createdAt: now,
+      },
+    );
+
+    const response = await authed('/api/v1/notifications', 'alice');
+    expect(response.status).toBe(200);
+    const body = (await response.json()).data;
+    expect(body).toHaveLength(1);
+    expect(body[0].recipientPrincipalId).toBe('alice');
+    expect(body[0].read).toBe(false);
+  });
+
+  it('round-trips PATCH .../read for the real recipient', async () => {
+    const notificationId = randomUUID() as Notification['id'];
+    notificationDeps.store.push({
+      id: notificationId,
+      recipientPrincipalId: 'carol',
+      type: 'ApprovalRequested',
+      referenceType: 'Approval',
+      referenceId: randomUUID(),
+      read: false,
+      createdAt: new Date().toISOString(),
+    });
+
+    const response = await authed(`/api/v1/notifications/${notificationId}/read`, 'carol', {
+      method: 'PATCH',
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()).data;
+    expect(body.read).toBe(true);
+    expect(body.readAt).toEqual(expect.any(String));
+  });
+
+  it('404s a PATCH .../read from a principal who is not the recipient', async () => {
+    const notificationId = randomUUID() as Notification['id'];
+    notificationDeps.store.push({
+      id: notificationId,
+      recipientPrincipalId: 'dave',
+      type: 'ApprovalRequested',
+      referenceType: 'Approval',
+      referenceId: randomUUID(),
+      read: false,
+      createdAt: new Date().toISOString(),
+    });
+
+    const response = await authed(`/api/v1/notifications/${notificationId}/read`, 'mallory', {
+      method: 'PATCH',
+    });
+    expect(response.status).toBe(404);
+  });
+
+  it('404s a PATCH .../read for a notification id that does not exist', async () => {
+    const response = await authed(`/api/v1/notifications/${randomUUID()}/read`, 'alice', {
+      method: 'PATCH',
+    });
     expect(response.status).toBe(404);
   });
 });
