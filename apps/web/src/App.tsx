@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import {
   AppBar,
@@ -10,6 +10,7 @@ import {
   IconButton,
   List,
   ListItemButton,
+  ListItemIcon,
   ListItemText,
   ListSubheader,
   MenuItem,
@@ -17,8 +18,26 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import AltRouteIcon from '@mui/icons-material/AltRoute';
+import CableIcon from '@mui/icons-material/Cable';
+import CategoryIcon from '@mui/icons-material/Category';
+import ChecklistIcon from '@mui/icons-material/Checklist';
+import CorporateFareIcon from '@mui/icons-material/CorporateFare';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
+import DescriptionIcon from '@mui/icons-material/Description';
+import FolderIcon from '@mui/icons-material/Folder';
+import GppGoodIcon from '@mui/icons-material/GppGood';
+import HomeIcon from '@mui/icons-material/Home';
+import InsightsIcon from '@mui/icons-material/Insights';
 import LightModeIcon from '@mui/icons-material/LightMode';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
+import PaidIcon from '@mui/icons-material/Paid';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import StorefrontIcon from '@mui/icons-material/Storefront';
+import TimelineIcon from '@mui/icons-material/Timeline';
+import VerifiedIcon from '@mui/icons-material/Verified';
+import type { SvgIconProps } from '@mui/material/SvgIcon';
 import { getHealth } from './api-client.js';
 import { AgentDetailPage } from './features/agents/AgentDetailPage.js';
 import { AgentMarketplacePage } from './features/agents/AgentMarketplacePage.js';
@@ -71,46 +90,55 @@ const DRAWER_WIDTH = 220;
 const NAV_GROUPS = [
   {
     label: 'Overview',
-    items: [{ to: '/', label: 'Home' }],
+    items: [{ to: '/', label: 'Home', icon: HomeIcon }],
   },
   {
     label: 'Work',
     items: [
-      { to: '/work-items', label: 'Work Items' },
-      { to: '/runs', label: 'Runs' },
+      { to: '/work-items', label: 'Work Items', icon: ChecklistIcon },
+      { to: '/runs', label: 'Runs', icon: TimelineIcon },
     ],
   },
   {
     label: 'Workflows',
     items: [
-      { to: '/workflows', label: 'Workflows' },
-      { to: '/workflow-library', label: 'Workflow Library' },
+      { to: '/workflows', label: 'Workflows', icon: AccountTreeIcon },
+      { to: '/workflow-library', label: 'Workflow Library', icon: AltRouteIcon },
     ],
   },
   {
     label: 'Decisions',
     items: [
-      { to: '/approvals', label: 'Approvals' },
-      { to: '/governance', label: 'Governance' },
+      { to: '/approvals', label: 'Approvals', icon: VerifiedIcon },
+      { to: '/governance', label: 'Governance', icon: GppGoodIcon },
     ],
   },
   {
     label: 'Platform',
     items: [
-      { to: '/organisations', label: 'Organisations' },
-      { to: '/projects', label: 'Projects' },
-      { to: '/project-types', label: 'Project Types' },
-      { to: '/agents', label: 'Agents' },
-      { to: '/agents/marketplace', label: 'Agent Marketplace' },
-      { to: '/knowledge', label: 'Knowledge' },
-      { to: '/knowledge/marketplace', label: 'Knowledge Marketplace' },
-      { to: '/cost', label: 'Cost' },
-      { to: '/engineering-intelligence', label: 'Engineering Intelligence' },
+      { to: '/organisations', label: 'Organisations', icon: CorporateFareIcon },
+      { to: '/projects', label: 'Projects', icon: FolderIcon },
+      { to: '/project-types', label: 'Project Types', icon: CategoryIcon },
+      { to: '/agents', label: 'Agents', icon: SmartToyIcon },
+      { to: '/agents/marketplace', label: 'Agent Marketplace', icon: StorefrontIcon },
+      { to: '/knowledge', label: 'Knowledge', icon: MenuBookIcon },
+      { to: '/knowledge/marketplace', label: 'Knowledge Marketplace', icon: StorefrontIcon },
+      { to: '/cost', label: 'Cost', icon: PaidIcon },
+      { to: '/engineering-intelligence', label: 'Engineering Intelligence', icon: InsightsIcon },
     ],
   },
-  { label: 'Artifacts', items: [{ to: '/artifacts', label: 'Artifacts' }] },
-  { label: 'Integrations', items: [{ to: '/integrations', label: 'Integrations' }] },
-] as const;
+  {
+    label: 'Artifacts',
+    items: [{ to: '/artifacts', label: 'Artifacts', icon: DescriptionIcon }],
+  },
+  {
+    label: 'Integrations',
+    items: [{ to: '/integrations', label: 'Integrations', icon: CableIcon }],
+  },
+] as const satisfies {
+  label: string;
+  items: { to: string; label: string; icon: ComponentType<SvgIconProps> }[];
+}[];
 
 function OrganisationSelector() {
   const { organisations, selectedOrganisationId, selectOrganisation, loading, error } =
@@ -356,7 +384,7 @@ export function App() {
             <li key={group.label}>
               <ul style={{ padding: 0 }}>
                 <ListSubheader component="div">{group.label}</ListSubheader>
-                {group.items.map(({ to, label }) => (
+                {group.items.map(({ to, label, icon: Icon }) => (
                   <ListItemButton
                     key={to}
                     component={NavLink}
@@ -364,6 +392,9 @@ export function App() {
                     end={to === '/'}
                     sx={{ '&.active': { bgcolor: 'action.selected' } }}
                   >
+                    <ListItemIcon sx={{ minWidth: 36 }}>
+                      <Icon fontSize="small" />
+                    </ListItemIcon>
                     <ListItemText primary={label} />
                   </ListItemButton>
                 ))}
