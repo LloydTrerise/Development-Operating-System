@@ -30,7 +30,17 @@ import type { ArtifactStorage } from '@devos/storage';
 import type { CreateWorkflowDraft, StartWorkflowRun } from '../workflows/deps.js';
 
 export type PublishArtifact = (artifact: Artifact, version: ArtifactVersion) => Promise<void>;
-export type RecordContextManifest = (manifest: ContextManifest) => Promise<void>;
+/**
+ * DEVOS-297 (Sprint 48): `actorId` is new — `runAgentTask` (this type's only
+ * production caller) always passes the resolved agent's own real
+ * `AGENT_PROFILE` principal id. Mirrors the identical widening in
+ * `@devos/database`'s own `RecordContextManifest` type
+ * (`packages/database/src/repositories/record-context-manifest.ts`) —
+ * declared separately here per this package's existing boundary (no
+ * `@devos/database` dependency), the same reason `PublishArtifact` above is
+ * already its own separate declaration.
+ */
+export type RecordContextManifest = (manifest: ContextManifest, actorId: string) => Promise<void>;
 
 export interface TaskHandlerDeps {
   workflowRuns: WorkflowRunRepository;

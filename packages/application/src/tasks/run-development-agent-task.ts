@@ -24,12 +24,17 @@ import { pendingApprovalWaitUntil } from './tool-invocation-outcome.js';
 
 const CONTENT_TYPE = 'application/json';
 
-// Matches publish-artifact.ts's SYSTEM_ACTOR_IDS and
-// record-context-manifest.ts's SYSTEM_ACTOR_ID — the agent runtime acting
-// without a human principal. Unlike those two call sites, invokeTool's
-// "Project Scope" step actually authorizes against this principal, so a
-// real membership row for it must exist (seeded — see
-// SEED_AGENT_RUNTIME_MEMBERSHIP_ID).
+// DEVOS-297 (Sprint 48): still used for every invokeTool call below,
+// deliberately not the development agent's own principal id — invokeTool's
+// "Project Scope" step actually authorizes against this principal, and only
+// this system actor has the real seeded project membership that
+// authorization needs (SEED_AGENT_RUNTIME_MEMBERSHIP_ID); granting every
+// individual agent principal its own project membership is a real,
+// disclosed, out-of-scope expansion this task does not make (see
+// specs/sprints/sprint-48/DEVOS-297.md). The artifact this task publishes
+// below is attributed to the development agent's own principal id instead
+// (`agentId`, resolved by runAgentTask) — that is the real, durable
+// per-agent attribution this task adds.
 const SYSTEM_ACTOR_ID = 'devos-agent-runtime';
 
 interface GitHubContext {
@@ -237,7 +242,11 @@ export async function runDevelopmentAgentTask(
     throw new Error(`Git integration ${gitIntegration.id} has no configured "repositoryPath".`);
   }
 
-  const githubContext = await resolvePullRequestProviderContext(deps, gitIntegration, repositoryPath);
+  const githubContext = await resolvePullRequestProviderContext(
+    deps,
+    gitIntegration,
+    repositoryPath,
+  );
   const workspace = await createWorkspace(task.id, githubContext?.cloneUrl ?? repositoryPath);
 
   try {
@@ -267,6 +276,7 @@ export async function runDevelopmentAgentTask(
     const {
       agentExecutionId,
       agentVersionId: agentVersionIdUnknown,
+      agentId: agentIdUnknown,
       ...modelOutput
     } = await runAgentTask(deps, task, {
       input: {
@@ -295,6 +305,7 @@ export async function runDevelopmentAgentTask(
       ],
     });
     const agentVersionId = agentVersionIdUnknown as AgentVersionId;
+    const agentId = agentIdUnknown as string;
 
     const proposedFiles = Array.isArray(modelOutput.files)
       ? (modelOutput.files as { path: string; content: string }[])
@@ -436,7 +447,7 @@ export async function runDevelopmentAgentTask(
       status: 'GENERATED',
       workflowRunId: run.id,
       workflowTaskId: task.id,
-      createdBy: SYSTEM_ACTOR_ID,
+      createdBy: agentId,
       createdAt: now,
       updatedAt: now,
     };
@@ -449,7 +460,7 @@ export async function runDevelopmentAgentTask(
       contentUri: stored.uri,
       contentHash: stored.hash,
       metadata: content,
-      createdBy: SYSTEM_ACTOR_ID,
+      createdBy: agentId,
       createdAt: now,
     };
 

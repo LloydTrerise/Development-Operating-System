@@ -5,11 +5,6 @@ import type { AgentArtifactConsumerTaskHandlerDeps } from './deps.js';
 
 const CONTENT_TYPE = 'application/json';
 
-// Matches publish-artifact.ts's SYSTEM_ACTOR_IDS and
-// record-context-manifest.ts's SYSTEM_ACTOR_ID — the agent runtime acting
-// without a human principal.
-const SYSTEM_ACTOR_ID = 'devos-agent-runtime';
-
 /**
  * The third planning-path agent (DEVOS-033) — reads the PRD artifact
  * produced earlier in the same run (DEVOS-032) and produces a
@@ -50,9 +45,15 @@ export async function runTechnicalDesignAgentTask(
   // DEVOS-109: no `sources` entry needed here anymore — runAgentTask's own
   // buildContext() call already records this artifact (and every other one
   // this run has produced so far) in the manifest automatically.
-  const { agentExecutionId, agentVersionId, ...modelOutput } = await runAgentTask(deps, task, {
+  const {
+    agentExecutionId,
+    agentVersionId,
+    agentId: agentIdUnknown,
+    ...modelOutput
+  } = await runAgentTask(deps, task, {
     input: { prd: latestPrdVersion.metadata ?? {} },
   });
+  const agentId = agentIdUnknown as string;
 
   const now = new Date().toISOString();
   const content = {
@@ -77,7 +78,7 @@ export async function runTechnicalDesignAgentTask(
     status: 'GENERATED',
     workflowRunId: run.id,
     workflowTaskId: task.id,
-    createdBy: SYSTEM_ACTOR_ID,
+    createdBy: agentId,
     createdAt: now,
     updatedAt: now,
   };
@@ -90,7 +91,7 @@ export async function runTechnicalDesignAgentTask(
     contentUri: stored.uri,
     contentHash: stored.hash,
     metadata: content,
-    createdBy: SYSTEM_ACTOR_ID,
+    createdBy: agentId,
     createdAt: now,
   };
 

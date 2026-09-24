@@ -464,6 +464,52 @@ async function main(): Promise<void> {
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
 
+  // DEVOS-295/296 (Sprint 48): a real PRINCIPAL/AGENT_PROFILE row for each
+  // of the six seeded agents above — without this, a genuinely fresh
+  // migrate+seed database would leave them without one, since migration
+  // 0050's own backfill only sees agents that already existed at migration
+  // time and this script inserts agent/agent_versions rows directly
+  // (bypassing createAgentDraftCreator's real, ongoing get-or-create),
+  // mirroring the exact same class of gap DEVOS-284/290 already found and
+  // fixed here for principals/organisation ownership.
+  const seedAgentIds = [
+    SEED_DISCOVERY_AGENT_ID,
+    SEED_REQUIREMENTS_AGENT_ID,
+    SEED_TECHNICAL_DESIGN_AGENT_ID,
+    SEED_PLANNING_AGENT_ID,
+    SEED_DEVELOPMENT_AGENT_ID,
+    SEED_REVIEW_AGENT_ID,
+  ];
+  await db
+    .insertInto('principals')
+    .values(
+      seedAgentIds.map((id) => ({
+        id,
+        principal_type: 'AGENT',
+        created_at: now,
+        updated_at: now,
+      })),
+    )
+    .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
+  await db
+    .insertInto('agent_profiles')
+    .values(
+      seedAgentIds.map((id) => ({
+        agent_id: id,
+        principal_id: id,
+        // Every seeded agent_versions row above uses created_by:
+        // SEED_PRINCIPAL_ID, and SEED_PRINCIPAL_ID's own HUMAN principal row
+        // is inserted earlier in this same script — resolves for real, not
+        // fabricated.
+        accountable_owner_id: SEED_PRINCIPAL_ID,
+        created_at: now,
+        updated_at: now,
+      })),
+    )
+    .onConflict((oc) => oc.column('agent_id').doNothing())
+    .execute();
+
   await db
     .insertInto('workflow_definitions')
     .values({

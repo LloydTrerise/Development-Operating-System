@@ -6,9 +6,18 @@ import { withTransaction } from './base.js';
 import { createContextManifestRepository } from './context-manifests.js';
 import { getOrganisationIdForProject } from './outbox-events.js';
 
-export type RecordContextManifest = (manifest: ContextManifest) => Promise<void>;
-
-const SYSTEM_ACTOR_ID = 'devos-agent-runtime';
+/**
+ * DEVOS-297 (Sprint 48): `actorId` is new — `runAgentTask` (this function's
+ * only production caller) always passes the resolved agent's own real
+ * `AGENT_PROFILE` principal id (`Agent.id`), since a context manifest is
+ * only ever recorded as part of one specific agent's own execution. A
+ * function type widening a required parameter is a real, deliberate
+ * behavior change here (unlike an optional-and-additive widening) — TypeScript's
+ * own "fewer parameters is assignable to more parameters" leniency still
+ * lets every existing `async (manifest) => {...}` test fake type-check
+ * unmodified, since JS ignores an extra argument a fake never reads.
+ */
+export type RecordContextManifest = (manifest: ContextManifest, actorId: string) => Promise<void>;
 
 /**
  * Writes the manifest row and an audit record in one transaction — the
@@ -18,7 +27,7 @@ const SYSTEM_ACTOR_ID = 'devos-agent-runtime';
  * (publish-artifact.ts) already established for artifact creation.
  */
 export function createContextManifestRecorder(db: Kysely<Database>): RecordContextManifest {
-  return async (manifest) => {
+  return async (manifest, actorId) => {
     await withTransaction(db, async (trx) => {
       await createContextManifestRepository(trx).create(manifest);
 
@@ -26,8 +35,8 @@ export function createContextManifestRecorder(db: Kysely<Database>): RecordConte
       await writeAuditRecord(trx, {
         organisationId,
         projectId: manifest.projectId,
-        actorType: 'SYSTEM',
-        actorId: SYSTEM_ACTOR_ID,
+        actorType: 'AGENT',
+        actorId,
         action: 'context_manifest.created',
         targetType: 'ContextManifest',
         targetId: manifest.id,

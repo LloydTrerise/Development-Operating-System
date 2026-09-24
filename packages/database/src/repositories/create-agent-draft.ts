@@ -1,6 +1,7 @@
 import type { Agent, AgentVersion } from '@devos/domain';
 import type { Kysely } from 'kysely';
 import type { Database } from '../database.js';
+import { ensureAgentPrincipal } from './agent-profiles.js';
 import { createAgentRepository } from './agents.js';
 import { createAgentVersionRepository } from './agent-versions.js';
 import { withTransaction } from './base.js';
@@ -12,6 +13,9 @@ export function createAgentDraftCreator(db: Kysely<Database>): CreateAgentDraft 
     await withTransaction(db, async (trx) => {
       await createAgentRepository(trx).create(agent);
       await createAgentVersionRepository(trx).create(version);
+      // DEVOS-295/296: the real chokepoint both createAgent (a brand-new
+      // agent) and installAgentVersion (a cross-project clone) share.
+      await ensureAgentPrincipal(trx, agent, version.createdBy);
     });
   };
 }

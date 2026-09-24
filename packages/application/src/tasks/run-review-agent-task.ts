@@ -7,8 +7,14 @@ import { startRunForVersion } from '../workflows/run-creation.js';
 
 const CONTENT_TYPE = 'application/json';
 
-// Matches every other stage's identical constant — the agent runtime
-// acting without a human principal.
+// DEVOS-297 (Sprint 48): still used for the automatic rework-run trigger
+// below — starting a new run is an orchestration decision this task's own
+// platform code makes in response to a CHANGES_REQUIRED outcome, not the
+// review agent's own produced output, so it stays attributed to the
+// generic system actor (see run-development-agent-task.ts's identical
+// disclosed boundary for invokeTool). The REVIEW_EVIDENCE artifact this
+// task publishes below is attributed to the review agent's own principal
+// id instead (`agentId`, resolved by runAgentTask).
 const SYSTEM_ACTOR_ID = 'devos-agent-runtime';
 
 /**
@@ -134,7 +140,12 @@ export async function runReviewAgentTask(
     ...knowledgeSources.map((source) => ({ type: source.type, ref: source.ref })),
   ];
 
-  const { agentExecutionId, agentVersionId, ...modelOutput } = await runAgentTask(deps, task, {
+  const {
+    agentExecutionId,
+    agentVersionId,
+    agentId: agentIdUnknown,
+    ...modelOutput
+  } = await runAgentTask(deps, task, {
     input: {
       prd: prdVersion?.metadata ?? null,
       technicalDesign: technicalDesignVersion?.metadata ?? null,
@@ -145,6 +156,7 @@ export async function runReviewAgentTask(
     },
     sources,
   });
+  const agentId = agentIdUnknown as string;
 
   const decision = modelOutput.decision === 'PASS' ? 'PASS' : 'CHANGES_REQUIRED';
   const findings = Array.isArray(modelOutput.findings) ? modelOutput.findings : [];
@@ -174,7 +186,7 @@ export async function runReviewAgentTask(
     status: 'GENERATED',
     workflowRunId: run.id,
     workflowTaskId: task.id,
-    createdBy: SYSTEM_ACTOR_ID,
+    createdBy: agentId,
     createdAt: now,
     updatedAt: now,
   };
@@ -187,7 +199,7 @@ export async function runReviewAgentTask(
     contentUri: stored.uri,
     contentHash: stored.hash,
     metadata: content,
-    createdBy: SYSTEM_ACTOR_ID,
+    createdBy: agentId,
     createdAt: now,
   };
 

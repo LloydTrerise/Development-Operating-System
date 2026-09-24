@@ -310,7 +310,9 @@ describe('runTechnicalDesignAgentTask', () => {
       status: 'GENERATED',
       workflowRunId: scenario.run.id,
       workflowTaskId: scenario.task.id,
-      createdBy: 'devos-agent-runtime',
+      // DEVOS-297 (Sprint 48): a real agent-run action is now attributed to
+      // the agent's own principal id, not the generic system actor.
+      createdBy: scenario.agent.id,
     });
     expect(publishedVersion?.metadata).toMatchObject({
       derivedFromArtifactId: scenario.prdArtifact.id,

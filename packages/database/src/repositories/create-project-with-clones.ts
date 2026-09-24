@@ -8,6 +8,7 @@ import type {
 } from '@devos/domain';
 import type { Kysely } from 'kysely';
 import type { Database } from '../database.js';
+import { ensureAgentPrincipal } from './agent-profiles.js';
 import { createAgentRepository } from './agents.js';
 import { createAgentVersionRepository } from './agent-versions.js';
 import { withTransaction } from './base.js';
@@ -57,6 +58,9 @@ export function createProjectWithClonesCreator(db: Kysely<Database>): CreateProj
       for (const { agent, version } of agents) {
         await agentRepository.create(agent);
         await agentVersionRepository.create(version);
+        // DEVOS-295/296: the project-template-clone path's own real agent
+        // creation, mirroring create-agent-draft.ts's identical call.
+        await ensureAgentPrincipal(trx, agent, version.createdBy);
       }
     });
   };

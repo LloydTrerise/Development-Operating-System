@@ -174,8 +174,13 @@ function buildScenario() {
   };
 
   const contextManifests: ContextManifest[] = [];
-  const recordContextManifest = async (manifest: ContextManifest): Promise<void> => {
+  const contextManifestActorIds: string[] = [];
+  const recordContextManifest = async (
+    manifest: ContextManifest,
+    actorId: string,
+  ): Promise<void> => {
     contextManifests.push(manifest);
+    contextManifestActorIds.push(actorId);
   };
 
   const project: Project = {
@@ -232,6 +237,7 @@ function buildScenario() {
     agentExecutions,
     executions,
     contextManifests,
+    contextManifestActorIds,
     recordContextManifest,
     projects,
     knowledgeSources,
@@ -410,7 +416,17 @@ describe('runAgentTask', () => {
 
     const output = await runAgentTask(deps, scenario.task);
 
-    expect(output).toMatchObject({ status: 'SUCCEEDED', summary: 'A validated PRD.' });
+    expect(output).toMatchObject({
+      status: 'SUCCEEDED',
+      summary: 'A validated PRD.',
+      // DEVOS-297 (Sprint 48): the resolved agent's own real principal id
+      // (decision §9.4, == agent.id) — every concrete agent-task handler
+      // destructures this out to attribute its own published artifact.
+      agentId: scenario.agent.id,
+    });
+    // DEVOS-297: recordContextManifest's own audit trail is attributed to
+    // this same agent principal id, not the generic system actor.
+    expect(scenario.contextManifestActorIds).toEqual([scenario.agent.id]);
     expect(scenario.executions).toHaveLength(1);
     expect(scenario.executions[0]).toMatchObject({
       status: 'SUCCEEDED',

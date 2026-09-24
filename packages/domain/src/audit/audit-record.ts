@@ -1,6 +1,13 @@
 import type { AuditId, OrganisationId, ProjectId } from '@devos/contracts';
 
-export type AuditActorType = 'USER' | 'SYSTEM';
+/**
+ * DEVOS-297 (Sprint 48): `'AGENT'` is new — a real agent-run action
+ * attributed to its own `AGENT_PROFILE` principal, distinct from a human
+ * (`'USER'`) and from the undifferentiated platform system actor
+ * (`'SYSTEM'`, e.g. `devos-agent-runtime`'s own budget-alert/orchestration
+ * writes, which stay `'SYSTEM'` — they are not any one agent's own action).
+ */
+export type AuditActorType = 'USER' | 'SYSTEM' | 'AGENT';
 export type AuditOutcome = 'SUCCESS' | 'FAILURE';
 
 export interface AuditRecord {

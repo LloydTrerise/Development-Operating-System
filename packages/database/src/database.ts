@@ -108,6 +108,19 @@ export interface AgentVersionsTable {
   shared_across_organisation: boolean;
 }
 
+/** DEVOS-295 (migration `0050`): `agent_id`/`principal_id` always hold the
+ * exact same string (decision §9.4) — kept as two columns so `agent_id`
+ * can carry a real `uuid` FK to `agents.id` while `principal_id` carries a
+ * real `text` FK to `principals.id`, matching each target's own column
+ * type. */
+export interface AgentProfilesTable {
+  agent_id: string;
+  principal_id: string;
+  accountable_owner_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AgentExecutionsTable {
   id: string;
   workflow_task_id: string;
@@ -425,6 +438,7 @@ export interface Database {
   work_items: WorkItemsTable;
   agents: AgentsTable;
   agent_versions: AgentVersionsTable;
+  agent_profiles: AgentProfilesTable;
   agent_executions: AgentExecutionsTable;
   context_manifests: ContextManifestsTable;
   workflow_definitions: WorkflowDefinitionsTable;

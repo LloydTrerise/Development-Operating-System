@@ -341,10 +341,7 @@ export async function runAgentTask(
     );
     await Promise.all(
       knowledgeSourceRefs.map((source) => {
-        const knowledgeSourceId = source.ref.replace(
-          'knowledge-source:',
-          '',
-        ) as KnowledgeSourceId;
+        const knowledgeSourceId = source.ref.replace('knowledge-source:', '') as KnowledgeSourceId;
         const reference: KnowledgeReference = {
           id: randomUUID() as KnowledgeReferenceId,
           projectId: run.projectId,
@@ -379,7 +376,12 @@ export async function runAgentTask(
     policySnapshot: { policyVersion: 'none' },
     createdAt: now,
   };
-  await deps.recordContextManifest(manifest);
+  // DEVOS-297: this manifest's own audit record (createContextManifestRecorder,
+  // packages/database/src/repositories/record-context-manifest.ts) is now
+  // attributed to this specific agent's own real AGENT_PROFILE principal id
+  // (== agent.id, decision §9.4), not the generic devos-agent-runtime system
+  // actor — this is the one real chokepoint every agent-task handler shares.
+  await deps.recordContextManifest(manifest, agent.id);
 
   const objective = `Perform the "${version.configuration.role}" role for work item "${workItem.title}".`;
 
@@ -447,6 +449,12 @@ export async function runAgentTask(
     status: 'SUCCEEDED',
     agentExecutionId: execution.id,
     agentVersionId: version.id,
+    // DEVOS-297: the agent's own real AGENT_PROFILE principal id (decision
+    // §9.4, == agent.id) — every one of this function's six concrete-agent
+    // callers destructures this out explicitly (mirroring how they already
+    // destructure agentVersionId out) so it never leaks into a spread
+    // ...modelOutput and ends up stored inside an artifact's own metadata.
+    agentId: agent.id,
     ...invocation.result,
   };
 }

@@ -5,11 +5,6 @@ import type { AgentArtifactTaskHandlerDeps } from './deps.js';
 
 const CONTENT_TYPE = 'application/json';
 
-// Matches publish-artifact.ts's SYSTEM_ACTOR_IDS and
-// record-context-manifest.ts's SYSTEM_ACTOR_ID — the agent runtime acting
-// without a human principal.
-const SYSTEM_ACTOR_ID = 'devos-agent-runtime';
-
 /**
  * The first concrete agent (DEVOS-031) — functionally replaces DEVOS-016's
  * deterministic runDiscoveryTask as the actual task handler, producing a
@@ -31,7 +26,13 @@ export async function runDiscoveryAgentTask(
   const workItem = await deps.workItems.getById(run.workItemId);
   if (!workItem) throw new Error(`Work item ${run.workItemId} not found.`);
 
-  const { agentExecutionId, agentVersionId, ...modelOutput } = await runAgentTask(deps, task);
+  const {
+    agentExecutionId,
+    agentVersionId,
+    agentId: agentIdUnknown,
+    ...modelOutput
+  } = await runAgentTask(deps, task);
+  const agentId = agentIdUnknown as string;
 
   const now = new Date().toISOString();
   const content = {
@@ -57,7 +58,7 @@ export async function runDiscoveryAgentTask(
     status: 'GENERATED',
     workflowRunId: run.id,
     workflowTaskId: task.id,
-    createdBy: SYSTEM_ACTOR_ID,
+    createdBy: agentId,
     createdAt: now,
     updatedAt: now,
   };
@@ -70,7 +71,7 @@ export async function runDiscoveryAgentTask(
     contentUri: stored.uri,
     contentHash: stored.hash,
     metadata: content,
-    createdBy: SYSTEM_ACTOR_ID,
+    createdBy: agentId,
     createdAt: now,
   };
 
