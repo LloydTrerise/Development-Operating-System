@@ -16,8 +16,11 @@ import type {
   ArtifactVersionRepository,
   ContextManifest,
   KnowledgeSourceRepository,
+  OrganisationId,
+  Project,
   ProjectId,
   ProjectRepository,
+  ProjectTypeId,
   WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
@@ -210,9 +213,21 @@ function buildScenario() {
     create: async () => {},
   };
   // DEVOS-109: runAgentTask now calls buildContext(), which needs these.
+  // DEVOS-316 (Sprint 53): also resolved unconditionally now, to supply
+  // AgentInvocationRequest.organisationId — a real, matching Project.
+  const project: Project = {
+    id: projectId,
+    organisationId: randomUUID() as OrganisationId,
+    projectTypeId: randomUUID() as ProjectTypeId,
+    name: 'Test Project',
+    slug: 'test-project',
+    status: 'ACTIVE',
+    createdAt: now,
+    updatedAt: now,
+  };
   const projects: ProjectRepository = {
-    getById: async () => null,
-    listForOrganisation: async () => [],
+    getById: async (id) => (id === project.id ? project : null),
+    listForOrganisation: async () => [project],
     create: async () => {},
     update: async () => {},
   };

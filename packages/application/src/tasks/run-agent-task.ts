@@ -279,6 +279,13 @@ export async function runAgentTask(
   const workItem = await deps.workItems.getById(run.workItemId);
   if (!workItem) throw new Error(`Work item ${run.workItemId} not found.`);
 
+  // DEVOS-316 (Sprint 53): resolved here (not only inside
+  // maybeAlertOnBudgetExceeded's own later, separate lookup) so
+  // organisationId is available before the model adapter is invoked below —
+  // the real value AgentInvocationRequest.organisationId carries.
+  const project = await deps.projects.getById(run.projectId);
+  if (!project) throw new Error(`Project ${run.projectId} not found.`);
+
   const agent = await deps.agents.getByProjectAndKey(run.projectId, agentRef);
   if (!agent) throw new Error(`Agent "${agentRef}" not found in project ${run.projectId}.`);
 
@@ -392,6 +399,7 @@ export async function runAgentTask(
 
   const invocation = await deps.modelAdapter.invoke({
     configuration: version.configuration,
+    organisationId: project.organisationId,
     ...(version.promptReference !== undefined ? { promptReference: version.promptReference } : {}),
     ...(systemInstructions !== undefined ? { systemInstructions } : {}),
     objective,

@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AgentConfiguration } from '@devos/contracts';
+import type { AgentConfiguration, OrganisationId } from '@devos/contracts';
 import type { AgentFixture } from './fixtures/fixture-repository.js';
 import {
   createFilesystemPromptRepository,
@@ -66,6 +66,9 @@ async function invokeWithRateLimitRetry(
  * refreshing is about re-recording real model behavior against the
  * current prompts/schemas, not designing a new scenario every time.
  */
+/** DEVOS-316: this standalone script has no real organisation context — a fixed placeholder, matching WORK_ITEM_TITLE/DESCRIPTION's own representative-scenario convention below. */
+const PLACEHOLDER_ORGANISATION_ID = 'refresh-fixtures-org' as OrganisationId;
+
 const WORK_ITEM_TITLE = 'Add CSV export to the reporting dashboard';
 const WORK_ITEM_DESCRIPTION =
   'Users on the analytics team need to export the current reporting dashboard view as a CSV file for offline analysis. No specific format or column list has been agreed yet.';
@@ -142,6 +145,7 @@ async function main(): Promise<void> {
 
     const invocation = await invokeWithRateLimitRetry(modelAdapter, {
       configuration,
+      organisationId: PLACEHOLDER_ORGANISATION_ID,
       promptReference: stage.promptReference,
       systemInstructions,
       objective,

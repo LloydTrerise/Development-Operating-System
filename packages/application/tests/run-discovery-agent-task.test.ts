@@ -16,8 +16,11 @@ import type {
   ArtifactVersionRepository,
   ContextManifest,
   KnowledgeSourceRepository,
+  OrganisationId,
+  Project,
   ProjectId,
   ProjectRepository,
+  ProjectTypeId,
   WorkflowRun,
   WorkflowRunRepository,
   WorkflowTask,
@@ -173,9 +176,22 @@ function buildScenario() {
 
   // DEVOS-109: runAgentTask now calls buildContext(), which needs these —
   // empty/absent by default, matching this scenario's own minimal scope.
+  // DEVOS-316 (Sprint 53): runAgentTask now also resolves the run's own
+  // project unconditionally (to supply AgentInvocationRequest.organisationId)
+  // — a real, matching Project is required, not just an empty repository.
+  const project: Project = {
+    id: projectId,
+    organisationId: randomUUID() as OrganisationId,
+    projectTypeId: randomUUID() as ProjectTypeId,
+    name: 'Test Project',
+    slug: 'test-project',
+    status: 'ACTIVE',
+    createdAt: now,
+    updatedAt: now,
+  };
   const projects: ProjectRepository = {
-    getById: async () => null,
-    listForOrganisation: async () => [],
+    getById: async (id) => (id === project.id ? project : null),
+    listForOrganisation: async () => [project],
     create: async () => {},
     update: async () => {},
   };

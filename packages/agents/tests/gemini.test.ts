@@ -9,6 +9,7 @@ const REQUEST: AgentInvocationRequest = {
     modelRef: 'gemini-3.6-flash',
     allowedCapabilities: [],
   },
+  organisationId: 'org-1' as AgentInvocationRequest['organisationId'],
   objective: 'Produce a PRD.',
   input: { workItemId: 'wi-1' },
 };

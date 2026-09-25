@@ -4,6 +4,7 @@ import type {
   AgentInvocationResult,
   AgentModelAdapter,
 } from '../model-adapter.js';
+import { buildAgentPrompt, parseJsonResultText } from './shared-prompt.js';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -29,34 +30,6 @@ interface GeminiGenerateContentResponse {
   candidates?: GeminiCandidate[];
   promptFeedback?: { blockReason?: string };
   usageMetadata?: GeminiUsageMetadata;
-}
-
-function buildPrompt(request: AgentInvocationRequest): string {
-  return [
-    // DEVOS-028: resolved prompt text (from the agent version's
-    // promptReference) leads, when present, so it genuinely shapes the
-    // model's behavior rather than being inert metadata.
-    request.systemInstructions,
-    `You are an agent performing the "${request.configuration.role}" role in an automated software engineering pipeline.`,
-    `Objective: ${request.objective}`,
-    `Input (JSON): ${JSON.stringify(request.input)}`,
-    'Respond with a single JSON object containing your result. Do not include any text outside the JSON object.',
-    'If required information is missing or uncertain, include an "uncertainty" array of { "statement": string, "severity": "LOW" | "MEDIUM" | "HIGH" } entries rather than inventing a value.',
-  ]
-    .filter((part): part is string => part !== undefined)
-    .join('\n\n');
-}
-
-function parseResultText(text: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-    return { value: parsed };
-  } catch {
-    return { text };
-  }
 }
 
 /**
@@ -90,7 +63,7 @@ export function createGeminiModelAdapter(options: GeminiAdapterOptions): AgentMo
             'x-goog-api-key': options.apiKey,
           },
           body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: buildPrompt(request) }] }],
+            contents: [{ role: 'user', parts: [{ text: buildAgentPrompt(request) }] }],
             generationConfig: { responseMimeType: 'application/json' },
           }),
         });
@@ -129,7 +102,7 @@ export function createGeminiModelAdapter(options: GeminiAdapterOptions): AgentMo
         };
       }
 
-      const parsed = parseResultText(text);
+      const parsed = parseJsonResultText(text);
       const uncertaintyRaw = parsed.uncertainty;
       const result: Record<string, unknown> = { ...parsed };
       delete result.uncertainty;

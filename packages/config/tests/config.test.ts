@@ -104,6 +104,34 @@ describe('configuration', () => {
     expect(JSON.stringify(result)).not.toContain(secret);
   });
 
+  it('DEVOS-315/316: loads ANTHROPIC_API_KEY/LLM_DEFAULT_PROVIDER as optional agents config when provided', () => {
+    const config = loadConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://localhost/devos',
+      ANTHROPIC_API_KEY: 'test-anthropic-key',
+      LLM_DEFAULT_PROVIDER: 'anthropic',
+    });
+
+    expect(config.agents).toEqual({
+      anthropicApiKey: 'test-anthropic-key',
+      defaultProvider: 'anthropic',
+    });
+  });
+
+  it('DEVOS-315/316: rejects an empty ANTHROPIC_API_KEY/LLM_DEFAULT_PROVIDER without exposing the value', () => {
+    const secret = 'a-leaked-looking-anthropic-key';
+    const result = validateEnvironment({
+      DATABASE_URL: 'postgresql://localhost/devos',
+      ANTHROPIC_API_KEY: '   ',
+      LLM_DEFAULT_PROVIDER: '   ',
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.map((issue) => issue.key)).toContain('ANTHROPIC_API_KEY');
+    expect(result.issues.map((issue) => issue.key)).toContain('LLM_DEFAULT_PROVIDER');
+    expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
   it('loads VAULT_ADDR/VAULT_TOKEN as optional secrets config when provided', () => {
     const config = loadConfig({
       NODE_ENV: 'development',

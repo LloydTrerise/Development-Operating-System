@@ -47,4 +47,16 @@ describe('estimateCostUsd', () => {
     const usage = { promptTokens: 1000, candidatesTokens: 1000, totalTokens: 2000 };
     expect(estimateCostUsd(usage, 'some-unknown-model')).toBeCloseTo(estimateCostUsd(usage), 10);
   });
+
+  it('DEVOS-317: uses real, distinct per-provider rates for claude-sonnet-5/claude-haiku-4-5', () => {
+    const usage = { promptTokens: 1000, candidatesTokens: 1000, totalTokens: 2000 };
+    const sonnetCost = estimateCostUsd(usage, 'claude-sonnet-5');
+    const haikuCost = estimateCostUsd(usage, 'claude-haiku-4-5');
+    expect(sonnetCost).toBeCloseTo(0.002 + 0.01, 10);
+    expect(haikuCost).toBeCloseTo(0.001 + 0.005, 10);
+    expect(sonnetCost).toBeGreaterThan(haikuCost);
+    // Distinct from every existing Gemini rate — providers don't collide.
+    expect(sonnetCost).not.toBeCloseTo(estimateCostUsd(usage, 'gemini-3.6-flash'), 10);
+    expect(sonnetCost).not.toBeCloseTo(estimateCostUsd(usage, 'gemini-3.6-pro'), 10);
+  });
 });

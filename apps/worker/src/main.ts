@@ -19,8 +19,11 @@ import {
   createFilesystemPromptRepository,
   createFilesystemSchemaRepository,
   createFixtureModelAdapter,
-  createGeminiModelAdapter,
+  createResolvingModelAdapter,
+  isLlmProviderKey,
+  LLM_PROVIDER_KEYS,
   type AgentModelAdapter,
+  type LlmProviderKey,
 } from '@devos/agents';
 import { loadConfig } from '@devos/config';
 import {
@@ -237,10 +240,31 @@ async function resolveAgentModelAdapter(): Promise<AgentModelAdapter | undefined
     });
   }
 
-  const geminiApiKey = config.agents.geminiApiKey;
-  return geminiApiKey === undefined
+  // DEVOS-316 (Sprint 53): replaces the prior single
+  // `createGeminiModelAdapter({ apiKey })` construction with a real
+  // per-task-resolving adapter (createResolvingModelAdapter) over the
+  // DEVOS-314 provider registry — LLM_DEFAULT_PROVIDER unset still means
+  // "gemini", so behavior is byte-for-byte unchanged when only
+  // GEMINI_API_KEY is configured, exactly as today.
+  const rawDefaultProvider = config.agents.defaultProvider ?? 'gemini';
+  if (!isLlmProviderKey(rawDefaultProvider)) {
+    throw new Error(
+      `LLM_DEFAULT_PROVIDER "${rawDefaultProvider}" is not a registered provider (expected one of: ${LLM_PROVIDER_KEYS.join(', ')}).`,
+    );
+  }
+  const credentialsByProvider: Partial<Record<LlmProviderKey, string>> = {
+    ...(config.agents.geminiApiKey !== undefined ? { gemini: config.agents.geminiApiKey } : {}),
+    ...(config.agents.anthropicApiKey !== undefined
+      ? { anthropic: config.agents.anthropicApiKey }
+      : {}),
+  };
+  const defaultCredential = credentialsByProvider[rawDefaultProvider];
+  return defaultCredential === undefined
     ? undefined
-    : createGeminiModelAdapter({ apiKey: geminiApiKey });
+    : createResolvingModelAdapter({
+        defaultProvider: rawDefaultProvider,
+        defaultCredential,
+      });
 }
 
 const modelAdapter = await resolveAgentModelAdapter();
@@ -250,7 +274,7 @@ const modelAdapter = await resolveAgentModelAdapter();
 // such a task clearly, rather than the whole process refusing to start.
 if (modelAdapter === undefined) {
   console.warn(
-    'GEMINI_API_KEY not configured (and AGENT_MODEL_ADAPTER is not "fixture") — AGENT_TASK (the planning-path agents) will not be handled.',
+    `No credential configured for the default LLM provider "${config.agents.defaultProvider ?? 'gemini'}" (and AGENT_MODEL_ADAPTER is not "fixture") — AGENT_TASK (the planning-path agents) will not be handled.`,
   );
 } else {
   const agentTaskDeps: DevelopmentAgentTaskHandlerDeps &

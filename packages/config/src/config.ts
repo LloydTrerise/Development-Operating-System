@@ -30,9 +30,18 @@ export interface LoggingConfig {
  * actually requires geminiApiKey; that requirement is enforced at
  * apps/worker's startup, not globally in this shared schema (apps/api has
  * no LLM dependency and shouldn't fail to start over a missing LLM key).
+ *
+ * DEVOS-315/316 (Sprint 53): `anthropicApiKey` is the second registered
+ * provider's own credential, same optional/enforced-at-worker-startup
+ * shape as `geminiApiKey`. `defaultProvider` selects which registered
+ * provider `apps/worker`'s own real per-task-resolving adapter
+ * (`createResolvingModelAdapter`) uses as the platform-wide default —
+ * defaults to `'gemini'`, preserving today's exact behavior unchanged.
  */
 export interface AgentsConfig {
   geminiApiKey?: string;
+  anthropicApiKey?: string;
+  defaultProvider?: string;
 }
 
 /**
@@ -100,6 +109,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DevosConfig {
   const authIssuerUrl = optional(raw.AUTH_ISSUER_URL);
   const authAudience = optional(raw.AUTH_AUDIENCE);
   const geminiApiKey = optional(raw.GEMINI_API_KEY);
+  const anthropicApiKey = optional(raw.ANTHROPIC_API_KEY);
+  const defaultProvider = optional(raw.LLM_DEFAULT_PROVIDER);
   const vaultAddress = optional(raw.VAULT_ADDR);
   const vaultToken = optional(raw.VAULT_TOKEN);
   const redisUrl = optional(raw.REDIS_URL);
@@ -129,6 +140,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DevosConfig {
     },
     agents: {
       ...(geminiApiKey === undefined ? {} : { geminiApiKey }),
+      ...(anthropicApiKey === undefined ? {} : { anthropicApiKey }),
+      ...(defaultProvider === undefined ? {} : { defaultProvider }),
     },
     secrets: {
       ...(vaultAddress === undefined ? {} : { vaultAddress }),

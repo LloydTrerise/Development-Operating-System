@@ -15,6 +15,8 @@ export interface RawEnvironment {
   AUTH_AUDIENCE?: string;
   LOG_LEVEL?: string;
   GEMINI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+  LLM_DEFAULT_PROVIDER?: string;
   VAULT_ADDR?: string;
   VAULT_TOKEN?: string;
   REDIS_URL?: string;
@@ -69,6 +71,10 @@ export function readEnvironment(env: Environment = process.env): RawEnvironment 
   if (logLevel !== undefined) result.LOG_LEVEL = logLevel;
   const geminiApiKey = optionalValue(env.GEMINI_API_KEY);
   if (geminiApiKey !== undefined) result.GEMINI_API_KEY = geminiApiKey;
+  const anthropicApiKey = optionalValue(env.ANTHROPIC_API_KEY);
+  if (anthropicApiKey !== undefined) result.ANTHROPIC_API_KEY = anthropicApiKey;
+  const llmDefaultProvider = optionalValue(env.LLM_DEFAULT_PROVIDER);
+  if (llmDefaultProvider !== undefined) result.LLM_DEFAULT_PROVIDER = llmDefaultProvider;
   const vaultAddr = optionalValue(env.VAULT_ADDR);
   if (vaultAddr !== undefined) result.VAULT_ADDR = vaultAddr;
   const vaultToken = optionalValue(env.VAULT_TOKEN);

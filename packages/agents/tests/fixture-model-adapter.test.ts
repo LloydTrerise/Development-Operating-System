@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createFixtureModelAdapter } from '../src/fixtures/fixture-model-adapter.js';
 import type { AgentFixture } from '../src/fixtures/fixture-repository.js';
+import type { AgentInvocationRequest } from '../src/model-adapter.js';
+
+const ORGANISATION_ID = 'org-1' as AgentInvocationRequest['organisationId'];
 
 const discoveryFixture: AgentFixture = {
   role: 'DISCOVERY',
@@ -23,6 +26,7 @@ describe('createFixtureModelAdapter', () => {
         modelRef: 'gemini-3.6-flash',
         allowedCapabilities: [],
       },
+      organisationId: ORGANISATION_ID,
       objective: 'irrelevant to the replay',
       input: {},
     });
@@ -46,6 +50,7 @@ describe('createFixtureModelAdapter', () => {
         modelRef: 'gemini-3.6-flash',
         allowedCapabilities: [],
       },
+      organisationId: ORGANISATION_ID,
       objective: 'irrelevant to the replay',
       input: {},
     };
@@ -69,6 +74,7 @@ describe('createFixtureModelAdapter', () => {
         modelRef: 'gemini-3.6-flash',
         allowedCapabilities: [],
       },
+      organisationId: ORGANISATION_ID,
       objective: 'irrelevant to the replay',
       input: {},
     });

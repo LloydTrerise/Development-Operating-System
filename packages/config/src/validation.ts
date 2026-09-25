@@ -110,6 +110,26 @@ export function validateEnvironment(env: RawEnvironment): ConfigValidationResult
     });
   }
 
+  // ANTHROPIC_API_KEY (DEVOS-315): optional here, same shape as
+  // GEMINI_API_KEY above — never echo the value itself.
+  if (env.ANTHROPIC_API_KEY !== undefined && env.ANTHROPIC_API_KEY.trim().length === 0) {
+    issues.push({
+      key: 'ANTHROPIC_API_KEY',
+      message: 'ANTHROPIC_API_KEY must not be empty when provided.',
+    });
+  }
+
+  // LLM_DEFAULT_PROVIDER (DEVOS-316): optional here — apps/worker validates
+  // it's a real registered provider key at its own startup (mirroring
+  // AGENT_MODEL_ADAPTER's identical "validated where it's consumed, not
+  // globally" precedent), this shared schema only rejects blank-when-provided.
+  if (env.LLM_DEFAULT_PROVIDER !== undefined && env.LLM_DEFAULT_PROVIDER.trim().length === 0) {
+    issues.push({
+      key: 'LLM_DEFAULT_PROVIDER',
+      message: 'LLM_DEFAULT_PROVIDER must not be empty when provided.',
+    });
+  }
+
   // VAULT_ADDR/VAULT_TOKEN (DEVOS-106): optional here — only a process that
   // actually resolves a live credential (apps/worker's real GitHub/Render
   // adapters) needs Vault configured; never echo VAULT_TOKEN's value itself.
