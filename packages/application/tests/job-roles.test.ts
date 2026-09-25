@@ -264,9 +264,13 @@ describe('job role use cases (DEVOS-299/300/301)', () => {
   });
 
   it('grants a job role to a principal, gated to an org admin', async () => {
+    // DEVOS-309: 'member' has no org-level membership row at all (only a
+    // project-level MEMBER row), so `resolveOrganisationAdminMembership`
+    // reports it identically to a non-member — NotFoundError, not
+    // ForbiddenError.
     await expect(
       assignPrincipalJobRole(deps, 'member', ORG_ID, 'dev-alice', `${ORG_ID}:DEV`),
-    ).rejects.toThrow(ForbiddenError);
+    ).rejects.toThrow(NotFoundError);
 
     const jobRole = await assignPrincipalJobRole(
       deps,
@@ -279,6 +283,18 @@ describe('job role use cases (DEVOS-299/300/301)', () => {
 
     const held = await listPrincipalJobRoles(deps, 'admin', ORG_ID, 'dev-alice');
     expect(held.map((jobRole) => jobRole.key)).toEqual(['DEV']);
+  });
+
+  it('denies a project-level OWNER with no org-level membership from granting an org-held job role (DEVOS-309)', async () => {
+    // `resolveOrganisationAdminMembership` (Sprint 51 reconciliation) closes
+    // the same privilege-escalation shape as `organisations.test.ts`'s own
+    // equivalent case: a plain project OWNER, never given any
+    // organisation-level standing, must not reach `canManageMembers` here
+    // either — `assignPrincipalJobRole` is gated identically to
+    // `addOrganisationMember`.
+    await expect(
+      assignPrincipalJobRole(deps, 'owner', ORG_ID, 'dev-alice', `${ORG_ID}:DEV`),
+    ).rejects.toThrow(NotFoundError);
   });
 
   it('rejects assigning a job role that belongs to a different organisation', async () => {

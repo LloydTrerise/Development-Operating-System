@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AuditId, OrganisationId } from '@devos/contracts';
 import { canManageMembers } from '@devos/domain';
-import { resolveOrganisationMembership } from '../organisations/membership-access.js';
+import { resolveOrganisationAdminMembership } from '../organisations/membership-access.js';
 import { ForbiddenError, NotFoundError } from '../errors.js';
 import type { JobRoleUseCaseDeps } from './deps.js';
 
@@ -19,7 +19,11 @@ export async function removePrincipalJobRole(
   const organisation = await deps.organisations.getById(organisationId);
   if (!organisation) throw new NotFoundError('Organisation');
 
-  const requester = await resolveOrganisationMembership(deps, requesterPrincipalId, organisationId);
+  const requester = await resolveOrganisationAdminMembership(
+    deps,
+    requesterPrincipalId,
+    organisationId,
+  );
   if (!requester) throw new NotFoundError('Organisation');
   if (!canManageMembers(requester.role)) throw new ForbiddenError();
 

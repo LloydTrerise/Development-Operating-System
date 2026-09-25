@@ -155,11 +155,17 @@ describe('organisation use cases', () => {
     ).rejects.toThrow(NotFoundError);
   });
 
-  it('falls back to an OWNER of any project within the organisation when no org-level membership exists', async () => {
+  it('denies a project-level OWNER with no org-level membership from updating the organisation (DEVOS-309)', async () => {
     const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
 
-    // Simulate today's reality: a project-level OWNER membership with no
-    // corresponding org-level one — the exact gap this fallback closes.
+    // DEVOS-309 (Sprint 51 reconciliation): this used to be a deliberate,
+    // tested Sprint 39 (DEVOS-254) fallback for a real gap at the time (most
+    // organisations had no org-level membership row at all). That gap no
+    // longer exists post-DEVOS-290 — every organisation is guaranteed a real
+    // org-level ORGANISATION_ADMIN row — so a plain project OWNER must no
+    // longer be able to reach organisation-admin authority just by owning
+    // one project; see `resolveOrganisationAdminMembership`'s own doc
+    // comment for the full rationale.
     await deps.memberships.create({
       id: randomUUID() as Membership['id'],
       organisationId: acme.id,
@@ -171,11 +177,12 @@ describe('organisation use cases', () => {
       updatedAt: new Date(0).toISOString(),
     });
 
-    const updated = await updateOrganisation(deps, 'carol', acme.id, { name: 'Via project owner' });
-    expect(updated.name).toBe('Via project owner');
+    await expect(
+      updateOrganisation(deps, 'carol', acme.id, { name: 'Via project owner' }),
+    ).rejects.toThrow(NotFoundError);
   });
 
-  it('denies a project-level MEMBER (non-OWNER) from updating the organisation', async () => {
+  it('denies a project-level MEMBER (non-OWNER) with no org-level membership from updating the organisation', async () => {
     const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
 
     await deps.memberships.create({
@@ -189,9 +196,22 @@ describe('organisation use cases', () => {
       updatedAt: new Date(0).toISOString(),
     });
 
+    // DEVOS-309: same as the project-level OWNER case above — no org-level
+    // membership row means no organisation-admin standing at all, reported
+    // as NotFoundError (matching every other "not a member" case in this
+    // codebase), not a role-specific ForbiddenError.
     await expect(
       updateOrganisation(deps, 'dave', acme.id, { name: 'Should fail' }),
-    ).rejects.toThrow(ForbiddenError);
+    ).rejects.toThrow(NotFoundError);
+  });
+
+  it('denies an org-level ORGANISATION_ADMIN from a different organisation (tenant isolation)', async () => {
+    const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+    await createOrganisation(deps, 'erin', { name: 'Globex', slug: 'globex' });
+
+    await expect(
+      updateOrganisation(deps, 'erin', acme.id, { name: 'Should fail' }),
+    ).rejects.toThrow(NotFoundError);
   });
 
   describe('organisation-level membership (DEVOS-254, revised by DEVOS-290)', () => {
@@ -220,6 +240,33 @@ describe('organisation use cases', () => {
 
       const audit = await deps.auditRecords.listForOrganisation(acme.id);
       expect(audit).toContainEqual(expect.objectContaining({ action: 'membership.added' }));
+    });
+
+    it('denies a project-level OWNER with no org-level membership from adding an org-level admin (DEVOS-309)', async () => {
+      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+
+      // The specific privilege-escalation shape DEVOS-309 closed: a plain
+      // project OWNER self-granting ORGANISATION_ADMIN would gain authority
+      // over every project in the organisation via `resolveMembership`'s
+      // own org-level fallback — never legitimate, since this principal was
+      // never given any organisation-level standing.
+      await deps.memberships.create({
+        id: randomUUID() as Membership['id'],
+        organisationId: acme.id,
+        projectId: randomUUID() as Membership['projectId'],
+        principalId: 'carol',
+        role: 'OWNER',
+        status: 'ACTIVE',
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      });
+
+      await expect(
+        addOrganisationMember(deps, 'carol', acme.id, {
+          principalId: 'carol',
+          role: 'ORGANISATION_ADMIN',
+        }),
+      ).rejects.toThrow(NotFoundError);
     });
 
     it('rejects any org-level role other than ORGANISATION_ADMIN (decision §9.3 drops org-level MEMBER)', async () => {

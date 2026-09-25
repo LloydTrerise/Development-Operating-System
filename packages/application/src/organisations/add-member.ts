@@ -3,7 +3,7 @@ import type { AuditId, OrganisationId } from '@devos/contracts';
 import { canManageMembers, type Membership, type MembershipRole } from '@devos/domain';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.js';
 import type { OrganisationUseCaseDeps } from './deps.js';
-import { resolveOrganisationMembership } from './membership-access.js';
+import { resolveOrganisationAdminMembership } from './membership-access.js';
 
 export interface AddOrganisationMemberInput {
   principalId: string;
@@ -30,7 +30,11 @@ export async function addOrganisationMember(
   const organisation = await deps.organisations.getById(organisationId);
   if (!organisation) throw new NotFoundError('Organisation');
 
-  const requester = await resolveOrganisationMembership(deps, requesterPrincipalId, organisationId);
+  const requester = await resolveOrganisationAdminMembership(
+    deps,
+    requesterPrincipalId,
+    organisationId,
+  );
   if (!requester) throw new NotFoundError('Organisation');
   if (!canManageMembers(requester.role)) throw new ForbiddenError();
 

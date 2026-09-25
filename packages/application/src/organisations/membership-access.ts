@@ -43,6 +43,46 @@ export async function resolveOrganisationMembership(
 }
 
 /**
+ * DEVOS-309 (Sprint 51 reconciliation): strictly org-level (`projectId:
+ * null`) membership only — used by organisation-admin-gated *write* actions
+ * (`updateOrganisation`, add/remove/change-member-role, assign/remove a
+ * principal's org-held job role). Unlike `resolveOrganisationMembership`'s
+ * broader "any standing in this org" fallback (kept unchanged for read-only
+ * org-wide visibility routes — `getOrganisationForPrincipal`, member
+ * listing, cost/audit/engineering-report reads, policy/workflow/job-role
+ * listing — a design Sprint 39/42 established deliberately and this task
+ * does not revisit), this never falls back to a project-level role.
+ *
+ * `resolveOrganisationMembership`'s own project-level-`OWNER` fallback
+ * (above) predates DEVOS-290 (Sprint 47) and was itself a deliberate,
+ * tested Sprint 39 (DEVOS-254) design for a real gap at the time: most
+ * organisations had no org-level membership row at all. That gap no longer
+ * exists — every organisation is now guaranteed a real org-level
+ * `ORGANISATION_ADMIN` row (`createOrganisation`; migration `0048`'s own
+ * backfill) — so letting that same fallback continue to satisfy
+ * `canManageMembers`/`canUpdateOrganisation` is a real, live privilege-
+ * escalation path this epic's own model was built specifically to close
+ * (§9.2/§9.3): the `OWNER` of even one project, never granted any
+ * organisation-level standing, could rename the organisation or add
+ * themselves as `ORGANISATION_ADMIN` — which then grants full authority
+ * over *every* project in the organisation via `resolveMembership`'s own,
+ * correctly narrower, org-level-only fallback
+ * (`packages/application/src/projects/membership-access.ts`).
+ */
+export async function resolveOrganisationAdminMembership(
+  deps: OrganisationMembershipAccessDeps,
+  principalId: string,
+  organisationId: OrganisationId,
+): Promise<Membership | null> {
+  const memberships = await deps.memberships.listForPrincipal(principalId);
+  return (
+    memberships.find(
+      (membership) => membership.organisationId === organisationId && membership.projectId === null,
+    ) ?? null
+  );
+}
+
+/**
  * DEVOS-254: mirrors `projects/membership-access.ts`'s `assertNotLastOwner`
  * exactly, at organisation scope — guards against removing the last
  * org-level (`projectId: null`) `ORGANISATION_ADMIN` membership (renamed

@@ -6,7 +6,7 @@ import type { OrganisationUseCaseDeps } from './deps.js';
 import {
   assertNotLastOrganisationAdmin,
   assertNotRemovingCurrentOwner,
-  resolveOrganisationMembership,
+  resolveOrganisationAdminMembership,
 } from './membership-access.js';
 
 /** DEVOS-254: mirrors `projects/remove-member.ts` exactly, at organisation
@@ -20,7 +20,11 @@ export async function removeOrganisationMember(
   const organisation = await deps.organisations.getById(organisationId);
   if (!organisation) throw new NotFoundError('Organisation');
 
-  const requester = await resolveOrganisationMembership(deps, requesterPrincipalId, organisationId);
+  const requester = await resolveOrganisationAdminMembership(
+    deps,
+    requesterPrincipalId,
+    organisationId,
+  );
   if (!requester) throw new NotFoundError('Organisation');
   if (!canManageMembers(requester.role)) throw new ForbiddenError();
 
