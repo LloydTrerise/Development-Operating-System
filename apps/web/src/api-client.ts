@@ -470,6 +470,93 @@ export function transferOrganisationOwnership(
   });
 }
 
+/** DEVOS-299/300/301: `packages/domain/src/job-roles/job-role.ts`'s
+ * `JobRole` — explicitly distinct from `Membership.role`. */
+export interface JobRole {
+  id: string;
+  organisationId: string;
+  key: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface ProjectJobRolesOverviewMember {
+  principalId: string;
+  heldJobRoleIds: string[];
+  activeJobRoleIds: string[];
+}
+
+export interface ProjectJobRolesOverview {
+  catalogue: JobRole[];
+  members: ProjectJobRolesOverviewMember[];
+}
+
+/** DEVOS-299: the organisation's seeded job-role catalogue. */
+export function listOrganisationJobRoles(organisationId: string): Promise<ApiResult<JobRole[]>> {
+  return request<JobRole[]>(`/api/v1/organisations/${organisationId}/job-roles`);
+}
+
+/** DEVOS-299/301: grants a principal a job role at organisation scope —
+ * gated to an organisation admin, same bar as `addOrganisationMember`. */
+export function assignPrincipalJobRole(
+  organisationId: string,
+  principalId: string,
+  jobRoleId: string,
+): Promise<ApiResult<JobRole>> {
+  return request<JobRole>(
+    `/api/v1/organisations/${organisationId}/principals/${principalId}/job-roles`,
+    { method: 'POST', body: { jobRoleId } },
+  );
+}
+
+export function removePrincipalJobRole(
+  organisationId: string,
+  principalId: string,
+  jobRoleId: string,
+): Promise<ApiResult<{ removed: boolean }>> {
+  return request<{ removed: boolean }>(
+    `/api/v1/organisations/${organisationId}/principals/${principalId}/job-roles/${jobRoleId}`,
+    { method: 'DELETE' },
+  );
+}
+
+/** DEVOS-300/301: one call for the whole Project Members panel's job-role
+ * UI — the org catalogue plus, per current project member, which job roles
+ * they hold at organisation scope and which are active on this project.
+ * Deliberately a single aggregate, not a per-member fetch — see
+ * `packages/application/src/job-roles/get-project-job-roles-overview.ts`'s
+ * own doc comment for why. */
+export function getProjectJobRolesOverview(
+  projectId: string,
+): Promise<ApiResult<ProjectJobRolesOverview>> {
+  return request<ProjectJobRolesOverview>(`/api/v1/projects/${projectId}/job-roles`);
+}
+
+/** DEVOS-300/301: activates a job role for a principal on this project — the
+ * backend rejects it (400) unless the principal already holds it at
+ * organisation scope. */
+export function assignProjectMemberJobRole(
+  projectId: string,
+  principalId: string,
+  jobRoleId: string,
+): Promise<ApiResult<{ projectId: string; principalId: string; jobRoleId: string }>> {
+  return request<{ projectId: string; principalId: string; jobRoleId: string }>(
+    `/api/v1/projects/${projectId}/members/${principalId}/job-roles`,
+    { method: 'POST', body: { jobRoleId } },
+  );
+}
+
+export function removeProjectMemberJobRole(
+  projectId: string,
+  principalId: string,
+  jobRoleId: string,
+): Promise<ApiResult<{ removed: boolean }>> {
+  return request<{ removed: boolean }>(
+    `/api/v1/projects/${projectId}/members/${principalId}/job-roles/${jobRoleId}`,
+    { method: 'DELETE' },
+  );
+}
+
 export function listProjectTypes(): Promise<ApiResult<ProjectType[]>> {
   return request<ProjectType[]>('/api/v1/project-types');
 }

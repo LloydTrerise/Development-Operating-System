@@ -2,6 +2,7 @@ import type { OrganisationId } from '@devos/contracts';
 import type { Organisation, OrganisationRepository } from '@devos/domain';
 import type { OrganisationsTable } from '../database.js';
 import type { QueryExecutor } from './base.js';
+import { ensureDefaultJobRolesForOrganisation } from './job-roles.js';
 
 function toDomain(row: OrganisationsTable): Organisation {
   return {
@@ -46,6 +47,15 @@ export function createOrganisationRepository(db: QueryExecutor): OrganisationRep
           updated_at: organisation.updatedAt,
         })
         .execute();
+
+      // DEVOS-299: the real, ongoing counterpart to migration 0051's
+      // one-time backfill — every organisation created through the
+      // application layer going forward gets the same default job-role
+      // catalogue (PO/BA/DEV/QA), the one true chokepoint every
+      // organisation-creation path shares. `seed.ts` inserts organisations
+      // directly (bypassing this repository, per its own established
+      // convention), so it separately seeds the same invariant.
+      await ensureDefaultJobRolesForOrganisation(db, organisation.id);
     },
 
     async update(id, changes, updatedAt) {

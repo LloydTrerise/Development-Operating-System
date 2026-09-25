@@ -416,6 +416,32 @@ export interface EffectiveProjectAccessView {
   project_id: string;
 }
 
+/** DEVOS-299 (migration `0051`): seeded per-organisation (PO/BA/DEV/QA by
+ * default) — `packages/domain/src/job-roles/job-role.ts`. */
+export interface JobRolesTable {
+  id: string;
+  organisation_id: string;
+  key: string;
+  name: string;
+  created_at: string;
+}
+
+/** DEVOS-299: a principal holds a job role at organisation scope. */
+export interface PrincipalJobRolesTable {
+  principal_id: string;
+  job_role_id: string;
+  created_at: string;
+}
+
+/** DEVOS-300 (migration `0052`): the per-project active subset — FK
+ * -constrained to `principal_job_roles` (`(principal_id, job_role_id)`). */
+export interface ProjectMemberJobRolesTable {
+  project_id: string;
+  principal_id: string;
+  job_role_id: string;
+  created_at: string;
+}
+
 export interface IntegrationsTable {
   id: string;
   project_id: string;
@@ -465,4 +491,7 @@ export interface Database {
   permissions: PermissionsTable;
   role_permissions: RolePermissionsTable;
   effective_project_access: EffectiveProjectAccessView;
+  job_roles: JobRolesTable;
+  principal_job_roles: PrincipalJobRolesTable;
+  project_member_job_roles: ProjectMemberJobRolesTable;
 }

@@ -30,13 +30,16 @@ import {
   createEffectiveProjectIdsForPrincipalLister,
   createHumanProfileRepository,
   createIntegrationRepository,
+  createJobRoleRepository,
   createKnowledgeReferenceRepository,
   createKnowledgeSourceRepository,
   createMembershipRepository,
   createNotificationRepository,
   createOrganisationRepository,
   createPolicyRepository,
+  createPrincipalJobRoleRepository,
   createPrincipalRepository,
+  createProjectMemberJobRoleRepository,
   createProjectRepository,
   createProjectTypeAgentRepository,
   createProjectTypeRepository,
@@ -72,6 +75,7 @@ import type {
   CostUseCaseDeps,
   EngineeringIntelligenceUseCaseDeps,
   IntegrationUseCaseDeps,
+  JobRoleUseCaseDeps,
   KnowledgeUseCaseDeps,
   NotificationUseCaseDeps,
   OrganisationUseCaseDeps,
@@ -109,6 +113,7 @@ import { createCostRoutes } from './routes/cost.js';
 import { createEngineeringIntelligenceRoutes } from './routes/engineering-intelligence.js';
 import { createHealthRoutes } from './routes/health.js';
 import { createIntegrationRoutes } from './routes/integrations.js';
+import { createJobRoleRoutes } from './routes/job-roles.js';
 import { createKnowledgeSourceRoutes } from './routes/knowledge-sources.js';
 import { createMeRoutes } from './routes/me.js';
 import { createNotificationRoutes } from './routes/notifications.js';
@@ -241,6 +246,7 @@ export interface CreateAppOptions {
   knowledgeDeps?: KnowledgeUseCaseDeps;
   integrationDeps?: IntegrationUseCaseDeps;
   organisationDeps?: OrganisationUseCaseDeps;
+  jobRoleDeps?: JobRoleUseCaseDeps;
   projectTypeDeps?: ProjectTypeUseCaseDeps;
   policyDeps?: PolicyUseCaseDeps;
   approvalDeps?: ApprovalUseCaseDeps;
@@ -452,6 +458,19 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     memberships: projectDeps.memberships,
     auditRecords: auditRecordRepository,
   };
+  const jobRoleDeps: JobRoleUseCaseDeps = options.jobRoleDeps ?? {
+    // DEVOS-299/300/301: separate instances from `organisationDeps.organisations`/
+    // `projectDeps.projects` above (construction order) — all stateless
+    // wrappers over the same real `database.db`, mirroring `auditDeps.
+    // organisations`'s own established precedent exactly.
+    organisations: createOrganisationRepository(database.db),
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    jobRoles: createJobRoleRepository(database.db),
+    principalJobRoles: createPrincipalJobRoleRepository(database.db),
+    projectMemberJobRoles: createProjectMemberJobRoleRepository(database.db),
+    auditRecords: auditRecordRepository,
+  };
   const projectTypeDeps: ProjectTypeUseCaseDeps = options.projectTypeDeps ?? {
     projectTypes: projectTypeRepository,
     projectTypeWorkflows: projectTypeWorkflowRepository,
@@ -519,6 +538,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createHealthRoutes(API_PREFIX, database),
     ...createMeRoutes(API_PREFIX),
     ...createOrganisationRoutes(API_PREFIX, organisationDeps),
+    ...createJobRoleRoutes(API_PREFIX, jobRoleDeps),
     ...createProjectTypeRoutes(API_PREFIX, projectTypeDeps),
     ...createProjectRoutes(API_PREFIX, projectDeps),
     ...createWorkItemRoutes(API_PREFIX, {

@@ -103,6 +103,34 @@ async function main(): Promise<void> {
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();
 
+  // DEVOS-299 (Sprint 49): seed.ts inserts organisations directly (bypassing
+  // createOrganisationRepository, per this file's own established
+  // convention), so it separately seeds the same default job-role catalogue
+  // (PO/BA/DEV/QA) that repository's `create()` now maintains for every
+  // organisation created through the application layer — a fresh database
+  // (migrate + seed, no prior history) would otherwise leave the seeded
+  // organisation without one, the identical class of gap DEVOS-284/290/295
+  // already found and fixed here for principals/organisation ownership/agent
+  // profiles.
+  await db
+    .insertInto('job_roles')
+    .values(
+      [
+        { key: 'PO', name: 'Product Owner' },
+        { key: 'BA', name: 'Business Analyst' },
+        { key: 'DEV', name: 'Developer' },
+        { key: 'QA', name: 'Quality Assurance' },
+      ].map(({ key, name }) => ({
+        id: `${SEED_ORGANISATION_ID}:${key}`,
+        organisation_id: SEED_ORGANISATION_ID,
+        key,
+        name,
+        created_at: now,
+      })),
+    )
+    .onConflict((oc) => oc.column('id').doNothing())
+    .execute();
+
   await db
     .insertInto('project_types')
     .values({

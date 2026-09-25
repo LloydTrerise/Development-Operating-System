@@ -18,13 +18,19 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import {
   addMember,
+  assignPrincipalJobRole,
+  assignProjectMemberJobRole,
   changeMemberRole,
+  getProjectJobRolesOverview,
   listMembers,
   listToolCapabilities,
   removeMember,
+  removePrincipalJobRole,
+  removeProjectMemberJobRole,
   setToolCapabilityStatus,
   updateProject,
   type Membership,
+  type ProjectJobRolesOverview,
   type ToolCapability,
 } from '../../api-client.js';
 import { DetailPageLayout } from '../../components/DetailPageLayout.js';
@@ -69,6 +75,11 @@ export function ProjectDetailPage() {
   const [newMemberRole, setNewMemberRole] = useState<(typeof ROLES)[number]>('MEMBER');
   const [addingMember, setAddingMember] = useState(false);
 
+  const [jobRolesOverview, setJobRolesOverview] = useState<ProjectJobRolesOverview | null>(null);
+  const [jobRolesError, setJobRolesError] = useState<string | null>(null);
+  const [jobRoleActionError, setJobRoleActionError] = useState<string | null>(null);
+  const [jobRoleBusyKey, setJobRoleBusyKey] = useState<string | null>(null);
+
   const [settingsName, setSettingsName] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -101,6 +112,78 @@ export function ProjectDetailPage() {
   useEffect(() => {
     refreshMembers();
   }, [id]);
+
+  /** DEVOS-301: one aggregate call for every member row's job-role UI —
+   * see `getProjectJobRolesOverview`'s own doc comment for why this is a
+   * single fetch rather than one per member. */
+  function refreshJobRoles() {
+    if (!id) return;
+    getProjectJobRolesOverview(id).then((result) => {
+      if (!result.ok) {
+        setJobRolesError(result.error.message);
+        return;
+      }
+      setJobRolesError(null);
+      setJobRolesOverview(result.data);
+    });
+  }
+
+  useEffect(() => {
+    refreshJobRoles();
+  }, [id]);
+
+  /** DEVOS-299/301: grants a job role at organisation scope — the org the
+   * job role catalogue is scoped to is the project's own `organisationId`,
+   * since this panel is this sprint's own single UI anchor for both the
+   * org-wide grant and the per-project subset (no separate organisation-wide
+   * job-role management page exists — see `specs/sprints/sprint-49/
+   * DEVOS-301.md`). */
+  async function handleGrantJobRole(principalId: string, jobRoleId: string) {
+    if (!project) return;
+    setJobRoleBusyKey(`${principalId}:${jobRoleId}`);
+    setJobRoleActionError(null);
+    const result = await assignPrincipalJobRole(project.organisationId, principalId, jobRoleId);
+    setJobRoleBusyKey(null);
+    if (!result.ok) {
+      setJobRoleActionError(result.error.message);
+      return;
+    }
+    refreshJobRoles();
+  }
+
+  async function handleRevokeJobRole(principalId: string, jobRoleId: string) {
+    if (!project) return;
+    setJobRoleBusyKey(`${principalId}:${jobRoleId}`);
+    setJobRoleActionError(null);
+    const result = await removePrincipalJobRole(project.organisationId, principalId, jobRoleId);
+    setJobRoleBusyKey(null);
+    if (!result.ok) {
+      setJobRoleActionError(result.error.message);
+      return;
+    }
+    refreshJobRoles();
+  }
+
+  /** DEVOS-300: the per-project subset picker — toggles whether a job role
+   * the principal already holds (DEVOS-299) is active on this project. */
+  async function handleToggleActiveJobRole(
+    principalId: string,
+    jobRoleId: string,
+    active: boolean,
+  ) {
+    if (!id) return;
+    setJobRoleBusyKey(`${principalId}:${jobRoleId}`);
+    setJobRoleActionError(null);
+    const result = active
+      ? await removeProjectMemberJobRole(id, principalId, jobRoleId)
+      : await assignProjectMemberJobRole(id, principalId, jobRoleId);
+    setJobRoleBusyKey(null);
+    if (!result.ok) {
+      setJobRoleActionError(result.error.message);
+      return;
+    }
+    refreshJobRoles();
+  }
 
   function refreshCapabilities() {
     if (!id) return;
@@ -236,51 +319,139 @@ export function ProjectDetailPage() {
               {membersLoading && <LoadingState label="Loading members…" />}
               {membersError && <ErrorAlert message={`Failed to load members: ${membersError}`} />}
               {memberActionError && <ErrorAlert message={memberActionError} />}
+              {jobRolesError && (
+                <ErrorAlert message={`Failed to load job roles: ${jobRolesError}`} />
+              )}
+              {jobRoleActionError && <ErrorAlert message={jobRoleActionError} />}
 
               {!membersLoading && !membersError && (
                 <Stack spacing={1}>
-                  {members.map((member) => (
-                    <Stack
-                      key={member.id}
-                      direction="row"
-                      alignItems="center"
-                      spacing={2}
-                      sx={{ py: 0.5, borderBottom: 1, borderColor: 'divider' }}
-                    >
-                      <Typography variant="body2" sx={{ flex: 1, fontFamily: 'monospace' }}>
-                        {member.userId}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {member.status}
-                      </Typography>
-                      <FormControl size="small" sx={{ minWidth: 110 }}>
-                        <Select<string>
-                          value={member.role}
-                          disabled={memberBusyUserId === member.userId}
-                          onChange={(event) =>
-                            handleChangeRole(
-                              member.userId,
-                              event.target.value as 'OWNER' | 'MEMBER',
-                            )
-                          }
-                        >
-                          {ROLES.map((role) => (
-                            <MenuItem key={role} value={role}>
-                              {role}
-                            </MenuItem>
-                          ))}
-                        </Select>
-                      </FormControl>
-                      <IconButton
-                        aria-label={`Remove ${member.userId}`}
-                        size="small"
-                        disabled={memberBusyUserId === member.userId}
-                        onClick={() => handleRemoveMember(member.userId)}
+                  {members.map((member) => {
+                    const memberJobRoles = jobRolesOverview?.members.find(
+                      (candidate) => candidate.principalId === member.userId,
+                    );
+                    const catalogue = jobRolesOverview?.catalogue ?? [];
+                    const heldIds = memberJobRoles?.heldJobRoleIds ?? [];
+                    const activeIds = memberJobRoles?.activeJobRoleIds ?? [];
+                    const heldJobRoles = catalogue.filter((jobRole) =>
+                      heldIds.includes(jobRole.id),
+                    );
+                    const grantableJobRoles = catalogue.filter(
+                      (jobRole) => !heldIds.includes(jobRole.id),
+                    );
+
+                    return (
+                      <Stack
+                        key={member.id}
+                        spacing={0.5}
+                        sx={{ py: 0.5, borderBottom: 1, borderColor: 'divider' }}
                       >
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  ))}
+                        <Stack direction="row" alignItems="center" spacing={2}>
+                          <Typography variant="body2" sx={{ flex: 1, fontFamily: 'monospace' }}>
+                            {member.userId}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {member.status}
+                          </Typography>
+                          <FormControl size="small" sx={{ minWidth: 110 }}>
+                            <Select<string>
+                              value={member.role}
+                              disabled={memberBusyUserId === member.userId}
+                              onChange={(event) =>
+                                handleChangeRole(
+                                  member.userId,
+                                  event.target.value as 'OWNER' | 'MEMBER',
+                                )
+                              }
+                            >
+                              {ROLES.map((role) => (
+                                <MenuItem key={role} value={role}>
+                                  {role}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                          <IconButton
+                            aria-label={`Remove ${member.userId}`}
+                            size="small"
+                            disabled={memberBusyUserId === member.userId}
+                            onClick={() => handleRemoveMember(member.userId)}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
+
+                        {/* DEVOS-299/300/301: job roles held at organisation scope
+                            (click a chip's × to revoke; the chip body toggles
+                            whether it's active on this project) plus a "grant"
+                            picker limited to the org's own seeded catalogue. */}
+                        <Stack
+                          direction="row"
+                          alignItems="center"
+                          spacing={1}
+                          flexWrap="wrap"
+                          useFlexGap
+                          sx={{ pl: 0.5 }}
+                        >
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            sx={{ minWidth: 68 }}
+                          >
+                            Job roles:
+                          </Typography>
+                          {heldJobRoles.map((jobRole) => {
+                            const active = activeIds.includes(jobRole.id);
+                            const busy = jobRoleBusyKey === `${member.userId}:${jobRole.id}`;
+                            return (
+                              <Chip
+                                key={jobRole.id}
+                                label={jobRole.key}
+                                size="small"
+                                color={active ? 'primary' : 'default'}
+                                variant={active ? 'filled' : 'outlined'}
+                                disabled={busy}
+                                title={
+                                  active
+                                    ? 'Active on this project — click to deactivate'
+                                    : 'Held, not active on this project — click to activate'
+                                }
+                                onClick={() =>
+                                  handleToggleActiveJobRole(member.userId, jobRole.id, active)
+                                }
+                                onDelete={() => handleRevokeJobRole(member.userId, jobRole.id)}
+                              />
+                            );
+                          })}
+                          {heldJobRoles.length === 0 && (
+                            <Typography variant="caption" color="text.secondary">
+                              None held.
+                            </Typography>
+                          )}
+                          {grantableJobRoles.length > 0 && (
+                            <FormControl size="small" sx={{ minWidth: 140 }}>
+                              <Select
+                                displayEmpty
+                                value=""
+                                onChange={(event) =>
+                                  handleGrantJobRole(member.userId, event.target.value)
+                                }
+                              >
+                                <MenuItem value="" disabled>
+                                  + Grant job role
+                                </MenuItem>
+                                {grantableJobRoles.map((jobRole) => (
+                                  <MenuItem key={jobRole.id} value={jobRole.id}>
+                                    {jobRole.key}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          )}
+                        </Stack>
+                      </Stack>
+                    );
+                  })}
                   {members.length === 0 && (
                     <Typography variant="body2" color="text.secondary">
                       No members yet.

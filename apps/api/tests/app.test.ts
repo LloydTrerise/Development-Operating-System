@@ -11,6 +11,7 @@ import type {
   ApprovalUseCaseDeps,
   CreateProjectWithClones,
   IntegrationUseCaseDeps,
+  JobRoleUseCaseDeps,
   KnowledgeUseCaseDeps,
   NotificationUseCaseDeps,
   OrganisationUseCaseDeps,
@@ -56,6 +57,8 @@ import {
   type ContextManifestRepository,
   type Integration,
   type IntegrationRepository,
+  type JobRole,
+  type JobRoleRepository,
   type KnowledgeSource,
   type KnowledgeSourceRepository,
   type ListWorkflowRunsForDefinition,
@@ -67,7 +70,11 @@ import {
   type OrganisationRepository,
   type Policy,
   type PolicyRepository,
+  type PrincipalJobRole,
+  type PrincipalJobRoleRepository,
   type Project,
+  type ProjectMemberJobRole,
+  type ProjectMemberJobRoleRepository,
   type ProjectRepository,
   type ProjectType,
   type ProjectTypeAgent,
@@ -298,6 +305,98 @@ function createInMemoryOrganisationDeps(projectDeps: ProjectUseCaseDeps): Organi
 
 function createInMemoryProjectTypeDeps(): ProjectTypeUseCaseDeps {
   return createInMemoryProjectTypeRepositories();
+}
+
+/** DEVOS-299/300/301 (Sprint 49): shares `organisationDeps`'/`projectDeps`'
+ * own `organisations`/`projects`/`memberships`/`auditRecords` fakes exactly,
+ * mirroring `createInMemoryOrganisationDeps`'s established construction
+ * pattern. Unlike the real `createOrganisationRepository.create()`, this
+ * in-memory `organisations.create()` never seeds a default job-role
+ * catalogue on its own — tests seed one explicitly via `jobRoles.create()`,
+ * the real chokepoint's own behavior being covered separately by
+ * `packages/database`'s own migration/seed live-verification, not this
+ * in-memory fake. */
+function createInMemoryJobRoleDeps(
+  organisationDeps: OrganisationUseCaseDeps,
+  projectDeps: ProjectUseCaseDeps,
+): JobRoleUseCaseDeps {
+  const jobRoles = new Map<string, JobRole>();
+  const principalJobRoles: PrincipalJobRole[] = [];
+  const projectMemberJobRoles: ProjectMemberJobRole[] = [];
+
+  const jobRoleRepository: JobRoleRepository = {
+    listForOrganisation: async (organisationId) =>
+      [...jobRoles.values()].filter((jobRole) => jobRole.organisationId === organisationId),
+    getById: async (id) => jobRoles.get(id) ?? null,
+    create: async (jobRole) => {
+      jobRoles.set(jobRole.id, jobRole);
+    },
+  };
+
+  const principalJobRoleRepository: PrincipalJobRoleRepository = {
+    listForPrincipal: async (principalId) =>
+      principalJobRoles.filter((row) => row.principalId === principalId),
+    listForPrincipals: async (principalIds) =>
+      principalJobRoles.filter((row) => principalIds.includes(row.principalId)),
+    create: async (row) => {
+      if (
+        !principalJobRoles.some(
+          (existing) =>
+            existing.principalId === row.principalId && existing.jobRoleId === row.jobRoleId,
+        )
+      ) {
+        principalJobRoles.push(row);
+      }
+    },
+    remove: async (principalId, jobRoleId) => {
+      const index = principalJobRoles.findIndex(
+        (row) => row.principalId === principalId && row.jobRoleId === jobRoleId,
+      );
+      if (index !== -1) principalJobRoles.splice(index, 1);
+      for (let i = projectMemberJobRoles.length - 1; i >= 0; i -= 1) {
+        const row = projectMemberJobRoles[i]!;
+        if (row.principalId === principalId && row.jobRoleId === jobRoleId) {
+          projectMemberJobRoles.splice(i, 1);
+        }
+      }
+    },
+  };
+
+  const projectMemberJobRoleRepository: ProjectMemberJobRoleRepository = {
+    listForProject: async (projectId) =>
+      projectMemberJobRoles.filter((row) => row.projectId === projectId),
+    create: async (row) => {
+      if (
+        !projectMemberJobRoles.some(
+          (existing) =>
+            existing.projectId === row.projectId &&
+            existing.principalId === row.principalId &&
+            existing.jobRoleId === row.jobRoleId,
+        )
+      ) {
+        projectMemberJobRoles.push(row);
+      }
+    },
+    remove: async (projectId, principalId, jobRoleId) => {
+      const index = projectMemberJobRoles.findIndex(
+        (row) =>
+          row.projectId === projectId &&
+          row.principalId === principalId &&
+          row.jobRoleId === jobRoleId,
+      );
+      if (index !== -1) projectMemberJobRoles.splice(index, 1);
+    },
+  };
+
+  return {
+    organisations: organisationDeps.organisations,
+    projects: projectDeps.projects,
+    memberships: projectDeps.memberships,
+    jobRoles: jobRoleRepository,
+    principalJobRoles: principalJobRoleRepository,
+    projectMemberJobRoles: projectMemberJobRoleRepository,
+    auditRecords: projectDeps.auditRecords,
+  };
 }
 
 function createInMemoryWorkItemDeps(projectDeps: ProjectUseCaseDeps): WorkItemUseCaseDeps {
@@ -3157,6 +3256,169 @@ describe('organisation routes', () => {
       { method: 'DELETE' },
     );
     expect(lastAdminResponse.status).toBe(400);
+  });
+});
+
+describe('job role routes (DEVOS-299/300/301)', () => {
+  let server: Server;
+  let baseUrl: string;
+  let jobRoleDeps: JobRoleUseCaseDeps;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const organisationDeps = createInMemoryOrganisationDeps(projectDeps);
+    jobRoleDeps = createInMemoryJobRoleDeps(organisationDeps, projectDeps);
+    const started = await startServer({ projectDeps, organisationDeps, jobRoleDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('assigns an organisation-held job role, restricts it to the org catalogue, and activates only what is held on a project', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Job Role Org', slug: 'job-role-org' }),
+    });
+    const organisation = (await orgResponse.json()).data as { id: string };
+
+    const now = new Date().toISOString();
+    const devJobRoleId = `${organisation.id}:DEV`;
+    await jobRoleDeps.jobRoles.create({
+      id: devJobRoleId,
+      organisationId: organisation.id as JobRole['organisationId'],
+      key: 'DEV',
+      name: 'Developer',
+      createdAt: now,
+    });
+    const otherOrgJobRoleId = `${randomUUID()}:DEV`;
+    await jobRoleDeps.jobRoles.create({
+      id: otherOrgJobRoleId,
+      organisationId: randomUUID() as JobRole['organisationId'],
+      key: 'DEV',
+      name: 'Developer',
+      createdAt: now,
+    });
+
+    const projectResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Job Role Project',
+        slug: 'job-role-project',
+        organisationId: organisation.id,
+      }),
+    });
+    const project = (await projectResponse.json()).data as { id: string };
+
+    await authed(`/api/v1/projects/${project.id}/members`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'dev-bob', role: 'MEMBER' }),
+    });
+
+    const catalogueResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/job-roles`,
+      'alice',
+    );
+    expect(catalogueResponse.status).toBe(200);
+    expect((await catalogueResponse.json()).data).toEqual([
+      expect.objectContaining({ id: devJobRoleId, key: 'DEV' }),
+    ]);
+
+    const rejectedAssign = await authed(
+      `/api/v1/projects/${project.id}/members/dev-bob/job-roles`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jobRoleId: devJobRoleId }),
+      },
+    );
+    expect(rejectedAssign.status).toBe(400);
+
+    const wrongOrgAssign = await authed(
+      `/api/v1/organisations/${organisation.id}/principals/dev-bob/job-roles`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jobRoleId: otherOrgJobRoleId }),
+      },
+    );
+    expect(wrongOrgAssign.status).toBe(400);
+
+    const grantResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/principals/dev-bob/job-roles`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jobRoleId: devJobRoleId }),
+      },
+    );
+    expect(grantResponse.status).toBe(200);
+
+    const heldResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/principals/dev-bob/job-roles`,
+      'alice',
+    );
+    expect((await heldResponse.json()).data).toEqual([
+      expect.objectContaining({ id: devJobRoleId }),
+    ]);
+
+    const activateResponse = await authed(
+      `/api/v1/projects/${project.id}/members/dev-bob/job-roles`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jobRoleId: devJobRoleId }),
+      },
+    );
+    expect(activateResponse.status).toBe(200);
+
+    const overviewResponse = await authed(`/api/v1/projects/${project.id}/job-roles`, 'alice');
+    const overview = (await overviewResponse.json()).data as {
+      catalogue: { id: string }[];
+      members: { principalId: string; heldJobRoleIds: string[]; activeJobRoleIds: string[] }[];
+    };
+    expect(overview.catalogue).toEqual([expect.objectContaining({ id: devJobRoleId })]);
+    const bobRow = overview.members.find((member) => member.principalId === 'dev-bob');
+    expect(bobRow).toMatchObject({
+      heldJobRoleIds: [devJobRoleId],
+      activeJobRoleIds: [devJobRoleId],
+    });
+
+    const deactivateResponse = await authed(
+      `/api/v1/projects/${project.id}/members/dev-bob/job-roles/${encodeURIComponent(devJobRoleId)}`,
+      'alice',
+      { method: 'DELETE' },
+    );
+    expect(deactivateResponse.status).toBe(200);
+
+    const revokeResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/principals/dev-bob/job-roles/${encodeURIComponent(devJobRoleId)}`,
+      'alice',
+      { method: 'DELETE' },
+    );
+    expect(revokeResponse.status).toBe(200);
+
+    const finalHeldResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/principals/dev-bob/job-roles`,
+      'alice',
+    );
+    expect((await finalHeldResponse.json()).data).toEqual([]);
   });
 });
 

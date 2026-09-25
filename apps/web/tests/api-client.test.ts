@@ -3,6 +3,8 @@ import {
   DEV_PRINCIPAL_ID,
   addMember,
   addOrganisationMember,
+  assignPrincipalJobRole,
+  assignProjectMemberJobRole,
   changeMemberRole,
   createOrganisation,
   createOrganisationPolicy,
@@ -20,6 +22,7 @@ import {
   getOrganisation,
   getOrganisationCostReport,
   getProjectCostSummary,
+  getProjectJobRolesOverview,
   getProjectSystemHealth,
   getWorkItem,
   installAgentVersion,
@@ -31,6 +34,7 @@ import {
   listIntegrations,
   listMembers,
   listNotifications,
+  listOrganisationJobRoles,
   listOrganisationMembers,
   listOrganisations,
   listPoliciesForOrganisation,
@@ -45,6 +49,8 @@ import {
   publishPolicy,
   removeMember,
   removeOrganisationMember,
+  removePrincipalJobRole,
+  removeProjectMemberJobRole,
   searchProject,
   setToolCapabilityStatus,
   shareAgentVersion,
@@ -1145,6 +1151,134 @@ describe('api client', () => {
     expect(result.ok).toBe(true);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/organisations/org-1/members/user-2');
+    expect(init.method).toBe('DELETE');
+  });
+
+  // DEVOS-299/300/301: the six job-role wrappers (Sprint 49).
+  it('DEVOS-299: lists an organisation job-role catalogue at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [
+          {
+            id: 'org-1:DEV',
+            organisationId: 'org-1',
+            key: 'DEV',
+            name: 'Developer',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        meta: { requestId: 'req-jr1' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listOrganisationJobRoles('org-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/job-roles');
+  });
+
+  it('DEVOS-299/301: grants a principal a job role at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'org-1:DEV',
+          organisationId: 'org-1',
+          key: 'DEV',
+          name: 'Developer',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        meta: { requestId: 'req-jr2' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await assignPrincipalJobRole('org-1', 'dev-alice', 'org-1:DEV');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/principals/dev-alice/job-roles');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ jobRoleId: 'org-1:DEV' });
+  });
+
+  it('DEVOS-299/301: revokes a job role from a principal at the real route', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(200, { data: { removed: true }, meta: { requestId: 'req-jr3' } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await removePrincipalJobRole('org-1', 'dev-alice', 'org-1:DEV');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/principals/dev-alice/job-roles/org-1:DEV');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('DEVOS-300/301: gets the project job-roles overview at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          catalogue: [
+            {
+              id: 'org-1:DEV',
+              organisationId: 'org-1',
+              key: 'DEV',
+              name: 'Developer',
+              createdAt: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+          members: [
+            { principalId: 'dev-alice', heldJobRoleIds: ['org-1:DEV'], activeJobRoleIds: [] },
+          ],
+        },
+        meta: { requestId: 'req-jr4' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await getProjectJobRolesOverview('project-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/job-roles');
+  });
+
+  it('DEVOS-300/301: activates a job role for a project member at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: { projectId: 'project-1', principalId: 'dev-alice', jobRoleId: 'org-1:DEV' },
+        meta: { requestId: 'req-jr5' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await assignProjectMemberJobRole('project-1', 'dev-alice', 'org-1:DEV');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/members/dev-alice/job-roles');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ jobRoleId: 'org-1:DEV' });
+  });
+
+  it('DEVOS-300/301: deactivates a job role for a project member at the real route', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(200, { data: { removed: true }, meta: { requestId: 'req-jr6' } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await removeProjectMemberJobRole('project-1', 'dev-alice', 'org-1:DEV');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/projects/project-1/members/dev-alice/job-roles/org-1:DEV');
     expect(init.method).toBe('DELETE');
   });
 
