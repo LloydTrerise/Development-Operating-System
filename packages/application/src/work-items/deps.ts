@@ -3,6 +3,7 @@ import type {
   MembershipRepository,
   ProjectRepository,
   WorkItemAssignmentRepository,
+  WorkItemCommentRepository,
   WorkItemRepository,
 } from '@devos/domain';
 
@@ -26,4 +27,11 @@ export interface WorkItemUseCaseDeps {
    * default for a genuine access restriction, unlike `outboxEvents?`'s own
    * enhancement-only optional dependencies. */
   workItemAssignments: WorkItemAssignmentRepository;
+  /** DEVOS-309 (Sprint 51 reconciliation): backs `addWorkItemComment`/
+   * `listWorkItemComments` — required, matching `workItemAssignments`'s own
+   * precedent above and its identical reasoning (only two real production/
+   * test-fake construction sites, so widening costs nothing; leaving it
+   * optional would let a genuinely new capability silently 404/no-op
+   * wherever this deps object is built without it). */
+  workItemComments: WorkItemCommentRepository;
 }

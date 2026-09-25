@@ -1,5 +1,6 @@
 import type {
   Agent,
+  AgentProfileRepository,
   AgentRepository,
   AgentVersion,
   AgentVersionRepository,
@@ -19,6 +20,16 @@ export interface AgentUseCaseDeps {
   createDraft: CreateAgentDraft;
   /** DEVOS-086: agent version publish is audited. */
   auditRecords: AuditRecordRepository;
+  /**
+   * DEVOS-309 (Sprint 51 reconciliation): optional, matching `artifacts?`'s
+   * own established convention below — absence only narrows
+   * `createNewAgentVersion`'s accountable-owner exception away (it still
+   * always enforces the mandatory role-based `canManageAgent` check
+   * regardless), it never silently disables the gate itself, unlike Sprint
+   * 50's `workItemAssignments` (deliberately required there for the
+   * opposite reason — see that field's own doc comment).
+   */
+  agentProfiles?: AgentProfileRepository;
   /**
    * DEVOS-174: reads DEVOS-163's real `listEvidenceForProject` for the
    * per-agent-version quality signal. Optional, matching every other

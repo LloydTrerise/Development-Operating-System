@@ -1,10 +1,13 @@
 import type { ProjectId, WorkItemId } from '@devos/contracts';
 import {
+  addWorkItemComment,
+  archiveWorkItem,
   assignWorkItem,
   createWorkItem,
   getWorkItemForPrincipal,
   getWorkflowRunsForWorkItem,
   listWorkItemAssignments,
+  listWorkItemComments,
   listWorkItemsForProject,
   removeWorkItemAssignment,
   updateWorkItem,
@@ -12,10 +15,12 @@ import {
   type WorkItemUseCaseDeps,
 } from '@devos/application';
 import {
+  parseAddWorkItemCommentBody,
   parseAssignWorkItemBody,
   parseCreateWorkItemBody,
   parseUpdateWorkItemBody,
   toWorkItemAssignmentDto,
+  toWorkItemCommentDto,
   toWorkItemDto,
 } from '../dto/work-item.js';
 import { toWorkflowRunDto } from '../dto/workflow-run.js';
@@ -147,6 +152,45 @@ export function createWorkItemRoutes(
           params.role!,
         );
         return { removed: true };
+      },
+    },
+    // DEVOS-309 (Sprint 51 reconciliation): workitem.comment.
+    {
+      method: 'GET',
+      pattern: `${prefix}/work-items/:workItemId/comments`,
+      protected: true,
+      handler: async ({ principal, params }) => {
+        const user = requirePrincipal(principal);
+        const comments = await listWorkItemComments(deps, user.id, params.workItemId as WorkItemId);
+        return comments.map(toWorkItemCommentDto);
+      },
+    },
+    {
+      method: 'POST',
+      pattern: `${prefix}/work-items/:workItemId/comments`,
+      protected: true,
+      handler: async ({ principal, params, body }) => {
+        const user = requirePrincipal(principal);
+        const input = parseAddWorkItemCommentBody(body);
+        const comment = await addWorkItemComment(
+          deps,
+          user.id,
+          params.workItemId as WorkItemId,
+          input,
+        );
+        return toWorkItemCommentDto(comment);
+      },
+    },
+    // DEVOS-309 (Sprint 51 reconciliation): workitem.delete, implemented as
+    // a soft archive — see `archiveWorkItem`'s own doc comment.
+    {
+      method: 'POST',
+      pattern: `${prefix}/work-items/:workItemId/archive`,
+      protected: true,
+      handler: async ({ principal, params }) => {
+        const user = requirePrincipal(principal);
+        const workItem = await archiveWorkItem(deps, user.id, params.workItemId as WorkItemId);
+        return toWorkItemDto(workItem);
       },
     },
   ];

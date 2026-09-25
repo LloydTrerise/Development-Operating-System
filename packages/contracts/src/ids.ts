@@ -5,6 +5,7 @@ export type ProjectId = Brand<string, 'ProjectId'>;
 export type UserId = Brand<string, 'UserId'>;
 export type MembershipId = Brand<string, 'MembershipId'>;
 export type WorkItemId = Brand<string, 'WorkItemId'>;
+export type WorkItemCommentId = Brand<string, 'WorkItemCommentId'>;
 export type WorkflowId = Brand<string, 'WorkflowId'>;
 export type WorkflowVersionId = Brand<string, 'WorkflowVersionId'>;
 export type WorkflowRunId = Brand<string, 'WorkflowRunId'>;

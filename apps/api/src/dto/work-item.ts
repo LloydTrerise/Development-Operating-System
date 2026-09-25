@@ -1,4 +1,9 @@
-import type { WorkItem, WorkItemAssignment, WorkItemAssignmentRole } from '@devos/domain';
+import type {
+  WorkItem,
+  WorkItemAssignment,
+  WorkItemAssignmentRole,
+  WorkItemComment,
+} from '@devos/domain';
 import { workItemAssignmentRoles } from '@devos/domain';
 import { BadRequestError } from '../http/errors.js';
 
@@ -37,6 +42,33 @@ export function toWorkItemAssignmentDto(assignment: WorkItemAssignment) {
     role: assignment.role,
     createdAt: assignment.createdAt,
   };
+}
+
+/** DEVOS-309 (Sprint 51 reconciliation):
+ * `packages/domain/src/work-items/work-item-comment.ts`'s `WorkItemComment`. */
+export function toWorkItemCommentDto(comment: WorkItemComment) {
+  return {
+    id: comment.id,
+    workItemId: comment.workItemId,
+    principalId: comment.principalId,
+    body: comment.body,
+    createdAt: comment.createdAt,
+  };
+}
+
+export interface AddWorkItemCommentBody {
+  body: string;
+}
+
+export function parseAddWorkItemCommentBody(body: unknown): AddWorkItemCommentBody {
+  const record = asRecord(body);
+
+  const commentBody = record.body;
+  if (typeof commentBody !== 'string' || commentBody.trim().length === 0) {
+    throw new BadRequestError('body is required.');
+  }
+
+  return { body: commentBody };
 }
 
 function asRecord(body: unknown): Record<string, unknown> {

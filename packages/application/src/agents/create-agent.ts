@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentConfiguration, ProjectId } from '@devos/contracts';
-import type { Agent, AgentVersion } from '@devos/domain';
-import { NotFoundError, ValidationError } from '../errors.js';
+import { canManageAgent, type Agent, type AgentVersion } from '@devos/domain';
+import { ForbiddenError, NotFoundError, ValidationError } from '../errors.js';
 import { resolveMembership } from '../projects/membership-access.js';
 import type { AgentUseCaseDeps } from './deps.js';
 
@@ -24,6 +24,11 @@ export async function createAgent(
 
   const membership = await resolveMembership(deps, principalId, project);
   if (!membership) throw new NotFoundError('Project');
+  // DEVOS-309 (Sprint 51 reconciliation): a brand-new agent has no existing
+  // `AgentProfile.accountableOwnerId` to defer to yet, so only the
+  // role-based `agent.manage` gate applies here (see `canManageAgent`'s own
+  // doc comment) — narrowed from "any resolved project member."
+  if (!canManageAgent(membership.role)) throw new ForbiddenError();
 
   if (input.key.trim().length === 0) throw new ValidationError('key is required.');
   if (input.name.trim().length === 0) throw new ValidationError('name is required.');

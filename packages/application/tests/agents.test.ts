@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import {
   SOFTWARE_DEVELOPMENT_PROJECT_TYPE_ID,
   type Agent,
+  type AgentProfile,
+  type AgentProfileRepository,
   type AgentRepository,
   type AgentVersion,
   type AgentVersionRepository,
@@ -207,6 +209,16 @@ function createInMemoryDeps() {
     await agentVersions.create(version);
   };
 
+  // DEVOS-309 (Sprint 51 reconciliation): backs `createNewAgentVersion`'s
+  // accountable-owner exception.
+  const agentProfilesStore = new Map<string, AgentProfile>();
+  const agentProfiles: AgentProfileRepository = {
+    getByAgentId: async (agentId) => agentProfilesStore.get(agentId) ?? null,
+    create: async (profile) => {
+      agentProfilesStore.set(profile.agentId, profile);
+    },
+  };
+
   return {
     projects: projectRepository,
     memberships: membershipRepository,
@@ -220,6 +232,7 @@ function createInMemoryDeps() {
     projectTypeWorkflows,
     projectTypeAgents,
     createProjectWithClones,
+    agentProfiles,
   };
 }
 
@@ -257,6 +270,27 @@ describe('agent use cases', () => {
     expect(version.version).toBe(1);
     expect(version.status).toBe('DRAFT');
     expect(version.createdBy).toBe('alice');
+  });
+
+  it('rejects agent creation by a project member who is not OWNER/ORGANISATION_ADMIN (DEVOS-309)', async () => {
+    await deps.memberships.create({
+      id: randomUUID() as Membership['id'],
+      organisationId,
+      projectId,
+      principalId: 'bob',
+      role: 'MEMBER',
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    await expect(
+      createAgent(deps, 'bob', projectId, {
+        key: 'member-cannot-create',
+        name: 'Member Cannot Create',
+        configuration: VALID_CONFIGURATION,
+      }),
+    ).rejects.toThrow(ForbiddenError);
   });
 
   it('rejects a duplicate key within the same project', async () => {
@@ -615,6 +649,58 @@ describe('agent use cases', () => {
       await publishAgentVersion(deps, 'alice', agent.id);
 
       await expect(createNewAgentVersion(deps, 'mallory', agent.id)).rejects.toThrow(NotFoundError);
+    });
+
+    it('rejects a project member who is neither OWNER/ORGANISATION_ADMIN nor the resolved accountable owner (DEVOS-309)', async () => {
+      const { agent } = await createAgent(deps, 'alice', projectId, {
+        key: 'gated-configure',
+        name: 'Gated Configure',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+
+      await deps.memberships.create({
+        id: randomUUID() as Membership['id'],
+        organisationId,
+        projectId,
+        principalId: 'bob',
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      await expect(createNewAgentVersion(deps, 'bob', agent.id)).rejects.toThrow(ForbiddenError);
+    });
+
+    it('lets the resolved accountable owner configure the agent even without OWNER/ORGANISATION_ADMIN (DEVOS-309)', async () => {
+      const { agent } = await createAgent(deps, 'alice', projectId, {
+        key: 'owner-exception',
+        name: 'Owner Exception',
+        configuration: VALID_CONFIGURATION,
+      });
+      await publishAgentVersion(deps, 'alice', agent.id);
+
+      await deps.memberships.create({
+        id: randomUUID() as Membership['id'],
+        organisationId,
+        projectId,
+        principalId: 'carol',
+        role: 'MEMBER',
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      await deps.agentProfiles.create({
+        agentId: agent.id,
+        principalId: agent.id,
+        accountableOwnerId: 'carol',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      const draft = await createNewAgentVersion(deps, 'carol', agent.id);
+      expect(draft.version).toBe(2);
     });
 
     it('writes a real agent_version.drafted audit record', async () => {

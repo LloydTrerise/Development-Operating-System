@@ -17,6 +17,7 @@ import {
   createAccessControlRepository,
   createAgentDraftCreator,
   createAgentExecutionRepository,
+  createAgentProfileRepository,
   createAgentRepository,
   createAgentVersionRepository,
   createApprovalRepository,
@@ -49,6 +50,7 @@ import {
   createToolInvocationRepository,
   createUserIdentityRepository,
   createWorkItemAssignmentRepository,
+  createWorkItemCommentRepository,
   createWorkItemRepository,
   createWorkflowDefinitionRepository,
   createWorkflowDraftCreator,
@@ -354,6 +356,9 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     // DEVOS-304/305 (Sprint 50): backs the new assignment-gated
     // `updateWorkItem` check and the new assign/remove/list use cases.
     workItemAssignments: createWorkItemAssignmentRepository(database.db),
+    // DEVOS-309 (Sprint 51 reconciliation): backs `addWorkItemComment`/
+    // `listWorkItemComments`.
+    workItemComments: createWorkItemCommentRepository(database.db),
   };
   const workflowDeps: WorkflowUseCaseDeps = options.workflowDeps ?? {
     projects: projectDeps.projects,
@@ -395,6 +400,9 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     // real `database.db`, mirroring `costDeps.organisations`'s own
     // established precedent exactly.
     artifacts: createArtifactRepository(database.db),
+    // DEVOS-309 (Sprint 51 reconciliation): backs `createNewAgentVersion`'s
+    // accountable-owner exception.
+    agentProfiles: createAgentProfileRepository(database.db),
   };
   const costDeps: CostUseCaseDeps = options.costDeps ?? {
     projects: projectDeps.projects,

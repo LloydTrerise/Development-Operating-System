@@ -13,10 +13,13 @@ import {
   Typography,
 } from '@mui/material';
 import {
+  addWorkItemComment,
+  archiveWorkItem,
   assignWorkItem,
   getWorkItem,
   listMembers,
   listWorkItemAssignments,
+  listWorkItemComments,
   listWorkItems,
   removeWorkItemAssignment,
   updateWorkItem,
@@ -24,6 +27,7 @@ import {
   type WorkItem,
   type WorkItemAssignment,
   type WorkItemAssignmentRole,
+  type WorkItemComment,
 } from '../../api-client.js';
 import { DetailPageLayout } from '../../components/DetailPageLayout.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
@@ -59,6 +63,13 @@ const ASSIGNMENT_ROLES: WorkItemAssignmentRole[] = ['ASSIGNEE', 'REVIEWER', 'APP
  * fetch `WorkItemsPage.tsx` already performs unbounded for a project — this
  * page reuses that same established, already-accepted cost rather than
  * inventing a new cap for identical data.
+ *
+ * DEVOS-309 (Sprint 51 reconciliation): adds a Comments panel (any project
+ * member may read/post — not assignment-gated) and an Archive action in the
+ * Details panel (`canManageMembers`-gated server-side; the source
+ * document's own `workitem.delete` grants no "project member" access at
+ * all, so this deliberately does not reuse `updateWorkItem`'s broader
+ * ASSIGNEE/REVIEWER/APPROVER-gated status-transition path).
  */
 export function WorkItemDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -86,6 +97,15 @@ export function WorkItemDetailPage() {
   const [parentSelection, setParentSelection] = useState('');
   const [parentSaving, setParentSaving] = useState(false);
   const [parentSaveError, setParentSaveError] = useState<string | null>(null);
+
+  const [comments, setComments] = useState<WorkItemComment[]>([]);
+  const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [newCommentBody, setNewCommentBody] = useState('');
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [commentSubmitError, setCommentSubmitError] = useState<string | null>(null);
+
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -128,6 +148,18 @@ export function WorkItemDetailPage() {
     });
   }
 
+  function refreshComments() {
+    if (!id) return;
+    listWorkItemComments(id).then((result) => {
+      if (!result.ok) {
+        setCommentsError(result.error.message);
+        return;
+      }
+      setCommentsError(null);
+      setComments(result.data);
+    });
+  }
+
   useEffect(() => {
     if (!id || !workItem) return;
 
@@ -142,6 +174,7 @@ export function WorkItemDetailPage() {
       setProjectWorkItems(result.data);
     });
     refreshAssignments();
+    refreshComments();
 
     return () => {
       cancelled = true;
@@ -218,6 +251,42 @@ export function WorkItemDetailPage() {
     setSavedAt(Date.now());
   }
 
+  async function handleAddComment(event: FormEvent) {
+    event.preventDefault();
+    if (!id || !newCommentBody.trim()) return;
+
+    setCommentSubmitting(true);
+    setCommentSubmitError(null);
+    const result = await addWorkItemComment(id, newCommentBody);
+    setCommentSubmitting(false);
+
+    if (!result.ok) {
+      setCommentSubmitError(result.error.message);
+      return;
+    }
+    setNewCommentBody('');
+    refreshComments();
+  }
+
+  async function handleArchive() {
+    if (!id) return;
+    if (!window.confirm('Archive this work item? It stays visible but is marked ARCHIVED.')) {
+      return;
+    }
+
+    setArchiving(true);
+    setArchiveError(null);
+    const result = await archiveWorkItem(id);
+    setArchiving(false);
+
+    if (!result.ok) {
+      setArchiveError(result.error.message);
+      return;
+    }
+    setWorkItem(result.data);
+    setStatus(result.data.status);
+  }
+
   return (
     <DetailPageLayout title={workItem?.title ?? 'Work Item'} backTo="/work-items">
       {loading && <LoadingState label="Loading work item…" />}
@@ -250,6 +319,21 @@ export function WorkItemDetailPage() {
                 <strong>Updated:</strong> {new Date(workItem.updatedAt).toLocaleString()}
               </Typography>
             </Stack>
+            {archiveError && <ErrorAlert message={archiveError} />}
+            <Button
+              variant="outlined"
+              color="error"
+              size="small"
+              disabled={archiving || workItem.status === 'ARCHIVED'}
+              onClick={handleArchive}
+              sx={{ mt: 1.5 }}
+            >
+              {workItem.status === 'ARCHIVED'
+                ? 'Archived'
+                : archiving
+                  ? 'Archiving…'
+                  : 'Archive work item'}
+            </Button>
           </Box>
 
           <Box sx={{ minWidth: 260 }}>
@@ -438,6 +522,52 @@ export function WorkItemDetailPage() {
               >
                 Assign
               </Button>
+            </Stack>
+          </Box>
+
+          <Box sx={{ minWidth: 280 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Comments
+            </Typography>
+            {commentsError && <ErrorAlert message={`Failed to load comments: ${commentsError}`} />}
+
+            <Stack spacing={1} sx={{ mb: 1.5 }}>
+              {comments.map((comment) => (
+                <Box key={comment.id} sx={{ borderLeft: 2, borderColor: 'divider', pl: 1 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    {comment.principalId} · {new Date(comment.createdAt).toLocaleString()}
+                  </Typography>
+                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                    {comment.body}
+                  </Typography>
+                </Box>
+              ))}
+              {comments.length === 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  No comments yet.
+                </Typography>
+              )}
+            </Stack>
+
+            <Stack component="form" onSubmit={handleAddComment} spacing={1}>
+              <TextField
+                label="Add a comment"
+                value={newCommentBody}
+                onChange={(event) => setNewCommentBody(event.target.value)}
+                multiline
+                minRows={2}
+                size="small"
+              />
+              <Button
+                type="submit"
+                variant="outlined"
+                size="small"
+                disabled={commentSubmitting || !newCommentBody.trim()}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                {commentSubmitting ? 'Posting…' : 'Comment'}
+              </Button>
+              {commentSubmitError && <ErrorAlert message={commentSubmitError} />}
             </Stack>
           </Box>
         </Stack>

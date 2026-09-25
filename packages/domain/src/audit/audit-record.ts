@@ -16,6 +16,12 @@ export interface AuditRecord {
   projectId?: ProjectId;
   actorType: AuditActorType;
   actorId: string;
+  /** DEVOS-309 (Sprint 51 reconciliation): resolved, read-only — writers
+   * never set this directly (it is derived from `actorId`/`actorType` at
+   * the repository layer, see `createAuditRecordRepository`); absent for
+   * `SYSTEM` actors or any `USER`/`AGENT` actor id that does not resolve to
+   * a real `principals` row. */
+  actorPrincipalId?: string;
   action: string;
   targetType: string;
   targetId: string;

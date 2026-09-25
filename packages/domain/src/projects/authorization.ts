@@ -59,3 +59,20 @@ export function canPublishWorkflow(role: MembershipRole): boolean {
 export function canManageToolCapabilities(role: MembershipRole): boolean {
   return hasProjectPermission(role, 'tool_capability.manage');
 }
+
+/**
+ * DEVOS-309 (Sprint 51 reconciliation): the role-based half of the source
+ * document's `agent.manage` ("org admin or accountable owner"). Used
+ * directly by `createAgent` (a brand-new agent has no existing
+ * `AgentProfile.accountableOwnerId` to defer to yet, so only this
+ * role-based check applies). `createNewAgentVersion` ("configure" an
+ * existing agent) additionally accepts the agent's own resolved
+ * accountable owner — checked directly against
+ * `AgentProfile.accountableOwnerId` at the call site, not through this
+ * catalogue, mirroring `division.transfer_ownership`'s own "checked
+ * against ... not against a role" precedent (the source document's own
+ * words for that permission apply identically here).
+ */
+export function canManageAgent(role: MembershipRole): boolean {
+  return hasProjectPermission(role, 'agent.manage');
+}

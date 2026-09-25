@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentId, AuditId } from '@devos/contracts';
-import type { AgentVersion } from '@devos/domain';
-import { NotFoundError, ValidationError } from '../errors.js';
+import { canManageAgent, type AgentVersion } from '@devos/domain';
+import { ForbiddenError, NotFoundError, ValidationError } from '../errors.js';
 import { resolveMembership } from '../projects/membership-access.js';
 import type { AgentUseCaseDeps } from './deps.js';
 
@@ -29,6 +29,19 @@ export async function createNewAgentVersion(
 
   const membership = await resolveMembership(deps, principalId, project);
   if (!membership) throw new NotFoundError('Agent');
+
+  // DEVOS-309 (Sprint 51 reconciliation): "configure" an existing agent —
+  // the role-based `agent.manage` gate, or the agent's own resolved
+  // accountable owner (checked directly, not through the catalogue,
+  // mirroring `division.transfer_ownership`'s "checked against ... not
+  // against a role" precedent). `deps.agentProfiles` is optional (see its
+  // own doc comment) — absence only narrows the accountable-owner
+  // exception away, the role-based check always still applies.
+  const profile = await deps.agentProfiles?.getByAgentId(agentId);
+  const isAccountableOwner = profile?.accountableOwnerId === principalId;
+  if (!canManageAgent(membership.role) && !isAccountableOwner) {
+    throw new ForbiddenError();
+  }
 
   const latest = await deps.agentVersions.getLatestForAgent(agentId);
   if (!latest) throw new NotFoundError('Agent version');

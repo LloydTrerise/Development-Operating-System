@@ -22,6 +22,12 @@ export const projectPermissionKeys = [
   'agent.publish',
   'workflow.publish',
   'tool_capability.manage',
+  /** DEVOS-309 (Sprint 51 reconciliation, migration `0057`): "create,
+   * configure" an agent — see `canManageAgent`'s own doc comment in
+   * `../projects/authorization.ts` for why this is role-based only for
+   * creation, with a separate, non-catalogue accountable-owner exception
+   * layered on top for configuring an existing agent. */
+  'agent.manage',
 ] as const;
 export type ProjectPermissionKey = (typeof projectPermissionKeys)[number];
 

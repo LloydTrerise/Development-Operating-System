@@ -15,6 +15,7 @@ function toDomain(row: AuditRecordsTable): AuditRecord {
     ...(row.project_id !== null ? { projectId: row.project_id as ProjectId } : {}),
     actorType: row.actor_type as AuditActorType,
     actorId: row.actor_id,
+    ...(row.actor_principal_id !== null ? { actorPrincipalId: row.actor_principal_id } : {}),
     action: row.action,
     targetType: row.target_type,
     targetId: row.target_id,
@@ -28,6 +29,23 @@ function toDomain(row: AuditRecordsTable): AuditRecord {
 export function createAuditRecordRepository(db: QueryExecutor): AuditRecordRepository {
   return {
     async create(record) {
+      // DEVOS-309 (Sprint 51 reconciliation): resolved here, not accepted
+      // as writer input (see `AuditRecord.actorPrincipalId`'s own doc
+      // comment) — a real existence check, not an unconditional copy of
+      // `actor_id`, since `actor_principal_id` carries a real FK to
+      // `principals.id` and an unconditional copy would reject the whole
+      // audit write whenever a USER/AGENT actor id does not (yet) resolve
+      // to one.
+      let actorPrincipalId: string | null = null;
+      if (record.actorType === 'USER' || record.actorType === 'AGENT') {
+        const principal = await db
+          .selectFrom('principals')
+          .select('id')
+          .where('id', '=', record.actorId)
+          .executeTakeFirst();
+        actorPrincipalId = principal?.id ?? null;
+      }
+
       await db
         .insertInto('audit_records')
         .values({
@@ -36,6 +54,7 @@ export function createAuditRecordRepository(db: QueryExecutor): AuditRecordRepos
           project_id: record.projectId ?? null,
           actor_type: record.actorType,
           actor_id: record.actorId,
+          actor_principal_id: actorPrincipalId,
           action: record.action,
           target_type: record.targetType,
           target_id: record.targetId,

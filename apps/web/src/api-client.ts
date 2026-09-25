@@ -176,6 +176,16 @@ export interface WorkItemAssignment {
   createdAt: string;
 }
 
+/** DEVOS-309 (Sprint 51 reconciliation): `packages/domain/src/work-items/
+ * work-item-comment.ts`'s `WorkItemComment`. */
+export interface WorkItemComment {
+  id: string;
+  workItemId: string;
+  principalId: string;
+  body: string;
+  createdAt: string;
+}
+
 export interface WorkflowDefinitionSummary {
   id: string;
   projectId: string;
@@ -747,6 +757,31 @@ export function removeWorkItemAssignment(
     `/api/v1/work-items/${workItemId}/assignments/${principalId}/${role}`,
     { method: 'DELETE' },
   );
+}
+
+/** DEVOS-309 (Sprint 51 reconciliation): any project member may read/post
+ * comments — not assignment-gated, unlike `assignWorkItem`. */
+export function listWorkItemComments(workItemId: string): Promise<ApiResult<WorkItemComment[]>> {
+  return request<WorkItemComment[]>(`/api/v1/work-items/${workItemId}/comments`);
+}
+
+export function addWorkItemComment(
+  workItemId: string,
+  body: string,
+): Promise<ApiResult<WorkItemComment>> {
+  return request<WorkItemComment>(`/api/v1/work-items/${workItemId}/comments`, {
+    method: 'POST',
+    body: { body },
+  });
+}
+
+/** DEVOS-309: gated server-side to `canManageMembers` (project OWNER/
+ * organisation admin) — the source document's `workitem.delete` grants no
+ * "project member" access at all, unlike every other `workitem.*`
+ * permission. Implemented as a soft archive (`status: 'ARCHIVED'`), not a
+ * hard delete. */
+export function archiveWorkItem(workItemId: string): Promise<ApiResult<WorkItem>> {
+  return request<WorkItem>(`/api/v1/work-items/${workItemId}/archive`, { method: 'POST' });
 }
 
 export function listWorkflows(projectId: string): Promise<ApiResult<WorkflowDefinitionSummary[]>> {

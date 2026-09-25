@@ -97,6 +97,16 @@ export interface WorkItemAssignmentsTable {
   created_at: string;
 }
 
+/** DEVOS-309 (Sprint 51 reconciliation, migration `0058`): `packages/domain/
+ * src/work-items/work-item-comment.ts`. */
+export interface WorkItemCommentsTable {
+  id: string;
+  work_item_id: string;
+  principal_id: string;
+  body: string;
+  created_at: string;
+}
+
 export interface AgentsTable {
   id: string;
   project_id: string;
@@ -261,6 +271,11 @@ export interface AuditRecordsTable {
   project_id: string | null;
   actor_type: string;
   actor_id: string;
+  /** DEVOS-309 (Sprint 51 reconciliation): a real, nullable FK to
+   * `principals.id`, populated only for `USER`/`AGENT` actor rows —
+   * `SYSTEM` actor rows (e.g. `devos-worker`) are never `principals` rows
+   * and always leave this `null`. See migration `0056`. */
+  actor_principal_id: string | null;
   action: string;
   target_type: string;
   target_id: string;
@@ -476,6 +491,7 @@ export interface Database {
   memberships: MembershipsTable;
   work_items: WorkItemsTable;
   work_item_assignments: WorkItemAssignmentsTable;
+  work_item_comments: WorkItemCommentsTable;
   agents: AgentsTable;
   agent_versions: AgentVersionsTable;
   agent_profiles: AgentProfilesTable;

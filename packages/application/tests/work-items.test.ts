@@ -10,16 +10,21 @@ import type {
   WorkItem,
   WorkItemAssignment,
   WorkItemAssignmentRepository,
+  WorkItemComment,
+  WorkItemCommentRepository,
   WorkItemRepository,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { addWorkItemComment } from '../src/work-items/add-work-item-comment.js';
+import { archiveWorkItem } from '../src/work-items/archive-work-item.js';
 import { assignWorkItem } from '../src/work-items/assign-work-item.js';
 import { createWorkItem } from '../src/work-items/create-work-item.js';
 import type { WorkItemUseCaseDeps } from '../src/work-items/deps.js';
 import { listWorkItemAssignments } from '../src/work-items/list-work-item-assignments.js';
+import { listWorkItemComments } from '../src/work-items/list-work-item-comments.js';
 import { removeWorkItemAssignment } from '../src/work-items/remove-work-item-assignment.js';
 import { updateWorkItem } from '../src/work-items/update-work-item.js';
-import { ForbiddenError, ValidationError } from '../src/errors.js';
+import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
 
 const PROJECT_ID = randomUUID() as ProjectId;
 const OTHER_PROJECT_ID = randomUUID() as ProjectId;
@@ -143,12 +148,22 @@ function createInMemoryDeps(): WorkItemUseCaseDeps {
       auditRecordsStore.filter((r) => r.organisationId === organisationId),
   };
 
+  const workItemComments: WorkItemComment[] = [];
+  const workItemCommentRepository: WorkItemCommentRepository = {
+    listForWorkItem: async (workItemId) =>
+      workItemComments.filter((c) => c.workItemId === workItemId),
+    create: async (comment) => {
+      workItemComments.push(comment);
+    },
+  };
+
   return {
     projects: projectRepository,
     memberships: membershipRepository,
     workItems: workItemRepository,
     auditRecords,
     workItemAssignments: workItemAssignmentRepository,
+    workItemComments: workItemCommentRepository,
   };
 }
 
@@ -339,5 +354,74 @@ describe('work item use cases (DEVOS-303/304/305, Sprint 50)', () => {
     await expect(
       assignWorkItem(deps, 'member', workItem.id, 'reviewer', 'REVIEWER'),
     ).rejects.toThrow(ForbiddenError);
+  });
+
+  describe('DEVOS-309 (Sprint 51 reconciliation): comments', () => {
+    it('lets any resolved project member comment and read comments, in creation order', async () => {
+      const workItem = await createWorkItem(deps, 'owner', PROJECT_ID, { title: 'A task' });
+
+      const first = await addWorkItemComment(deps, 'owner', workItem.id, { body: 'First' });
+      const second = await addWorkItemComment(deps, 'member', workItem.id, { body: 'Second' });
+
+      expect(first.principalId).toBe('owner');
+      expect(second.principalId).toBe('member');
+
+      const comments = await listWorkItemComments(deps, 'reviewer', workItem.id);
+      expect(comments.map((c) => c.body)).toEqual(['First', 'Second']);
+
+      const audit = await deps.auditRecords.listForProject(PROJECT_ID);
+      expect(audit).toContainEqual(
+        expect.objectContaining({ action: 'work-item.commented', actorId: 'member' }),
+      );
+    });
+
+    it('rejects an empty comment body', async () => {
+      const workItem = await createWorkItem(deps, 'owner', PROJECT_ID, { title: 'A task' });
+      await expect(addWorkItemComment(deps, 'owner', workItem.id, { body: '   ' })).rejects.toThrow(
+        ValidationError,
+      );
+    });
+
+    it('rejects a non-member with NotFoundError', async () => {
+      const workItem = await createWorkItem(deps, 'owner', PROJECT_ID, { title: 'A task' });
+      await expect(
+        addWorkItemComment(deps, 'mallory', workItem.id, { body: 'Hi' }),
+      ).rejects.toThrow(NotFoundError);
+      await expect(listWorkItemComments(deps, 'mallory', workItem.id)).rejects.toThrow(
+        NotFoundError,
+      );
+    });
+  });
+
+  describe('DEVOS-309 (Sprint 51 reconciliation): archive', () => {
+    it('lets OWNER archive a work item, denies a plain MEMBER (even the ASSIGNEE)', async () => {
+      const workItem = await createWorkItem(deps, 'owner', PROJECT_ID, { title: 'A task' });
+      // 'owner' is auto-assigned ASSIGNEE on creation (Sprint 50) but that
+      // alone must not be enough — workitem.delete has no "project member"
+      // grant at all in the source document, unlike every other
+      // workitem.* permission.
+      await assignWorkItem(deps, 'owner', workItem.id, 'member', 'ASSIGNEE');
+
+      await expect(archiveWorkItem(deps, 'member', workItem.id)).rejects.toThrow(ForbiddenError);
+
+      const archived = await archiveWorkItem(deps, 'owner', workItem.id);
+      expect(archived.status).toBe('ARCHIVED');
+
+      const audit = await deps.auditRecords.listForProject(PROJECT_ID);
+      expect(audit).toContainEqual(
+        expect.objectContaining({ action: 'work-item.archived', targetId: workItem.id }),
+      );
+    });
+
+    it('rejects archiving an already-archived work item', async () => {
+      const workItem = await createWorkItem(deps, 'owner', PROJECT_ID, { title: 'A task' });
+      await archiveWorkItem(deps, 'owner', workItem.id);
+      await expect(archiveWorkItem(deps, 'owner', workItem.id)).rejects.toThrow(ValidationError);
+    });
+
+    it('rejects a non-member with NotFoundError', async () => {
+      const workItem = await createWorkItem(deps, 'owner', PROJECT_ID, { title: 'A task' });
+      await expect(archiveWorkItem(deps, 'mallory', workItem.id)).rejects.toThrow(NotFoundError);
+    });
   });
 });

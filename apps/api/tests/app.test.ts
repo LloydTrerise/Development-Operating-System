@@ -89,6 +89,8 @@ import {
   type WorkItem,
   type WorkItemAssignment,
   type WorkItemAssignmentRepository,
+  type WorkItemComment,
+  type WorkItemCommentRepository,
   type WorkItemRepository,
   type WorkflowDefinition,
   type WorkflowDefinitionRepository,
@@ -424,6 +426,18 @@ function createInMemoryWorkItemAssignmentRepository(): WorkItemAssignmentReposit
   };
 }
 
+function createInMemoryWorkItemCommentRepository(): WorkItemCommentRepository {
+  const comments: WorkItemComment[] = [];
+
+  return {
+    listForWorkItem: async (workItemId) =>
+      comments.filter((comment) => comment.workItemId === workItemId),
+    create: async (comment) => {
+      comments.push(comment);
+    },
+  };
+}
+
 function createInMemoryWorkItemDeps(projectDeps: ProjectUseCaseDeps): WorkItemUseCaseDeps {
   const workItems = new Map<string, WorkItem>();
 
@@ -457,6 +471,8 @@ function createInMemoryWorkItemDeps(projectDeps: ProjectUseCaseDeps): WorkItemUs
     auditRecords: projectDeps.auditRecords,
     // DEVOS-304/305 (Sprint 50).
     workItemAssignments: createInMemoryWorkItemAssignmentRepository(),
+    // DEVOS-309 (Sprint 51 reconciliation).
+    workItemComments: createInMemoryWorkItemCommentRepository(),
   };
 }
 
@@ -1808,6 +1824,81 @@ describe('work item routes', () => {
         body: JSON.stringify({ principalId: 'frank', role: 'REVIEWER' }),
       });
       expect(response.status).toBe(403);
+    });
+  });
+
+  describe('DEVOS-309 (Sprint 51 reconciliation): comments and archive', () => {
+    it('lets any project member comment and read comments, rejects an empty body', async () => {
+      const created = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Commentable item' }),
+      });
+      const workItemId = (await created.json()).data.id;
+
+      await authed(`/api/v1/projects/${projectId}/members`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'gina', role: 'MEMBER' }),
+      });
+
+      const postResponse = await authed(`/api/v1/work-items/${workItemId}/comments`, 'gina', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'Looks good to me' }),
+      });
+      expect(postResponse.status).toBe(200);
+      const posted = (await postResponse.json()).data;
+      expect(posted).toMatchObject({ workItemId, principalId: 'gina', body: 'Looks good to me' });
+
+      const listResponse = await authed(`/api/v1/work-items/${workItemId}/comments`, 'alice');
+      const comments = (await listResponse.json()).data;
+      expect(comments).toContainEqual(expect.objectContaining({ id: posted.id }));
+
+      const emptyResponse = await authed(`/api/v1/work-items/${workItemId}/comments`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: '   ' }),
+      });
+      expect(emptyResponse.status).toBe(400);
+
+      const deniedResponse = await authed(`/api/v1/work-items/${workItemId}/comments`, 'mallory', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'sneaking in' }),
+      });
+      expect(deniedResponse.status).toBe(404);
+    });
+
+    it('lets OWNER archive a work item, denies a plain MEMBER, and rejects a second archive', async () => {
+      const created = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Archivable item' }),
+      });
+      const workItemId = (await created.json()).data.id;
+
+      await authed(`/api/v1/projects/${projectId}/members`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'harold', role: 'MEMBER' }),
+      });
+
+      const deniedResponse = await authed(`/api/v1/work-items/${workItemId}/archive`, 'harold', {
+        method: 'POST',
+      });
+      expect(deniedResponse.status).toBe(403);
+
+      const archiveResponse = await authed(`/api/v1/work-items/${workItemId}/archive`, 'alice', {
+        method: 'POST',
+      });
+      expect(archiveResponse.status).toBe(200);
+      expect((await archiveResponse.json()).data.status).toBe('ARCHIVED');
+
+      const secondAttempt = await authed(`/api/v1/work-items/${workItemId}/archive`, 'alice', {
+        method: 'POST',
+      });
+      expect(secondAttempt.status).toBe(400);
     });
   });
 });
