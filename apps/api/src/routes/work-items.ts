@@ -1,16 +1,21 @@
 import type { ProjectId, WorkItemId } from '@devos/contracts';
 import {
+  assignWorkItem,
   createWorkItem,
   getWorkItemForPrincipal,
   getWorkflowRunsForWorkItem,
+  listWorkItemAssignments,
   listWorkItemsForProject,
+  removeWorkItemAssignment,
   updateWorkItem,
   type GetWorkflowRunsForWorkItemDeps,
   type WorkItemUseCaseDeps,
 } from '@devos/application';
 import {
+  parseAssignWorkItemBody,
   parseCreateWorkItemBody,
   parseUpdateWorkItemBody,
+  toWorkItemAssignmentDto,
   toWorkItemDto,
 } from '../dto/work-item.js';
 import { toWorkflowRunDto } from '../dto/workflow-run.js';
@@ -41,8 +46,11 @@ export function createWorkItemRoutes(
       protected: true,
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
-        const input = parseCreateWorkItemBody(body);
-        const workItem = await createWorkItem(deps, user.id, params.projectId as ProjectId, input);
+        const { parentId, ...input } = parseCreateWorkItemBody(body);
+        const workItem = await createWorkItem(deps, user.id, params.projectId as ProjectId, {
+          ...input,
+          ...(parentId !== undefined ? { parentId: parentId as WorkItemId } : {}),
+        });
         return toWorkItemDto(workItem);
       },
     },
@@ -66,13 +74,13 @@ export function createWorkItemRoutes(
       protected: true,
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
-        const changes = parseUpdateWorkItemBody(body);
-        const workItem = await updateWorkItem(
-          deps,
-          user.id,
-          params.workItemId as WorkItemId,
-          changes,
-        );
+        const { parentId, ...changes } = parseUpdateWorkItemBody(body);
+        const workItem = await updateWorkItem(deps, user.id, params.workItemId as WorkItemId, {
+          ...changes,
+          ...(parentId !== undefined
+            ? { parentId: parentId === null ? null : (parentId as WorkItemId) }
+            : {}),
+        });
         return toWorkItemDto(workItem);
       },
     },
@@ -91,6 +99,54 @@ export function createWorkItemRoutes(
           params.workItemId as WorkItemId,
         );
         return runs.map(toWorkflowRunDto);
+      },
+    },
+    // DEVOS-306 (Sprint 50): the work item detail view's assignment picker.
+    {
+      method: 'GET',
+      pattern: `${prefix}/work-items/:workItemId/assignments`,
+      protected: true,
+      handler: async ({ principal, params }) => {
+        const user = requirePrincipal(principal);
+        const assignments = await listWorkItemAssignments(
+          deps,
+          user.id,
+          params.workItemId as WorkItemId,
+        );
+        return assignments.map(toWorkItemAssignmentDto);
+      },
+    },
+    {
+      method: 'POST',
+      pattern: `${prefix}/work-items/:workItemId/assignments`,
+      protected: true,
+      handler: async ({ principal, params, body }) => {
+        const user = requirePrincipal(principal);
+        const input = parseAssignWorkItemBody(body);
+        const assignment = await assignWorkItem(
+          deps,
+          user.id,
+          params.workItemId as WorkItemId,
+          input.principalId,
+          input.role,
+        );
+        return toWorkItemAssignmentDto(assignment);
+      },
+    },
+    {
+      method: 'DELETE',
+      pattern: `${prefix}/work-items/:workItemId/assignments/:principalId/:role`,
+      protected: true,
+      handler: async ({ principal, params }) => {
+        const user = requirePrincipal(principal);
+        await removeWorkItemAssignment(
+          deps,
+          user.id,
+          params.workItemId as WorkItemId,
+          params.principalId!,
+          params.role!,
+        );
+        return { removed: true };
       },
     },
   ];

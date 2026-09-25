@@ -87,6 +87,8 @@ import {
   type ToolInvocation,
   type ToolInvocationRepository,
   type WorkItem,
+  type WorkItemAssignment,
+  type WorkItemAssignmentRepository,
   type WorkItemRepository,
   type WorkflowDefinition,
   type WorkflowDefinitionRepository,
@@ -399,6 +401,29 @@ function createInMemoryJobRoleDeps(
   };
 }
 
+function createInMemoryWorkItemAssignmentRepository(): WorkItemAssignmentRepository {
+  // Composite-key map, mirroring this file's own established
+  // `${a}:${b}` in-memory-key convention (see `createInMemoryWorkItemDeps`
+  // below and the job-role in-memory repositories further down this file).
+  const assignments = new Map<string, WorkItemAssignment>();
+  const key = (workItemId: string, principalId: string, role: string) =>
+    `${workItemId}:${principalId}:${role}`;
+
+  return {
+    listForWorkItem: async (workItemId) =>
+      [...assignments.values()].filter((a) => a.workItemId === workItemId),
+    create: async (assignment) => {
+      assignments.set(
+        key(assignment.workItemId, assignment.principalId, assignment.role),
+        assignment,
+      );
+    },
+    remove: async (workItemId, principalId, role) => {
+      assignments.delete(key(workItemId, principalId, role));
+    },
+  };
+}
+
 function createInMemoryWorkItemDeps(projectDeps: ProjectUseCaseDeps): WorkItemUseCaseDeps {
   const workItems = new Map<string, WorkItem>();
 
@@ -430,6 +455,8 @@ function createInMemoryWorkItemDeps(projectDeps: ProjectUseCaseDeps): WorkItemUs
     memberships: projectDeps.memberships,
     workItems: workItemRepository,
     auditRecords: projectDeps.auditRecords,
+    // DEVOS-304/305 (Sprint 50).
+    workItemAssignments: createInMemoryWorkItemAssignmentRepository(),
   };
 }
 
@@ -1461,6 +1488,327 @@ describe('work item routes', () => {
       'alice',
     );
     expect(response.status).toBe(404);
+  });
+
+  // DEVOS-305 (Sprint 50): the creator becomes the initial ASSIGNEE on
+  // create, and non-assignee project members are now denied edits — the
+  // real narrowing this sprint introduces (`packages/domain/src/work-items/
+  // work-item.ts` had no assignment concept at all before this sprint).
+  describe('assignment-gated edit/transition (DEVOS-305)', () => {
+    let workItemId: string;
+
+    beforeAll(async () => {
+      await authed(`/api/v1/projects/${projectId}/members`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'bob', role: 'MEMBER' }),
+      });
+
+      const created = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Assignment-gated item' }),
+      });
+      workItemId = (await created.json()).data.id;
+    });
+
+    it('lets the creator (auto-assigned ASSIGNEE) edit and transition', async () => {
+      const response = await authed(`/api/v1/work-items/${workItemId}`, 'alice', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Renamed by creator', status: 'IN_PROGRESS' }),
+      });
+      expect(response.status).toBe(200);
+    });
+
+    it('denies a non-assignee project member from editing', async () => {
+      const response = await authed(`/api/v1/work-items/${workItemId}`, 'bob', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Bob tries to rename' }),
+      });
+      expect(response.status).toBe(403);
+    });
+
+    it('denies a non-assignee/reviewer/approver project member from transitioning status', async () => {
+      const response = await authed(`/api/v1/work-items/${workItemId}`, 'bob', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'DONE' }),
+      });
+      expect(response.status).toBe(403);
+    });
+
+    it('lets a REVIEWER transition status but not edit non-status fields', async () => {
+      const grantResponse = await authed(`/api/v1/work-items/${workItemId}/assignments`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ principalId: 'bob', role: 'REVIEWER' }),
+      });
+      expect(grantResponse.status).toBe(200);
+
+      const transitionResponse = await authed(`/api/v1/work-items/${workItemId}`, 'bob', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'IN_REVIEW' }),
+      });
+      expect(transitionResponse.status).toBe(200);
+
+      const editResponse = await authed(`/api/v1/work-items/${workItemId}`, 'bob', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Bob the reviewer tries to rename' }),
+      });
+      expect(editResponse.status).toBe(403);
+    });
+
+    it('denies a non-managing member from granting/revoking an assignment', async () => {
+      const response = await authed(`/api/v1/work-items/${workItemId}/assignments`, 'bob', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ principalId: 'bob', role: 'ASSIGNEE' }),
+      });
+      expect(response.status).toBe(403);
+    });
+
+    it('lists, then removes, an assignment', async () => {
+      const listResponse = await authed(`/api/v1/work-items/${workItemId}/assignments`, 'alice');
+      const listBody = await listResponse.json();
+      expect(listBody.data).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ principalId: 'alice', role: 'ASSIGNEE' }),
+          expect.objectContaining({ principalId: 'bob', role: 'REVIEWER' }),
+        ]),
+      );
+
+      const removeResponse = await authed(
+        `/api/v1/work-items/${workItemId}/assignments/bob/REVIEWER`,
+        'alice',
+        { method: 'DELETE' },
+      );
+      expect(removeResponse.status).toBe(200);
+
+      const afterRemove = await authed(`/api/v1/work-items/${workItemId}`, 'bob', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'DONE' }),
+      });
+      expect(afterRemove.status).toBe(403);
+    });
+  });
+
+  // DEVOS-303 (Sprint 50): `parentId` — same-project only, no self-parent.
+  describe('parent work item (DEVOS-303)', () => {
+    it('accepts a same-project parent and rejects a cross-project one', async () => {
+      const parent = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Parent item' }),
+      });
+      const parentId = (await parent.json()).data.id;
+
+      const child = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Child item', parentId }),
+      });
+      const childBody = await child.json();
+      expect(child.status).toBe(200);
+      expect(childBody.data.parentId).toBe(parentId);
+
+      const otherProject = await authed('/api/v1/projects', 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Other Project', slug: 'other-parent-project' }),
+      });
+      const otherProjectId = (await otherProject.json()).data.id;
+
+      const crossProjectChild = await authed(
+        `/api/v1/projects/${otherProjectId}/work-items`,
+        'alice',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ title: 'Cross-project child', parentId }),
+        },
+      );
+      expect(crossProjectChild.status).toBe(400);
+    });
+
+    it('rejects a work item being set as its own parent', async () => {
+      const created = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Self-parent attempt' }),
+      });
+      const id = (await created.json()).data.id;
+
+      const response = await authed(`/api/v1/work-items/${id}`, 'alice', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ parentId: id }),
+      });
+      expect(response.status).toBe(400);
+    });
+
+    it('rejects a multi-hop parentId cycle (A -> B -> A)', async () => {
+      const a = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Cycle A' }),
+      });
+      const aId = (await a.json()).data.id;
+
+      const b = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Cycle B', parentId: aId }),
+      });
+      const bId = (await b.json()).data.id;
+
+      const response = await authed(`/api/v1/work-items/${aId}`, 'alice', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ parentId: bId }),
+      });
+      expect(response.status).toBe(400);
+    });
+
+    it('explicitly clears a parent with a literal null', async () => {
+      const parent = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Clear-parent parent' }),
+      });
+      const parentId = (await parent.json()).data.id;
+
+      const child = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Clear-parent child', parentId }),
+      });
+      const childId = (await child.json()).data.id;
+
+      const cleared = await authed(`/api/v1/work-items/${childId}`, 'alice', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ parentId: null }),
+      });
+      const clearedBody = await cleared.json();
+      expect(cleared.status).toBe(200);
+      expect(clearedBody.data.parentId).toBeUndefined();
+    });
+  });
+
+  // DEVOS-305 follow-up: the current ASSIGNEE may hand ASSIGNEE off to
+  // another member without needing canManageMembers, added after this
+  // sprint's own initial completion per explicit user request.
+  describe('ASSIGNEE hand-off (DEVOS-305 follow-up)', () => {
+    it('lets the current ASSIGNEE hand off to another member, and it is a real transfer', async () => {
+      await authed(`/api/v1/projects/${projectId}/members`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'carol', role: 'MEMBER' }),
+      });
+      await authed(`/api/v1/projects/${projectId}/members`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'dave', role: 'MEMBER' }),
+      });
+
+      const created = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Hand-off item' }),
+      });
+      const workItemId = (await created.json()).data.id;
+
+      // alice (auto-assigned ASSIGNEE, not canManageMembers-relevant here
+      // since she's OWNER anyway) hands off to carol via the ordinary
+      // canManageMembers path first, to get a non-OWNER ASSIGNEE in place.
+      await authed(`/api/v1/work-items/${workItemId}/assignments`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ principalId: 'carol', role: 'ASSIGNEE' }),
+      });
+
+      // carol (plain MEMBER, not canManageMembers) hands ASSIGNEE off to
+      // dave — should succeed via the hand-off exception.
+      const handoff = await authed(`/api/v1/work-items/${workItemId}/assignments`, 'carol', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ principalId: 'dave', role: 'ASSIGNEE' }),
+      });
+      expect(handoff.status).toBe(200);
+
+      const assignmentsResponse = await authed(
+        `/api/v1/work-items/${workItemId}/assignments`,
+        'alice',
+      );
+      const assignments = (await assignmentsResponse.json()).data;
+      expect(
+        assignments.some(
+          (a: { principalId: string; role: string }) =>
+            a.principalId === 'carol' && a.role === 'ASSIGNEE',
+        ),
+      ).toBe(false);
+      expect(
+        assignments.some(
+          (a: { principalId: string; role: string }) =>
+            a.principalId === 'dave' && a.role === 'ASSIGNEE',
+        ),
+      ).toBe(true);
+
+      // carol no longer holds ASSIGNEE, so a further hand-off by her is denied.
+      const deniedFurtherHandoff = await authed(
+        `/api/v1/work-items/${workItemId}/assignments`,
+        'carol',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ principalId: 'alice', role: 'ASSIGNEE' }),
+        },
+      );
+      expect(deniedFurtherHandoff.status).toBe(403);
+    });
+
+    it('does not extend the hand-off exception to REVIEWER/APPROVER grants', async () => {
+      await authed(`/api/v1/projects/${projectId}/members`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'erin', role: 'MEMBER' }),
+      });
+      await authed(`/api/v1/projects/${projectId}/members`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'frank', role: 'MEMBER' }),
+      });
+
+      const created = await authed(`/api/v1/projects/${projectId}/work-items`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Hand-off exception scope item' }),
+      });
+      const workItemId = (await created.json()).data.id;
+
+      // Give erin ASSIGNEE via the ordinary canManageMembers path, so she
+      // genuinely holds it but is not herself canManageMembers.
+      await authed(`/api/v1/work-items/${workItemId}/assignments`, 'alice', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ principalId: 'erin', role: 'ASSIGNEE' }),
+      });
+
+      // erin holds ASSIGNEE but the hand-off exception only ever applies to
+      // the ASSIGNEE role itself — granting REVIEWER to frank must still
+      // require canManageMembers.
+      const response = await authed(`/api/v1/work-items/${workItemId}/assignments`, 'erin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ principalId: 'frank', role: 'REVIEWER' }),
+      });
+      expect(response.status).toBe(403);
+    });
   });
 });
 

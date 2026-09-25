@@ -14,6 +14,9 @@ export interface WorkItem {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** DEVOS-303: same-project parent, enforced at the database layer
+   * (migration `0053`'s composite FK to `work_items(id, project_id)`). */
+  parentId?: WorkItemId;
 }
 
 export interface CreateWorkItemInput {
@@ -24,6 +27,7 @@ export interface CreateWorkItemInput {
   priority?: string;
   source?: string;
   metadata?: Record<string, unknown>;
+  parentId?: WorkItemId;
 }
 
 export interface UpdateWorkItemInput {
@@ -32,6 +36,11 @@ export interface UpdateWorkItemInput {
   status?: string;
   priority?: string;
   metadata?: Record<string, unknown>;
+  /** DEVOS-303: omitted = no change; a `WorkItemId` = set/replace the
+   * parent; `null` = explicitly clear it (detach from its current parent).
+   * `CreateWorkItemInput.parentId` has no `null` case — a work item being
+   * created has no existing parent to clear. */
+  parentId?: WorkItemId | null;
 }
 
 export interface WorkItemReworkCount {

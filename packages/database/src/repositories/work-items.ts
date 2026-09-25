@@ -19,6 +19,7 @@ function toDomain(row: WorkItemsTable): WorkItem {
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ...(row.parent_id !== null ? { parentId: row.parent_id as WorkItemId } : {}),
   };
 }
 
@@ -60,6 +61,7 @@ export function createWorkItemRepository(db: QueryExecutor): WorkItemRepository 
           created_by: workItem.createdBy,
           created_at: workItem.createdAt,
           updated_at: workItem.updatedAt,
+          parent_id: workItem.parentId ?? null,
         })
         .execute();
     },
@@ -73,6 +75,7 @@ export function createWorkItemRepository(db: QueryExecutor): WorkItemRepository 
           ...(changes.status !== undefined ? { status: changes.status } : {}),
           ...(changes.priority !== undefined ? { priority: changes.priority } : {}),
           ...(changes.metadata !== undefined ? { metadata: JSON.stringify(changes.metadata) } : {}),
+          ...(changes.parentId !== undefined ? { parent_id: changes.parentId } : {}),
           updated_at: updatedAt,
         })
         .where('id', '=', id)

@@ -48,6 +48,7 @@ import {
   createToolCapabilityRepository,
   createToolInvocationRepository,
   createUserIdentityRepository,
+  createWorkItemAssignmentRepository,
   createWorkItemRepository,
   createWorkflowDefinitionRepository,
   createWorkflowDraftCreator,
@@ -350,6 +351,9 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     memberships: projectDeps.memberships,
     workItems: createWorkItemRepository(database.db),
     auditRecords: auditRecordRepository,
+    // DEVOS-304/305 (Sprint 50): backs the new assignment-gated
+    // `updateWorkItem` check and the new assign/remove/list use cases.
+    workItemAssignments: createWorkItemAssignmentRepository(database.db),
   };
   const workflowDeps: WorkflowUseCaseDeps = options.workflowDeps ?? {
     projects: projectDeps.projects,

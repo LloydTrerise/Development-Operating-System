@@ -1,0 +1,62 @@
+# Sprint 50 — Work Item Assignment & Hierarchy
+
+**Source:** `specs/DEVOS-ACCESS-CONTROL-MODEL-BACKLOG.md` §5/§6.5 (candidate epic E29, Identity & Access Control Redesign).
+**Conversion date:** 2026-09-25
+**Status:** Converted and executed per explicit user authorization ("Proceed with sprint. Run through sprint fully without waiting for authorisation after each task. Stop once sprint is done", 2026-09-25), in direct response to a position report confirming Sprint 49 complete and Sprint 50 the recorded next item, per `AGENTS.md` §35/§4.2.
+
+## Goal
+
+Give a work item a real same-project parent (`parentId`) and a real `WORK_ITEM_ASSIGNMENT` concept (`ASSIGNEE`/`REVIEWER`/`APPROVER`), then use that concept to narrow the previously-unrestricted `PATCH /work-items/:id` endpoint: editing non-status fields now requires holding `ASSIGNEE` on that specific work item; changing `status` (a transition) requires `ASSIGNEE`, `REVIEWER`, or `APPROVER` — per decision §9.6, backfilled before the restriction takes effect so nothing already in flight becomes suddenly uneditable.
+
+## Grounding (confirmed by direct code inspection at implementation time)
+
+- Confirmed `WorkItem` (`packages/domain/src/work-items/work-item.ts`) had no `assigneeId`/`reviewerId`/`approverId` and no `parent_id` column anywhere (absent from both `0004_work_items.ts` and `0013_work_items_add_metadata.ts`), and that today's `updateWorkItem` use case had no work-item-scoped restriction at all — any resolved project member could edit any work item, confirmed by reading `packages/application/src/work-items/update-work-item.ts` before this sprint's changes.
+- **Real, disclosed correction to the source document's own `reporter_id` language**: no `reporter_id` column has ever existed in this schema — `work_items.created_by` is the only creator-attribution field a work item has, confirmed by grep across both work-item migrations. The backfill (DEVOS-305) and every reference to "reporter" in this sprint's own documentation use `created_by`, the same class of gap Sprint 48 (DEVOS-296) already found and resolved identically for `agents.accountable_owner_id`.
+- Migration `0053`'s same-project parent constraint follows migration `0052`'s own established technique exactly: Postgres cannot express "the referenced row must share one of its own scope columns" with a plain single-column FK, so a real unique constraint on `work_items(id, project_id)` (trivially satisfiable, since `id` is already the primary key) is added purely so a composite FK — `(parent_id, project_id)` REFERENCES `(id, project_id)` — can target it, mirroring `project_member_job_roles_principal_job_role_fkey`'s identical shape.
+- `work_item_assignments.principal_id` is given a real FK to `principals.id` (migration `0054`) rather than left as a bare, unconstrained `text` column the way `memberships.principal_id` still is — a deliberate choice to follow this epic's own newer, stricter convention (`principal_job_roles`/`project_member_job_roles`, migrations `0051`/`0052`), verified safe against this environment's real data before writing the migration: a direct Postgres query confirmed zero `work_items.created_by` values were missing a `principals` row (every work item is created through `createWorkItem`, which already requires a resolved project membership, and Sprint 46's own `createMembershipRepository.create()` chokepoint already backfills a `principals` row for every membership).
+- `ON DELETE CASCADE` on `work_item_assignments.work_item_id` and `ON DELETE SET NULL` on `work_items.parent_id` were both applied proactively in the original migrations, not found the hard way — directly incorporating the lesson Sprint 48/49 each had to learn from a live `tests/e2e` failure (a hard-deleted parent row breaking an existing pilot test's own cleanup code).
+
+## Necessary, disclosed addition beyond the backlog's literal DEVOS-305 wording
+
+The backlog's own acceptance text scopes DEVOS-305 as "backfill `ASSIGNEE = reporter_id`" — read literally, a one-time migration concern for work items that already existed. Shipping the narrowed `updateWorkItem` restriction without also giving every **newly created** work item its own initial `ASSIGNEE` row would make every work item created after this sprint uneditable by anyone at all, including its own creator — the identical "don't ship a restriction with nothing satisfying it yet" failure mode decision §9.6 already flags for the historical backfill, just at the creation path instead. `createWorkItem` was therefore extended to create one `ASSIGNEE` row (the creator) alongside every new work item, disclosed here as a real, necessary extension beyond the backlog's literal text, not a silent scope change.
+
+## Design choice disclosed: assignment management gated by `canManageMembers` (with one hand-off exception)
+
+The backlog's own §6.5 acceptance summary names no gate for granting/revoking a `WORK_ITEM_ASSIGNMENT` role. This sprint reuses this codebase's own most recent, established precedent for "who may grant another principal a project-scoped attribute" — `assignProjectMemberJobRole`'s `canManageMembers` gate (Sprint 49) — rather than inventing a new rule. A project `OWNER`/organisation admin/owner may assign/remove `ASSIGNEE`/`REVIEWER`/`APPROVER` on any work item in their project; a plain member may not, even for themselves. **Updated by the post-completion scope extension below**: the current `ASSIGNEE` (whether or not they hold `canManageMembers`) may additionally hand `ASSIGNEE` off to another project member — a real, narrowly-scoped exception to the rule above, not a replacement of it.
+
+## Real bugs found and fixed during implementation
+
+None. Unlike Sprints 48/49, this sprint's own live verification (real Postgres, a real running `apps/api`, and a second full `tests/e2e` run) surfaced zero new defects — full evidence in `DEVOS-307.md`.
+
+## Scope extension (post-completion, per explicit user request)
+
+After this sprint's own initial completion, the user was presented with the disclosed gaps below and asked which to fix, mirroring Sprint 41's own established precedent for exactly this situation. Two were named as real, in-scope follow-ups; a third ("revisit the `canManageMembers` assignment gate") was clarified into one specific rule change:
+
+1. **Cycle detection for `parentId`** (DEVOS-303's own originally-disclosed gap) — `assertParentBelongsToProject` (`packages/application/src/work-items/validate-parent-work-item.ts`) gained an optional `excludeId` parameter, passed only by `updateWorkItem` (never by `createWorkItem`, whose brand-new id cannot already appear in any existing chain): it walks up the candidate parent's own ancestor chain and rejects if the work item being updated is found anywhere in it — subsuming the original trivial self-parent check at depth zero, without a separate rule.
+2. **Explicit parent-clearing** (a necessary companion to cycle detection and to a real Hierarchy UI — without it, a work item could gain a parent but never lose one through the API): `UpdateWorkItemInput.parentId` widened to `WorkItemId | null` — `undefined` (omitted) = no change, `null` = explicitly clear, a real id = set/replace. `exactOptionalPropertyTypes` forbids assigning `parentId: undefined` explicitly, so both `updateWorkItem` and the in-memory test fake use `delete` to omit the key when clearing, rather than setting it to `undefined`.
+3. **Hierarchy-browsing UI for `parentId`** (DEVOS-306's own originally-disclosed gap) — a new Hierarchy panel on `WorkItemDetailPage.tsx`: the current parent (if any) links to its own detail page, a picker changes or clears it, and direct children are listed below — all derived from a single `listWorkItems(projectId)` fetch, reusing the same unbounded-per-project cost `WorkItemsPage.tsx` already accepts for identical data (measured live against the real seeded "DevOS POC" project's 992 real work items: the picker opened in 249ms with zero console errors — confirming this reuse, not a new risk, per `DEVOS-306.md`'s own updated evidence).
+4. **ASSIGNEE hand-off exception** (the specific rule the user chose after clarification, not the other two offered alternatives) — a principal who is not `canManageMembers` but _is_ currently the work item's own `ASSIGNEE` may hand `ASSIGNEE` off to another real project member (`assignWorkItem`, `packages/application/src/work-items/assign-work-item.ts`). A genuine transfer, not an additive grant: the requester's own `ASSIGNEE` row is removed as part of the same call. Scoped narrowly: only the `ASSIGNEE` role itself (never `REVIEWER`/`APPROVER`), and only for a non-`canManageMembers` requester — an admin granting `ASSIGNEE` through the ordinary `canManageMembers` gate keeps the original purely-additive behavior (confirmed live: an OWNER's own additive grant and a subsequent real hand-off coexisted correctly — the OWNER's own grant was untouched by the unrelated hand-off).
+
+No new migrations, tables, or routes were needed for any of the four — all four are application/route/UI-layer changes on top of this sprint's own already-shipped schema. Full validation (`pnpm turbo run typecheck lint test build --filter='!@devos/e2e-tests'` **76/76 green**, forced; full `tests/e2e` **27/27 files, 52/52 tests green**) and live-verification evidence for all four are in `DEVOS-303.md`, `DEVOS-305.md`, `DEVOS-306.md`, and `DEVOS-307.md`'s own updated sections.
+
+## In scope
+
+- **DEVOS-303** — `work_items.parent_id` (migration `0053`), self-referencing, composite-FK-constrained to the same `project_id`. `WorkItem`/`CreateWorkItemInput`/`UpdateWorkItemInput` (`packages/domain/src/work-items/work-item.ts`) gain `parentId`; a shared `assertParentBelongsToProject` helper (`packages/application/src/work-items/validate-parent-work-item.ts`) turns the database-level rejection into a clean `400` for both create and update.
+- **DEVOS-304** — `work_item_assignments` table (migration `0054`), `ASSIGNEE`/`REVIEWER`/`APPROVER`, composite primary key `(work_item_id, principal_id, role)`. `WorkItemAssignment`/`WorkItemAssignmentRole`/`WorkItemAssignmentRepository` (`packages/domain/src/work-items/work-item-assignment.ts`); `packages/database/src/repositories/work-item-assignments.ts` implements it.
+- **DEVOS-305** — Migration `0055` backfills every pre-existing work item's `ASSIGNEE` from `created_by`, before the new restriction takes effect. `updateWorkItem` (`packages/application/src/work-items/update-work-item.ts`) is narrowed: non-status edits require `ASSIGNEE`; `status` transitions allow `ASSIGNEE`/`REVIEWER`/`APPROVER`. New use cases `assignWorkItem`/`removeWorkItemAssignment`/`listWorkItemAssignments` (`packages/application/src/work-items/`); `createWorkItem` auto-assigns the creator (see disclosed addition above).
+- **DEVOS-306** — Three new routes (`GET`/`POST /work-items/:id/assignments`, `DELETE /work-items/:id/assignments/:principalId/:role`) in `apps/api/src/routes/work-items.ts`; new client wrappers in `apps/web/src/api-client.ts`; an Assignments panel on `WorkItemDetailPage.tsx` (chips per current assignment with a remove action, plus a principal/role picker to grant a new one — mirroring `ProjectDetailPage.tsx`'s own established job-role-picker convention).
+- **DEVOS-307** — Validation, documentation, and gap disclosure, including this sprint's own required real end-to-end proof.
+
+## Out of scope
+
+Any change to the existing `MembershipRole`/job-role/agent-workflow-role axes — all three confirmed unrelated, per the epic's own `AGENTS.md` §4/§3 boundaries. Reconciliation and full-epic re-audit (Sprint 51). _(Cycle detection and a hierarchy-browsing UI for `parentId` were originally out of scope here — both were added by the post-completion scope extension above, per explicit user request.)_
+
+## Task index
+
+| ID        | Story                                                     | File           |
+| --------- | --------------------------------------------------------- | -------------- |
+| DEVOS-303 | `work_items.parent_id` (same-project FK)                  | `DEVOS-303.md` |
+| DEVOS-304 | `WORK_ITEM_ASSIGNMENT` table (ASSIGNEE/REVIEWER/APPROVER) | `DEVOS-304.md` |
+| DEVOS-305 | Backfill + narrow `workitem.edit`/`workitem.transition`   | `DEVOS-305.md` |
+| DEVOS-306 | UI: assignment pickers on the work item detail view       | `DEVOS-306.md` |
+| DEVOS-307 | Validation, documentation, and gap disclosure             | `DEVOS-307.md` |

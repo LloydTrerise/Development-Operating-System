@@ -45,6 +45,7 @@ export * from './repositories/task-queue.js';
 export * from './repositories/tool-capabilities.js';
 export * from './repositories/tool-invocations.js';
 export * from './repositories/user-identities.js';
+export * from './repositories/work-item-assignments.js';
 export * from './repositories/work-items.js';
 export * from './repositories/workflow-definitions.js';
 export * from './repositories/workflow-runs.js';

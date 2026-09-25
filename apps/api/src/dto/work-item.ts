@@ -1,5 +1,14 @@
-import type { WorkItem } from '@devos/domain';
+import type { WorkItem, WorkItemAssignment, WorkItemAssignmentRole } from '@devos/domain';
+import { workItemAssignmentRoles } from '@devos/domain';
 import { BadRequestError } from '../http/errors.js';
+
+/** Mirrors `apps/api/src/dto/project.ts`'s own `isMembershipRole` — the
+ * same "validate a string against a fixed, readonly tuple" shape. */
+function isWorkItemAssignmentRole(value: unknown): value is WorkItemAssignmentRole {
+  return (
+    typeof value === 'string' && (workItemAssignmentRoles as readonly string[]).includes(value)
+  );
+}
 
 export function toWorkItemDto(workItem: WorkItem) {
   return {
@@ -15,6 +24,18 @@ export function toWorkItemDto(workItem: WorkItem) {
     metadata: workItem.metadata,
     createdAt: workItem.createdAt,
     updatedAt: workItem.updatedAt,
+    parentId: workItem.parentId,
+  };
+}
+
+/** DEVOS-306: `packages/domain/src/work-items/work-item-assignment.ts`'s
+ * `WorkItemAssignment`. */
+export function toWorkItemAssignmentDto(assignment: WorkItemAssignment) {
+  return {
+    workItemId: assignment.workItemId,
+    principalId: assignment.principalId,
+    role: assignment.role,
+    createdAt: assignment.createdAt,
   };
 }
 
@@ -39,6 +60,16 @@ function optionalMetadata(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+/** DEVOS-303 follow-up: `parentId` on an update may be explicitly cleared
+ * with a literal JSON `null`, distinct from omitting the field entirely
+ * (no change) — see `UpdateWorkItemInput.parentId`'s own doc comment. */
+function optionalNullableString(value: unknown, field: string): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'string') throw new BadRequestError(`${field} must be a string or null.`);
+  return value;
+}
+
 export interface CreateWorkItemBody {
   title: string;
   description?: string;
@@ -47,6 +78,7 @@ export interface CreateWorkItemBody {
   priority?: string;
   source?: string;
   metadata?: Record<string, unknown>;
+  parentId?: string;
 }
 
 export function parseCreateWorkItemBody(body: unknown): CreateWorkItemBody {
@@ -63,6 +95,7 @@ export function parseCreateWorkItemBody(body: unknown): CreateWorkItemBody {
   const priority = optionalString(record.priority, 'priority');
   const source = optionalString(record.source, 'source');
   const metadata = optionalMetadata(record.metadata);
+  const parentId = optionalString(record.parentId, 'parentId');
 
   return {
     title,
@@ -72,6 +105,7 @@ export function parseCreateWorkItemBody(body: unknown): CreateWorkItemBody {
     ...(priority !== undefined ? { priority } : {}),
     ...(source !== undefined ? { source } : {}),
     ...(metadata !== undefined ? { metadata } : {}),
+    ...(parentId !== undefined ? { parentId } : {}),
   };
 }
 
@@ -81,6 +115,9 @@ export interface UpdateWorkItemBody {
   status?: string;
   priority?: string;
   metadata?: Record<string, unknown>;
+  /** `undefined` (omitted) = no change; `null` = explicitly clear the
+   * parent; a string = set/replace it. */
+  parentId?: string | null;
 }
 
 export function parseUpdateWorkItemBody(body: unknown): UpdateWorkItemBody {
@@ -91,6 +128,7 @@ export function parseUpdateWorkItemBody(body: unknown): UpdateWorkItemBody {
   const status = optionalString(record.status, 'status');
   const priority = optionalString(record.priority, 'priority');
   const metadata = optionalMetadata(record.metadata);
+  const parentId = optionalNullableString(record.parentId, 'parentId');
 
   return {
     ...(title !== undefined ? { title } : {}),
@@ -98,5 +136,27 @@ export function parseUpdateWorkItemBody(body: unknown): UpdateWorkItemBody {
     ...(status !== undefined ? { status } : {}),
     ...(priority !== undefined ? { priority } : {}),
     ...(metadata !== undefined ? { metadata } : {}),
+    ...(parentId !== undefined ? { parentId } : {}),
   };
+}
+
+export interface AssignWorkItemBody {
+  principalId: string;
+  role: string;
+}
+
+export function parseAssignWorkItemBody(body: unknown): AssignWorkItemBody {
+  const record = asRecord(body);
+
+  const principalId = record.principalId;
+  if (typeof principalId !== 'string' || principalId.trim().length === 0) {
+    throw new BadRequestError('principalId is required.');
+  }
+
+  const role = record.role;
+  if (!isWorkItemAssignmentRole(role)) {
+    throw new BadRequestError(`role must be one of: ${workItemAssignmentRoles.join(', ')}.`);
+  }
+
+  return { principalId, role };
 }

@@ -82,6 +82,19 @@ export interface WorkItemsTable {
   created_by: string;
   created_at: string;
   updated_at: string;
+  /** DEVOS-303 (migration `0053`): self-referencing, composite-FK-constrained
+   * to `(id, project_id)` so a work item's parent must share its project. */
+  parent_id: string | null;
+}
+
+/** DEVOS-304 (migration `0054`): a principal holds one of `ASSIGNEE`/
+ * `REVIEWER`/`APPROVER` on a work item — `packages/domain/src/work-items/
+ * work-item-assignment.ts`. */
+export interface WorkItemAssignmentsTable {
+  work_item_id: string;
+  principal_id: string;
+  role: string;
+  created_at: string;
 }
 
 export interface AgentsTable {
@@ -462,6 +475,7 @@ export interface Database {
   project_type_agents: ProjectTypeAgentsTable;
   memberships: MembershipsTable;
   work_items: WorkItemsTable;
+  work_item_assignments: WorkItemAssignmentsTable;
   agents: AgentsTable;
   agent_versions: AgentVersionsTable;
   agent_profiles: AgentProfilesTable;

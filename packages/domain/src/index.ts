@@ -36,6 +36,7 @@ export * from './projects/membership.js';
 export * from './projects/project.js';
 export * from './tools/tool-capability.js';
 export * from './tools/tool-invocation.js';
+export * from './work-items/work-item-assignment.js';
 export * from './work-items/work-item.js';
 export * from './workflows/compute-execution-paths.js';
 export * from './workflows/diff-workflow-versions.js';

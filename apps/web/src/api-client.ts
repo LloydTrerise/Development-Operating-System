@@ -159,6 +159,21 @@ export interface WorkItem {
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  /** DEVOS-303 (Sprint 50): same-project parent — enforced at the database
+   * layer, no dedicated UI built for it (see WorkItemDetailPage.tsx's own
+   * comment for why). */
+  parentId?: string;
+}
+
+/** DEVOS-304/305 (Sprint 50): `packages/domain/src/work-items/
+ * work-item-assignment.ts`'s `WorkItemAssignment`. */
+export type WorkItemAssignmentRole = 'ASSIGNEE' | 'REVIEWER' | 'APPROVER';
+
+export interface WorkItemAssignment {
+  workItemId: string;
+  principalId: string;
+  role: WorkItemAssignmentRole;
+  createdAt: string;
 }
 
 export interface WorkflowDefinitionSummary {
@@ -671,10 +686,19 @@ export function getWorkItem(workItemId: string): Promise<ApiResult<WorkItem>> {
 
 /** DEVOS-213: the real `updateWorkItem`/`PATCH /work-items/:workItemId` route
  * already existed with no client wrapper. Only the fields the backend's own
- * `UpdateWorkItemBody` accepts (`apps/api/src/dto/work-item.ts`). */
+ * `UpdateWorkItemBody` accepts (`apps/api/src/dto/work-item.ts`). `parentId`
+ * added DEVOS-303 (Sprint 50). */
 export function updateWorkItem(
   workItemId: string,
-  changes: { title?: string; description?: string; status?: string; priority?: string },
+  changes: {
+    title?: string;
+    description?: string;
+    status?: string;
+    priority?: string;
+    /** Omitted = no change; `null` = explicitly clear the parent; a
+     * string = set/replace it. */
+    parentId?: string | null;
+  },
 ): Promise<ApiResult<WorkItem>> {
   return request<WorkItem>(`/api/v1/work-items/${workItemId}`, {
     method: 'PATCH',
@@ -690,6 +714,39 @@ export function createWorkItem(
     method: 'POST',
     body: input,
   });
+}
+
+/** DEVOS-306 (Sprint 50): backs the work item detail view's assignment
+ * picker — any project member may read who is currently assigned. */
+export function listWorkItemAssignments(
+  workItemId: string,
+): Promise<ApiResult<WorkItemAssignment[]>> {
+  return request<WorkItemAssignment[]>(`/api/v1/work-items/${workItemId}/assignments`);
+}
+
+/** DEVOS-306: gated server-side to `canManageMembers` (project OWNER/
+ * organisation admin/owner), mirroring `assignProjectMemberJobRole`'s own
+ * identical gate. */
+export function assignWorkItem(
+  workItemId: string,
+  principalId: string,
+  role: WorkItemAssignmentRole,
+): Promise<ApiResult<WorkItemAssignment>> {
+  return request<WorkItemAssignment>(`/api/v1/work-items/${workItemId}/assignments`, {
+    method: 'POST',
+    body: { principalId, role },
+  });
+}
+
+export function removeWorkItemAssignment(
+  workItemId: string,
+  principalId: string,
+  role: WorkItemAssignmentRole,
+): Promise<ApiResult<{ removed: boolean }>> {
+  return request<{ removed: boolean }>(
+    `/api/v1/work-items/${workItemId}/assignments/${principalId}/${role}`,
+    { method: 'DELETE' },
+  );
 }
 
 export function listWorkflows(projectId: string): Promise<ApiResult<WorkflowDefinitionSummary[]>> {

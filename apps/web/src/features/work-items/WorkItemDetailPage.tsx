@@ -1,10 +1,35 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useParams } from 'react-router-dom';
-import { Box, Button, Stack, TextField, Typography } from '@mui/material';
-import { getWorkItem, updateWorkItem, type WorkItem } from '../../api-client.js';
+import { Link as RouterLink, useParams } from 'react-router-dom';
+import {
+  Box,
+  Button,
+  Chip,
+  FormControl,
+  Link,
+  MenuItem,
+  Select,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
+import {
+  assignWorkItem,
+  getWorkItem,
+  listMembers,
+  listWorkItemAssignments,
+  listWorkItems,
+  removeWorkItemAssignment,
+  updateWorkItem,
+  type Membership,
+  type WorkItem,
+  type WorkItemAssignment,
+  type WorkItemAssignmentRole,
+} from '../../api-client.js';
 import { DetailPageLayout } from '../../components/DetailPageLayout.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
+
+const ASSIGNMENT_ROLES: WorkItemAssignmentRole[] = ['ASSIGNEE', 'REVIEWER', 'APPROVER'];
 
 /**
  * DEVOS-213: the real work item detail/edit view, replacing Sprint 29's
@@ -14,6 +39,26 @@ import { LoadingState } from '../../components/LoadingState.js';
  * frontend-only work, not a new backend route. Status/priority are plain
  * text fields because `WorkItemStatus`/`WorkItemPriority` are open-ended
  * strings, not closed enums, anywhere in this codebase's domain model.
+ *
+ * DEVOS-306 (Sprint 50): adds an Assignments panel — `updateWorkItem`'s
+ * PATCH above is now assignment-gated server-side (edit requires ASSIGNEE,
+ * status transitions allow ASSIGNEE/REVIEWER/APPROVER), so this page needs
+ * a way to see and change who holds those roles. Assign/remove are
+ * `canManageMembers`-gated server-side (project OWNER/organisation
+ * admin/owner) — except a principal who already holds ASSIGNEE may hand it
+ * off to another member (a real "reassign my ticket" action, added after
+ * this sprint's own initial completion per explicit user request); mirroring
+ * `ProjectDetailPage.tsx`'s own established convention (DEVOS-293/301), no
+ * client-side role check hides the form — an unauthorized attempt surfaces
+ * the server's real 403 via the same error-alert pattern.
+ *
+ * Also adds a Hierarchy panel (same follow-up): the current parent (if any)
+ * links to its own detail page, a picker changes or clears it (`parentId`
+ * PATCHed as a real `WorkItemId` or explicit `null`), and direct children
+ * are listed below, derived client-side from the same `listWorkItems`
+ * fetch `WorkItemsPage.tsx` already performs unbounded for a project — this
+ * page reuses that same established, already-accepted cost rather than
+ * inventing a new cap for identical data.
  */
 export function WorkItemDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -28,6 +73,19 @@ export function WorkItemDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  const [members, setMembers] = useState<Membership[]>([]);
+  const [assignments, setAssignments] = useState<WorkItemAssignment[]>([]);
+  const [assignmentsError, setAssignmentsError] = useState<string | null>(null);
+  const [assignActionError, setAssignActionError] = useState<string | null>(null);
+  const [assignBusyKey, setAssignBusyKey] = useState<string | null>(null);
+  const [newAssignPrincipalId, setNewAssignPrincipalId] = useState('');
+  const [newAssignRole, setNewAssignRole] = useState<WorkItemAssignmentRole>('ASSIGNEE');
+
+  const [projectWorkItems, setProjectWorkItems] = useState<WorkItem[]>([]);
+  const [parentSelection, setParentSelection] = useState('');
+  const [parentSaving, setParentSaving] = useState(false);
+  const [parentSaveError, setParentSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -50,12 +108,95 @@ export function WorkItemDetailPage() {
       setDescription(result.data.description ?? '');
       setStatus(result.data.status);
       setPriority(result.data.priority);
+      setParentSelection(result.data.parentId ?? '');
     });
 
     return () => {
       cancelled = true;
     };
   }, [id]);
+
+  function refreshAssignments() {
+    if (!id) return;
+    listWorkItemAssignments(id).then((result) => {
+      if (!result.ok) {
+        setAssignmentsError(result.error.message);
+        return;
+      }
+      setAssignmentsError(null);
+      setAssignments(result.data);
+    });
+  }
+
+  useEffect(() => {
+    if (!id || !workItem) return;
+
+    let cancelled = false;
+
+    listMembers(workItem.projectId).then((result) => {
+      if (cancelled || !result.ok) return;
+      setMembers(result.data);
+    });
+    listWorkItems(workItem.projectId).then((result) => {
+      if (cancelled || !result.ok) return;
+      setProjectWorkItems(result.data);
+    });
+    refreshAssignments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, workItem?.projectId]);
+
+  async function handleChangeParent(event: FormEvent) {
+    event.preventDefault();
+    if (!id) return;
+
+    setParentSaving(true);
+    setParentSaveError(null);
+    const result = await updateWorkItem(id, {
+      parentId: parentSelection === '' ? null : parentSelection,
+    });
+    setParentSaving(false);
+
+    if (!result.ok) {
+      setParentSaveError(result.error.message);
+      return;
+    }
+    setWorkItem(result.data);
+  }
+
+  async function handleAssign(event: FormEvent) {
+    event.preventDefault();
+    if (!id || !newAssignPrincipalId.trim()) return;
+
+    setAssignBusyKey(`${newAssignPrincipalId}:${newAssignRole}`);
+    setAssignActionError(null);
+    const result = await assignWorkItem(id, newAssignPrincipalId, newAssignRole);
+    setAssignBusyKey(null);
+
+    if (!result.ok) {
+      setAssignActionError(result.error.message);
+      return;
+    }
+    setNewAssignPrincipalId('');
+    refreshAssignments();
+  }
+
+  async function handleRemoveAssignment(principalId: string, role: WorkItemAssignmentRole) {
+    if (!id) return;
+
+    setAssignBusyKey(`${principalId}:${role}`);
+    setAssignActionError(null);
+    const result = await removeWorkItemAssignment(id, principalId, role);
+    setAssignBusyKey(null);
+
+    if (!result.ok) {
+      setAssignActionError(result.error.message);
+      return;
+    }
+    refreshAssignments();
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -111,6 +252,75 @@ export function WorkItemDetailPage() {
             </Stack>
           </Box>
 
+          <Box sx={{ minWidth: 260 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Hierarchy
+            </Typography>
+            {parentSaveError && <ErrorAlert message={parentSaveError} />}
+
+            <Stack spacing={0.5} sx={{ mb: 1.5 }}>
+              <Typography variant="body2">
+                <strong>Parent:</strong>{' '}
+                {workItem.parentId ? (
+                  <Link component={RouterLink} to={`/work-items/${workItem.parentId}`}>
+                    {projectWorkItems.find((item) => item.id === workItem.parentId)?.title ??
+                      workItem.parentId}
+                  </Link>
+                ) : (
+                  <Typography component="span" variant="body2" color="text.secondary">
+                    None
+                  </Typography>
+                )}
+              </Typography>
+            </Stack>
+
+            <Stack component="form" onSubmit={handleChangeParent} spacing={1} sx={{ mb: 2 }}>
+              <FormControl size="small">
+                <Select
+                  displayEmpty
+                  value={parentSelection}
+                  onChange={(event) => setParentSelection(event.target.value)}
+                >
+                  <MenuItem value="">None</MenuItem>
+                  {projectWorkItems
+                    .filter((item) => item.id !== workItem.id)
+                    .map((item) => (
+                      <MenuItem key={item.id} value={item.id}>
+                        {item.title}
+                      </MenuItem>
+                    ))}
+                </Select>
+              </FormControl>
+              <Button
+                type="submit"
+                variant="outlined"
+                size="small"
+                disabled={parentSaving || parentSelection === (workItem.parentId ?? '')}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                {parentSaving ? 'Saving…' : 'Change parent'}
+              </Button>
+            </Stack>
+
+            <Typography variant="body2" gutterBottom>
+              <strong>Children:</strong>
+            </Typography>
+            <Stack spacing={0.5}>
+              {projectWorkItems
+                .filter((item) => item.parentId === workItem.id)
+                .map((child) => (
+                  <Link key={child.id} component={RouterLink} to={`/work-items/${child.id}`}>
+                    {child.title}
+                  </Link>
+                ))}
+              {!projectWorkItems.some((item) => item.parentId === workItem.id) && (
+                <Typography variant="caption" color="text.secondary">
+                  None.
+                </Typography>
+              )}
+            </Stack>
+          </Box>
+
           <Box sx={{ flex: 1 }}>
             <Typography variant="subtitle2" color="text.secondary" gutterBottom>
               Edit
@@ -158,6 +368,76 @@ export function WorkItemDetailPage() {
                   Saved.
                 </Typography>
               )}
+            </Stack>
+          </Box>
+
+          <Box sx={{ minWidth: 260 }}>
+            <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+              Assignments
+            </Typography>
+            {assignmentsError && (
+              <ErrorAlert message={`Failed to load assignments: ${assignmentsError}`} />
+            )}
+            {assignActionError && <ErrorAlert message={assignActionError} />}
+
+            <Stack spacing={0.75} sx={{ mb: 1.5 }}>
+              {assignments.map((assignment) => (
+                <Chip
+                  key={`${assignment.principalId}:${assignment.role}`}
+                  label={`${assignment.role}: ${assignment.principalId}`}
+                  size="small"
+                  disabled={assignBusyKey === `${assignment.principalId}:${assignment.role}`}
+                  onDelete={() => handleRemoveAssignment(assignment.principalId, assignment.role)}
+                  sx={{ justifyContent: 'space-between', width: 'fit-content' }}
+                />
+              ))}
+              {assignments.length === 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  No assignments yet.
+                </Typography>
+              )}
+            </Stack>
+
+            <Stack component="form" onSubmit={handleAssign} spacing={1}>
+              <FormControl size="small">
+                <Select
+                  displayEmpty
+                  value={newAssignPrincipalId}
+                  onChange={(event) => setNewAssignPrincipalId(event.target.value)}
+                >
+                  <MenuItem value="" disabled>
+                    Principal
+                  </MenuItem>
+                  {members.map((member) => (
+                    <MenuItem key={member.userId} value={member.userId}>
+                      {member.userId}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small">
+                <Select
+                  value={newAssignRole}
+                  onChange={(event) =>
+                    setNewAssignRole(event.target.value as WorkItemAssignmentRole)
+                  }
+                >
+                  {ASSIGNMENT_ROLES.map((role) => (
+                    <MenuItem key={role} value={role}>
+                      {role}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Button
+                type="submit"
+                variant="outlined"
+                size="small"
+                disabled={!newAssignPrincipalId.trim()}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                Assign
+              </Button>
             </Stack>
           </Box>
         </Stack>
