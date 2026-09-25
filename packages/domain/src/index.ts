@@ -24,6 +24,7 @@ export * from './job-roles/job-role.js';
 export * from './knowledge/knowledge-reference.js';
 export * from './knowledge/knowledge-source.js';
 export * from './notifications/notification.js';
+export * from './organisations/organisation-llm-provider.js';
 export * from './organisations/organisation.js';
 export * from './policy/policy.js';
 export * from './principals/principal.js';

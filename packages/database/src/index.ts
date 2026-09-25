@@ -26,6 +26,7 @@ export * from './repositories/integrations.js';
 export * from './repositories/job-roles.js';
 export * from './repositories/memberships.js';
 export * from './repositories/notifications.js';
+export * from './repositories/organisation-llm-providers.js';
 export * from './repositories/organisations.js';
 export * from './repositories/outbox-events.js';
 export * from './repositories/human-profiles.js';

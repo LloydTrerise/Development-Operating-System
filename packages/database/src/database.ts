@@ -482,6 +482,19 @@ export interface IntegrationsTable {
   updated_at: string;
 }
 
+/** DEVOS-311 (migration `0059`): dormant this sprint — see
+ * `packages/domain/src/organisations/organisation-llm-provider.ts`. */
+export interface OrganisationLlmProvidersTable {
+  id: string;
+  organisation_id: string;
+  provider: string;
+  credential_reference: string;
+  priority: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Database {
   organisations: OrganisationsTable;
   projects: ProjectsTable;
@@ -514,6 +527,7 @@ export interface Database {
   tool_capabilities: ToolCapabilitiesTable;
   tool_invocations: ToolInvocationsTable;
   integrations: IntegrationsTable;
+  organisation_llm_providers: OrganisationLlmProvidersTable;
   principals: PrincipalsTable;
   human_profiles: HumanProfilesTable;
   user_identities: UserIdentitiesTable;

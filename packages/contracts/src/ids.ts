@@ -24,6 +24,7 @@ export type KnowledgeReferenceId = Brand<string, 'KnowledgeReferenceId'>;
 export type PolicyId = Brand<string, 'PolicyId'>;
 export type ToolCapabilityId = Brand<string, 'ToolCapabilityId'>;
 export type IntegrationId = Brand<string, 'IntegrationId'>;
+export type OrganisationLlmProviderId = Brand<string, 'OrganisationLlmProviderId'>;
 export type EventId = Brand<string, 'EventId'>;
 export type AuditId = Brand<string, 'AuditId'>;
 export type ProjectTypeId = Brand<string, 'ProjectTypeId'>;

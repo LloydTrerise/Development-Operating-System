@@ -165,6 +165,16 @@ export type ToolInvocationStatus = (typeof toolInvocationStatuses)[number];
 export const integrationStatuses = ['ACTIVE', 'DISABLED'] as const;
 export type IntegrationStatus = (typeof integrationStatuses)[number];
 
+/**
+ * DEVOS-311 (Sprint 52, `specs/DEVOS-LLM-CREDENTIAL-MANAGEMENT-BACKLOG.md`
+ * §5.1): `organisation_llm_providers.status` — the backlog's own literal
+ * "status (Active/Disabled)" column text, matching `IntegrationStatus`'s
+ * identical two-state shape for the identical reason: no draft/publish
+ * lifecycle, just usable-or-not.
+ */
+export const organisationLlmProviderStatuses = ['ACTIVE', 'DISABLED'] as const;
+export type OrganisationLlmProviderStatus = (typeof organisationLlmProviderStatuses)[number];
+
 export const workflowNodeTypes = [
   'TRIGGER',
   'TASK',
