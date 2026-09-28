@@ -7,6 +7,7 @@ import {
   assignProjectMemberJobRole,
   changeMemberRole,
   createOrganisation,
+  createOrganisationLlmProvider,
   createOrganisationPolicy,
   createPolicy,
   createArtifact,
@@ -24,6 +25,7 @@ import {
   getProjectCostSummary,
   getProjectJobRolesOverview,
   getProjectSystemHealth,
+  deleteOrganisationLlmProvider,
   getWorkItem,
   installAgentVersion,
   installKnowledgeSource,
@@ -35,6 +37,7 @@ import {
   listMembers,
   listNotifications,
   listOrganisationJobRoles,
+  listOrganisationLlmProviders,
   listOrganisationMembers,
   listOrganisations,
   listPoliciesForOrganisation,
@@ -51,6 +54,7 @@ import {
   removeOrganisationMember,
   removePrincipalJobRole,
   removeProjectMemberJobRole,
+  reorderOrganisationLlmProviders,
   searchProject,
   setToolCapabilityStatus,
   shareAgentVersion,
@@ -59,6 +63,7 @@ import {
   startRunFromVersion,
   transferOrganisationOwnership,
   updateOrganisation,
+  updateOrganisationLlmProvider,
   updateProject,
   updateProjectType,
   updateWorkItem,
@@ -1152,6 +1157,131 @@ describe('api client', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/organisations/org-1/members/user-2');
     expect(init.method).toBe('DELETE');
+  });
+
+  // DEVOS-321 (Sprint 54): the five organisation LLM-provider wrappers.
+  it('DEVOS-321: lists an organisation’s LLM providers at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: [
+          {
+            id: 'provider-1',
+            organisationId: 'org-1',
+            provider: 'gemini',
+            credentialReference: 'LLM_PROVIDER_ORG_GEMINI',
+            priority: 1,
+            status: 'ACTIVE',
+            createdAt: '2026-09-25T00:00:00.000Z',
+            updatedAt: '2026-09-25T00:00:00.000Z',
+          },
+        ],
+        meta: { requestId: 'req-40' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await listOrganisationLlmProviders('org-1');
+
+    expect(result.ok).toBe(true);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/llm-providers');
+  });
+
+  it('DEVOS-321: creates an organisation LLM provider at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'provider-1',
+          organisationId: 'org-1',
+          provider: 'gemini',
+          credentialReference: 'LLM_PROVIDER_ORG_GEMINI',
+          priority: 1,
+          status: 'ACTIVE',
+          createdAt: '2026-09-25T00:00:00.000Z',
+          updatedAt: '2026-09-25T00:00:00.000Z',
+        },
+        meta: { requestId: 'req-41' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createOrganisationLlmProvider('org-1', {
+      provider: 'gemini',
+      credentialReference: 'LLM_PROVIDER_ORG_GEMINI',
+    });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/llm-providers');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      provider: 'gemini',
+      credentialReference: 'LLM_PROVIDER_ORG_GEMINI',
+    });
+  });
+
+  it('DEVOS-321: updates an organisation LLM provider at the real route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        data: {
+          id: 'provider-1',
+          organisationId: 'org-1',
+          provider: 'gemini',
+          credentialReference: 'LLM_PROVIDER_ORG_GEMINI',
+          priority: 1,
+          status: 'DISABLED',
+          createdAt: '2026-09-25T00:00:00.000Z',
+          updatedAt: '2026-09-25T00:00:01.000Z',
+        },
+        meta: { requestId: 'req-42' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await updateOrganisationLlmProvider('org-1', 'provider-1', {
+      status: 'DISABLED',
+    });
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/llm-providers/provider-1');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ status: 'DISABLED' });
+  });
+
+  it('DEVOS-321: deletes an organisation LLM provider at the real route', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(200, { data: { removed: true }, meta: { requestId: 'req-43' } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await deleteOrganisationLlmProvider('org-1', 'provider-1');
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/llm-providers/provider-1');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('DEVOS-321: reorders an organisation’s LLM providers at the real route', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(200, { data: { reordered: true }, meta: { requestId: 'req-44' } }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await reorderOrganisationLlmProviders('org-1', ['provider-2', 'provider-1']);
+
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/api/v1/organisations/org-1/llm-providers/reorder');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      orderedIds: ['provider-2', 'provider-1'],
+    });
   });
 
   // DEVOS-299/300/301: the six job-role wrappers (Sprint 49).

@@ -46,8 +46,31 @@ export interface OrganisationLlmProvider {
 
 export interface OrganisationLlmProviderRepository {
   getById: (id: OrganisationLlmProviderId) => Promise<OrganisationLlmProvider | null>;
-  /** Ordered by `priority` ascending — the real fallback-chain order Sprint
-   * 54's resolution logic will walk. */
+  /** Ordered by `priority` ascending — the real fallback-chain order
+   * DEVOS-319's resolution logic walks. */
   listForOrganisation: (organisationId: OrganisationId) => Promise<OrganisationLlmProvider[]>;
   create: (provider: OrganisationLlmProvider) => Promise<void>;
+  /**
+   * DEVOS-321 (Sprint 54): deliberately excludes `priority` — changing a
+   * single row's rank directly here would re-open the exact unique-
+   * constraint collision class `reorderOrganisationLlmProviders` (below)
+   * exists to avoid. A provider's rank only ever changes through that
+   * dedicated, transactional, whole-list primitive.
+   */
+  update: (
+    id: OrganisationLlmProviderId,
+    changes: Partial<Pick<OrganisationLlmProvider, 'credentialReference' | 'status'>>,
+    updatedAt: string,
+  ) => Promise<void>;
+  delete: (id: OrganisationLlmProviderId) => Promise<void>;
 }
+
+// DEVOS-321 (Sprint 54): the dedicated, transactional, whole-list reordering
+// primitive (`ReorderOrganisationLlmProviders`) is deliberately NOT declared
+// here, even though it operates on this same table — it is a bespoke,
+// multi-statement operation, not a plain repository CRUD method, and this
+// codebase's own established convention (`CloseWorkItem`, `PublishArtifact`,
+// `DecideApprovalAndTransition`) declares that class of primitive directly
+// in `packages/application`'s own deps file, with `packages/database`
+// providing the concrete implementation wired in at composition time. See
+// `packages/application/src/organisations/deps.ts`.

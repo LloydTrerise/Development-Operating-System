@@ -42,6 +42,7 @@ import {
   createKnowledgeSourceRepository,
   createMembershipRepository,
   createNotificationRepository,
+  createOrganisationLlmProviderRepository,
   createOrganisationRepository,
   createOutboxEventRepository,
   createPolicyRepository,
@@ -108,6 +109,14 @@ const credentialResolver: CredentialResolver =
         token: config.secrets.vaultToken,
       })
     : createEnvCredentialResolver();
+/**
+ * DEVOS-319 (Sprint 54): a real, separate instance from `createOrganisationRepository`'s
+ * own construction elsewhere in this file (construction order) — a stateless
+ * wrapper over the same real `database.db`, mirroring this file's own
+ * established "separate instance, same underlying client" precedent for
+ * every other repository constructed more than once here.
+ */
+const organisationLlmProviders = createOrganisationLlmProviderRepository(database.db);
 const publishArtifact = createArtifactPublisher(database.db);
 const workItems = createWorkItemRepository(database.db);
 
@@ -264,6 +273,22 @@ async function resolveAgentModelAdapter(): Promise<AgentModelAdapter | undefined
     : createResolvingModelAdapter({
         defaultProvider: rawDefaultProvider,
         defaultCredential,
+        // DEVOS-319 (Sprint 54): `request.organisationId` now genuinely
+        // differentiates provider selection — an organisation's own
+        // `ACTIVE` providers (Sprint 52's `organisation_llm_providers`,
+        // priority-ascending) are tried first; unconfigured/failing entries
+        // fall through; an organisation with none configured falls straight
+        // to the platform default above, unchanged.
+        listProvidersForOrganisation: async (organisationId) =>
+          (await organisationLlmProviders.listForOrganisation(organisationId))
+            .filter((provider) => provider.status === 'ACTIVE')
+            .map((provider) => ({
+              provider: provider.provider,
+              credentialReference: provider.credentialReference,
+            })),
+        // The same real credentialResolver instance already used for
+        // Git/Deployment integration credentials (DEVOS-104/106) above.
+        resolveCredential: credentialResolver.resolve,
       });
 }
 

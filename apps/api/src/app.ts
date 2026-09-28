@@ -36,6 +36,8 @@ import {
   createKnowledgeSourceRepository,
   createMembershipRepository,
   createNotificationRepository,
+  createOrganisationLlmProviderReorderer,
+  createOrganisationLlmProviderRepository,
   createOrganisationRepository,
   createPolicyRepository,
   createPrincipalJobRoleRepository,
@@ -81,6 +83,7 @@ import type {
   JobRoleUseCaseDeps,
   KnowledgeUseCaseDeps,
   NotificationUseCaseDeps,
+  OrganisationLlmProviderUseCaseDeps,
   OrganisationUseCaseDeps,
   PolicyUseCaseDeps,
   ProjectTypeUseCaseDeps,
@@ -120,6 +123,7 @@ import { createJobRoleRoutes } from './routes/job-roles.js';
 import { createKnowledgeSourceRoutes } from './routes/knowledge-sources.js';
 import { createMeRoutes } from './routes/me.js';
 import { createNotificationRoutes } from './routes/notifications.js';
+import { createOrganisationLlmProviderRoutes } from './routes/organisation-llm-providers.js';
 import { createOrganisationRoutes } from './routes/organisations.js';
 import { createPolicyRoutes } from './routes/policies.js';
 import { createProjectTypeRoutes } from './routes/project-types.js';
@@ -249,6 +253,7 @@ export interface CreateAppOptions {
   knowledgeDeps?: KnowledgeUseCaseDeps;
   integrationDeps?: IntegrationUseCaseDeps;
   organisationDeps?: OrganisationUseCaseDeps;
+  organisationLlmProviderDeps?: OrganisationLlmProviderUseCaseDeps;
   jobRoleDeps?: JobRoleUseCaseDeps;
   projectTypeDeps?: ProjectTypeUseCaseDeps;
   policyDeps?: PolicyUseCaseDeps;
@@ -470,6 +475,17 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     memberships: projectDeps.memberships,
     auditRecords: auditRecordRepository,
   };
+  const organisationLlmProviderDeps: OrganisationLlmProviderUseCaseDeps =
+    options.organisationLlmProviderDeps ?? {
+      // DEVOS-321: separate instance from `organisationDeps.organisations`
+      // above (construction order) — a stateless wrapper over the same real
+      // `database.db`, mirroring `jobRoleDeps`'s own established precedent.
+      organisations: createOrganisationRepository(database.db),
+      memberships: projectDeps.memberships,
+      organisationLlmProviders: createOrganisationLlmProviderRepository(database.db),
+      reorderOrganisationLlmProviders: createOrganisationLlmProviderReorderer(database.db),
+      auditRecords: auditRecordRepository,
+    };
   const jobRoleDeps: JobRoleUseCaseDeps = options.jobRoleDeps ?? {
     // DEVOS-299/300/301: separate instances from `organisationDeps.organisations`/
     // `projectDeps.projects` above (construction order) — all stateless
@@ -550,6 +566,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createHealthRoutes(API_PREFIX, database),
     ...createMeRoutes(API_PREFIX),
     ...createOrganisationRoutes(API_PREFIX, organisationDeps),
+    ...createOrganisationLlmProviderRoutes(API_PREFIX, organisationLlmProviderDeps),
     ...createJobRoleRoutes(API_PREFIX, jobRoleDeps),
     ...createProjectTypeRoutes(API_PREFIX, projectTypeDeps),
     ...createProjectRoutes(API_PREFIX, projectDeps),

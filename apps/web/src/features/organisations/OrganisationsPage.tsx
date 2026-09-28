@@ -8,29 +8,50 @@ import {
   List,
   ListItemButton,
   ListItemText,
+  MenuItem,
   Paper,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PeopleIcon from '@mui/icons-material/People';
 import SettingsIcon from '@mui/icons-material/Settings';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import {
   addOrganisationMember,
   createOrganisation,
+  createOrganisationLlmProvider,
+  deleteOrganisationLlmProvider,
+  listOrganisationLlmProviders,
   listOrganisationMembers,
   removeOrganisationMember,
+  reorderOrganisationLlmProviders,
   transferOrganisationOwnership,
   updateOrganisation,
+  updateOrganisationLlmProvider,
   type Membership,
+  type OrganisationLlmProvider,
 } from '../../api-client.js';
 import { ErrorAlert } from '../../components/ErrorAlert.js';
 import { LoadingState } from '../../components/LoadingState.js';
 import { StatusChip } from '../../components/StatusChip.js';
 import { useOrganisationContext } from '../../organisation-context.js';
 import { useSession } from '../../session.js';
+
+/**
+ * DEVOS-321 (Sprint 54): mirrors `@devos/agents`'s own `LLM_PROVIDER_KEYS`
+ * (`packages/agents/src/providers/registry.ts`) — duplicated here rather
+ * than fetched from a new route, since no route exposes "which providers
+ * does this deployment's registry know about" and adding one is out of this
+ * sprint's own scope; a mismatch would only ever surface as a real,
+ * server-side `ValidationError` on create (DEVOS-320's own registered-key
+ * check), never a silent failure.
+ */
+const LLM_PROVIDER_OPTIONS = ['gemini', 'anthropic'] as const;
 
 function PanelHeader({ title }: { title: string }) {
   return (
@@ -213,6 +234,218 @@ function MembersPanel({
 }
 
 /**
+ * DEVOS-321 (Sprint 54): mirrors `MembersPanel` immediately above exactly —
+ * list/add/remove, loading/error state, a `busyId` guard — plus a status
+ * toggle chip per row and move-up/move-down reordering. Every write action
+ * (`createOrganisationLlmProvider`/`updateOrganisationLlmProvider`/
+ * `deleteOrganisationLlmProvider`/`reorderOrganisationLlmProviders`) is
+ * server-gated to an organisation admin (DEVOS-320); this panel renders its
+ * controls unconditionally for every viewer and surfaces a rejection via
+ * `actionError`, the same client/server split `MembersPanel`'s own
+ * Add/Remove controls already establish (only "Transfer ownership" is
+ * client-hidden there, and only because it needs to know who the single
+ * transferable owner is, not because of the access gate itself).
+ */
+function AiProvidersPanel({ organisationId }: { organisationId: string }) {
+  const [providers, setProviders] = useState<OrganisationLlmProvider[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const [newProvider, setNewProvider] = useState<string>(LLM_PROVIDER_OPTIONS[0]);
+  const [newCredentialReference, setNewCredentialReference] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  function refresh() {
+    setLoading(true);
+    listOrganisationLlmProviders(organisationId).then((result) => {
+      setLoading(false);
+      if (!result.ok) {
+        setListError(result.error.message);
+        return;
+      }
+      setListError(null);
+      setProviders(result.data);
+    });
+  }
+
+  useEffect(() => {
+    refresh();
+  }, [organisationId]);
+
+  async function handleAdd(event: FormEvent) {
+    event.preventDefault();
+    if (!newCredentialReference.trim()) return;
+    setAdding(true);
+    setActionError(null);
+    const result = await createOrganisationLlmProvider(organisationId, {
+      provider: newProvider,
+      credentialReference: newCredentialReference.trim(),
+    });
+    setAdding(false);
+    if (!result.ok) {
+      setActionError(result.error.message);
+      return;
+    }
+    setNewCredentialReference('');
+    refresh();
+  }
+
+  async function handleToggleStatus(provider: OrganisationLlmProvider) {
+    setBusyId(provider.id);
+    setActionError(null);
+    const result = await updateOrganisationLlmProvider(organisationId, provider.id, {
+      status: provider.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
+    });
+    setBusyId(null);
+    if (!result.ok) {
+      setActionError(result.error.message);
+      return;
+    }
+    refresh();
+  }
+
+  async function handleRemove(providerId: string) {
+    setBusyId(providerId);
+    setActionError(null);
+    const result = await deleteOrganisationLlmProvider(organisationId, providerId);
+    setBusyId(null);
+    if (!result.ok) {
+      setActionError(result.error.message);
+      return;
+    }
+    refresh();
+  }
+
+  async function handleMove(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= providers.length) return;
+    const reordered = [...providers];
+    const [moved] = reordered.splice(index, 1);
+    reordered.splice(target, 0, moved!);
+    setBusyId(providers[index]!.id);
+    setActionError(null);
+    const result = await reorderOrganisationLlmProviders(
+      organisationId,
+      reordered.map((provider) => provider.id),
+    );
+    setBusyId(null);
+    if (!result.ok) {
+      setActionError(result.error.message);
+      return;
+    }
+    refresh();
+  }
+
+  return (
+    <Box sx={{ pl: 2, pb: 1.5, pt: 0.5, pr: 2 }}>
+      {loading && <LoadingState label="Loading AI providers…" />}
+      {listError && <ErrorAlert message={`Failed to load AI providers: ${listError}`} />}
+      {actionError && <ErrorAlert message={actionError} />}
+
+      {!loading && !listError && (
+        <Stack spacing={0.5} sx={{ mb: 1.5 }}>
+          {providers.map((provider, index) => (
+            <Stack
+              key={provider.id}
+              direction="row"
+              alignItems="center"
+              spacing={2}
+              sx={{ py: 0.5, borderBottom: 1, borderColor: 'divider' }}
+            >
+              <Typography variant="body2" color="text.secondary" sx={{ width: 24 }}>
+                {provider.priority}
+              </Typography>
+              <Typography variant="body2" sx={{ flex: 1 }}>
+                {provider.provider}
+              </Typography>
+              <Typography
+                variant="body2"
+                sx={{ flex: 2, fontFamily: 'monospace' }}
+                color="text.secondary"
+              >
+                {provider.credentialReference}
+              </Typography>
+              <Chip
+                label={provider.status}
+                size="small"
+                color={provider.status === 'ACTIVE' ? 'success' : 'default'}
+                variant="outlined"
+                onClick={() => handleToggleStatus(provider)}
+                disabled={busyId === provider.id}
+              />
+              <IconButton
+                aria-label={`Move ${provider.provider} up`}
+                size="small"
+                disabled={index === 0 || busyId === provider.id}
+                onClick={() => handleMove(index, -1)}
+              >
+                <ArrowUpwardIcon fontSize="small" />
+              </IconButton>
+              <IconButton
+                aria-label={`Move ${provider.provider} down`}
+                size="small"
+                disabled={index === providers.length - 1 || busyId === provider.id}
+                onClick={() => handleMove(index, 1)}
+              >
+                <ArrowDownwardIcon fontSize="small" />
+              </IconButton>
+              <IconButton
+                aria-label={`Remove ${provider.provider}`}
+                size="small"
+                disabled={busyId === provider.id}
+                onClick={() => handleRemove(provider.id)}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Stack>
+          ))}
+          {providers.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              No LLM providers configured — this organisation uses the platform default.
+            </Typography>
+          )}
+        </Stack>
+      )}
+
+      <Stack component="form" direction="row" spacing={1} alignItems="center" onSubmit={handleAdd}>
+        <TextField
+          select
+          label="Provider"
+          size="small"
+          value={newProvider}
+          onChange={(event) => setNewProvider(event.target.value)}
+          sx={{ minWidth: 140 }}
+        >
+          {LLM_PROVIDER_OPTIONS.map((option) => (
+            <MenuItem key={option} value={option}>
+              {option}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          label="Credential reference"
+          size="small"
+          value={newCredentialReference}
+          onChange={(event) => setNewCredentialReference(event.target.value)}
+          helperText="A reference name, resolved via the credential resolver — never the secret itself."
+          sx={{ minWidth: 260 }}
+        />
+        <Button
+          type="submit"
+          variant="outlined"
+          size="small"
+          disabled={adding || !newCredentialReference.trim()}
+        >
+          {adding ? 'Adding…' : 'Add provider'}
+        </Button>
+      </Stack>
+    </Box>
+  );
+}
+
+/**
  * DEVOS-227: an inline, expand-in-place Settings affordance per row —
  * closes the real, disclosed `PATCH /organisations/:id` UI gap
  * (`updateOrganisation` already had a client wrapper; only the UI was
@@ -247,6 +480,7 @@ function OrganisationRow({
 }) {
   const [open, setOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [aiProvidersOpen, setAiProvidersOpen] = useState(false);
   const [name, setName] = useState(currentName);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -284,6 +518,16 @@ function OrganisationRow({
           <PeopleIcon fontSize="small" />
         </IconButton>
         <IconButton
+          aria-label={`AI providers for ${currentName}`}
+          size="small"
+          onClick={(event) => {
+            event.stopPropagation();
+            setAiProvidersOpen((current) => !current);
+          }}
+        >
+          <SmartToyIcon fontSize="small" />
+        </IconButton>
+        <IconButton
           aria-label={`Settings for ${currentName}`}
           size="small"
           onClick={(event) => {
@@ -301,6 +545,9 @@ function OrganisationRow({
           currentPrincipalId={currentPrincipalId}
           onOwnershipChanged={onSaved}
         />
+      </Collapse>
+      <Collapse in={aiProvidersOpen} unmountOnExit>
+        <AiProvidersPanel organisationId={organisationId} />
       </Collapse>
       <Collapse in={open} unmountOnExit>
         <Box

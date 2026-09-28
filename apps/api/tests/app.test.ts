@@ -14,6 +14,7 @@ import type {
   JobRoleUseCaseDeps,
   KnowledgeUseCaseDeps,
   NotificationUseCaseDeps,
+  OrganisationLlmProviderUseCaseDeps,
   OrganisationUseCaseDeps,
   PolicyUseCaseDeps,
   ProjectTypeUseCaseDeps,
@@ -67,6 +68,8 @@ import {
   type Notification,
   type NotificationRepository,
   type Organisation,
+  type OrganisationLlmProvider,
+  type OrganisationLlmProviderRepository,
   type OrganisationRepository,
   type Policy,
   type PolicyRepository,
@@ -309,6 +312,49 @@ function createInMemoryOrganisationDeps(projectDeps: ProjectUseCaseDeps): Organi
 
 function createInMemoryProjectTypeDeps(): ProjectTypeUseCaseDeps {
   return createInMemoryProjectTypeRepositories();
+}
+
+/** DEVOS-321 (Sprint 54): shares `organisationDeps`'s own `organisations`/
+ * `memberships`/`auditRecords` fakes exactly, mirroring
+ * `createInMemoryJobRoleDeps`'s established construction pattern. */
+function createInMemoryOrganisationLlmProviderDeps(
+  organisationDeps: OrganisationUseCaseDeps,
+): OrganisationLlmProviderUseCaseDeps {
+  const providers = new Map<string, OrganisationLlmProvider>();
+
+  const organisationLlmProviderRepository: OrganisationLlmProviderRepository = {
+    getById: async (id) => providers.get(id) ?? null,
+    listForOrganisation: async (organisationId) =>
+      [...providers.values()]
+        .filter((row) => row.organisationId === organisationId)
+        .sort((a, b) => a.priority - b.priority),
+    create: async (provider) => {
+      providers.set(provider.id, provider);
+    },
+    update: async (id, changes, updatedAt) => {
+      const existing = providers.get(id);
+      if (!existing) return;
+      providers.set(id, { ...existing, ...changes, updatedAt });
+    },
+    delete: async (id) => {
+      providers.delete(id);
+    },
+  };
+
+  return {
+    organisations: organisationDeps.organisations,
+    memberships: organisationDeps.memberships,
+    organisationLlmProviders: organisationLlmProviderRepository,
+    reorderOrganisationLlmProviders: async (organisationId, orderedIds, updatedAt) => {
+      orderedIds.forEach((id, index) => {
+        const existing = providers.get(id);
+        if (existing && existing.organisationId === organisationId) {
+          providers.set(id, { ...existing, priority: index + 1, updatedAt });
+        }
+      });
+    },
+    auditRecords: organisationDeps.auditRecords,
+  };
 }
 
 /** DEVOS-299/300/301 (Sprint 49): shares `organisationDeps`'/`projectDeps`'
@@ -3858,6 +3904,223 @@ describe('job role routes (DEVOS-299/300/301)', () => {
       'alice',
     );
     expect((await finalHeldResponse.json()).data).toEqual([]);
+  });
+});
+
+describe('organisation LLM provider routes (DEVOS-319/320/321)', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const organisationDeps = createInMemoryOrganisationDeps(projectDeps);
+    const organisationLlmProviderDeps = createInMemoryOrganisationLlmProviderDeps(organisationDeps);
+    const started = await startServer({
+      projectDeps,
+      organisationDeps,
+      organisationLlmProviderDeps,
+    });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('gates create/update/reorder/delete to an org admin, allows read to any org member, and enforces the ranked order', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'LLM Org', slug: 'llm-org' }),
+    });
+    const organisation = (await orgResponse.json()).data as { id: string };
+
+    const projectResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'LLM Project',
+        slug: 'llm-project',
+        organisationId: organisation.id,
+      }),
+    });
+    const project = (await projectResponse.json()).data as { id: string };
+    await authed(`/api/v1/projects/${project.id}/members`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'bob', role: 'MEMBER' }),
+    });
+
+    const rejectedCreate = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers`,
+      'bob',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'gemini',
+          credentialReference: 'LLM_PROVIDER_ORG_GEMINI',
+        }),
+      },
+    );
+    // bob has only a project-level MEMBER row, never any org-level
+    // membership — resolveOrganisationAdminMembership reports this
+    // identically to a non-member (NotFoundError, not ForbiddenError),
+    // matching the job-roles routes' own identical, already-established
+    // DEVOS-309 precedent.
+    expect(rejectedCreate.status).toBe(404);
+
+    const rejectedProvider = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'openai',
+          credentialReference: 'LLM_PROVIDER_ORG_OPENAI',
+        }),
+      },
+    );
+    expect(rejectedProvider.status).toBe(400);
+
+    const firstCreate = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'gemini',
+          credentialReference: 'LLM_PROVIDER_ORG_GEMINI',
+        }),
+      },
+    );
+    expect(firstCreate.status).toBe(200);
+    const first = (await firstCreate.json()).data as { id: string; priority: number };
+    expect(first.priority).toBe(1);
+
+    const secondCreate = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'anthropic',
+          credentialReference: 'LLM_PROVIDER_ORG_ANTHROPIC',
+        }),
+      },
+    );
+    const second = (await secondCreate.json()).data as { id: string; priority: number };
+    expect(second.priority).toBe(2);
+
+    const listAsMember = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers`,
+      'bob',
+    );
+    expect(listAsMember.status).toBe(200);
+    expect((await listAsMember.json()).data).toEqual([
+      expect.objectContaining({ id: first.id, provider: 'gemini', priority: 1 }),
+      expect.objectContaining({ id: second.id, provider: 'anthropic', priority: 2 }),
+    ]);
+
+    const rejectedUpdate = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers/${first.id}`,
+      'bob',
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'DISABLED' }),
+      },
+    );
+    expect(rejectedUpdate.status).toBe(404);
+
+    const updateResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers/${first.id}`,
+      'alice',
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'DISABLED' }),
+      },
+    );
+    expect(updateResponse.status).toBe(200);
+    expect((await updateResponse.json()).data).toEqual(
+      expect.objectContaining({ id: first.id, status: 'DISABLED', priority: 1 }),
+    );
+
+    const rejectedReorder = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers/reorder`,
+      'bob',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderedIds: [second.id, first.id] }),
+      },
+    );
+    expect(rejectedReorder.status).toBe(404);
+
+    const partialReorder = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers/reorder`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderedIds: [second.id] }),
+      },
+    );
+    expect(partialReorder.status).toBe(400);
+
+    const reorderResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers/reorder`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderedIds: [second.id, first.id] }),
+      },
+    );
+    expect(reorderResponse.status).toBe(200);
+
+    const afterReorder = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers`,
+      'alice',
+    );
+    expect((await afterReorder.json()).data).toEqual([
+      expect.objectContaining({ id: second.id, priority: 1 }),
+      expect.objectContaining({ id: first.id, priority: 2 }),
+    ]);
+
+    const rejectedDelete = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers/${first.id}`,
+      'bob',
+      { method: 'DELETE' },
+    );
+    expect(rejectedDelete.status).toBe(404);
+
+    const deleteResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers/${first.id}`,
+      'alice',
+      { method: 'DELETE' },
+    );
+    expect(deleteResponse.status).toBe(200);
+
+    const finalList = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers`,
+      'alice',
+    );
+    expect((await finalList.json()).data).toEqual([
+      expect.objectContaining({ id: second.id, provider: 'anthropic' }),
+    ]);
   });
 });
 

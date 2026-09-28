@@ -482,6 +482,70 @@ export function removeOrganisationMember(
   );
 }
 
+/** DEVOS-321 (Sprint 54): mirrors `toOrganisationLlmProviderDto`
+ * (`apps/api/src/dto/organisation-llm-provider.ts`) exactly.
+ * `credentialReference` is a reference *name*, never the secret value it
+ * points to (DEVOS-083's own precedent, restated for this sibling field). */
+export interface OrganisationLlmProvider {
+  id: string;
+  organisationId: string;
+  provider: string;
+  credentialReference: string;
+  priority: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function listOrganisationLlmProviders(
+  organisationId: string,
+): Promise<ApiResult<OrganisationLlmProvider[]>> {
+  return request<OrganisationLlmProvider[]>(
+    `/api/v1/organisations/${organisationId}/llm-providers`,
+  );
+}
+
+export function createOrganisationLlmProvider(
+  organisationId: string,
+  input: { provider: string; credentialReference: string },
+): Promise<ApiResult<OrganisationLlmProvider>> {
+  return request<OrganisationLlmProvider>(`/api/v1/organisations/${organisationId}/llm-providers`, {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function updateOrganisationLlmProvider(
+  organisationId: string,
+  providerId: string,
+  changes: { credentialReference?: string; status?: string },
+): Promise<ApiResult<OrganisationLlmProvider>> {
+  return request<OrganisationLlmProvider>(
+    `/api/v1/organisations/${organisationId}/llm-providers/${providerId}`,
+    { method: 'PATCH', body: changes },
+  );
+}
+
+export function deleteOrganisationLlmProvider(
+  organisationId: string,
+  providerId: string,
+): Promise<ApiResult<{ removed: boolean }>> {
+  return request<{ removed: boolean }>(
+    `/api/v1/organisations/${organisationId}/llm-providers/${providerId}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function reorderOrganisationLlmProviders(
+  organisationId: string,
+  orderedIds: string[],
+): Promise<ApiResult<{ reordered: boolean }>> {
+  return request<{ reordered: boolean }>(
+    `/api/v1/organisations/${organisationId}/llm-providers/reorder`,
+    { method: 'POST', body: { orderedIds } },
+  );
+}
+
 /** DEVOS-293: `POST /organisations/:id/transfer-ownership` (DEVOS-290,
  * new) — transferable only by the current owner, to an existing
  * `ORGANISATION_ADMIN` co-admin. */

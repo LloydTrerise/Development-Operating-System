@@ -92,4 +92,156 @@ describe('createResolvingModelAdapter (DEVOS-316)', () => {
     const [url] = fetchImpl.mock.calls[0] as [string];
     expect(url).toContain('http://localhost:9999/fake-gemini');
   });
+
+  describe('ranked fallback chain (DEVOS-319)', () => {
+    function geminiOkResponse(): Response {
+      return jsonResponse({
+        candidates: [{ content: { parts: [{ text: '{"from":"gemini"}' }] }, finishReason: 'STOP' }],
+      });
+    }
+
+    function anthropicOkResponse(): Response {
+      return jsonResponse({
+        content: [{ type: 'text', text: '{"from":"anthropic"}' }],
+        stop_reason: 'end_turn',
+      });
+    }
+
+    it('falls through to the platform default when no candidate list is supplied (Sprint 53 behavior unchanged)', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(geminiOkResponse());
+      const adapter = createResolvingModelAdapter({
+        defaultProvider: 'gemini',
+        defaultCredential: 'default-key',
+        fetchImpl,
+      });
+
+      const result = await adapter.invoke(REQUEST);
+
+      expect(result.result).toEqual({ from: 'gemini' });
+      const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+      expect((init.headers as Record<string, string>)['x-goog-api-key']).toBe('default-key');
+    });
+
+    it('falls through to the platform default when the candidate list is empty', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(geminiOkResponse());
+      const adapter = createResolvingModelAdapter({
+        defaultProvider: 'gemini',
+        defaultCredential: 'default-key',
+        listProvidersForOrganisation: async () => [],
+        resolveCredential: async () => 'unused',
+        fetchImpl,
+      });
+
+      await adapter.invoke(REQUEST);
+
+      const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+      expect((init.headers as Record<string, string>)['x-goog-api-key']).toBe('default-key');
+    });
+
+    it('uses the top-priority organisation candidate instead of the platform default', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(anthropicOkResponse());
+      const adapter = createResolvingModelAdapter({
+        defaultProvider: 'gemini',
+        defaultCredential: 'default-key',
+        listProvidersForOrganisation: async () => [
+          { provider: 'anthropic', credentialReference: 'org-anthropic-ref' },
+        ],
+        resolveCredential: async (reference) =>
+          reference === 'org-anthropic-ref' ? 'org-anthropic-key' : null,
+        fetchImpl,
+      });
+
+      const result = await adapter.invoke(REQUEST);
+
+      expect(result.result).toEqual({ from: 'anthropic' });
+      const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+      expect(url).toContain('api.anthropic.com');
+      expect((init.headers as Record<string, string>)['x-api-key']).toBe('org-anthropic-key');
+    });
+
+    it('skips a candidate whose credential is unconfigured (resolves to null) and falls to the next', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(anthropicOkResponse());
+      const adapter = createResolvingModelAdapter({
+        defaultProvider: 'gemini',
+        defaultCredential: 'default-key',
+        listProvidersForOrganisation: async () => [
+          { provider: 'gemini', credentialReference: 'unconfigured-ref' },
+          { provider: 'anthropic', credentialReference: 'org-anthropic-ref' },
+        ],
+        resolveCredential: async (reference) =>
+          reference === 'org-anthropic-ref' ? 'org-anthropic-key' : null,
+        fetchImpl,
+      });
+
+      const result = await adapter.invoke(REQUEST);
+
+      expect(result.result).toEqual({ from: 'anthropic' });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips a candidate whose invoke() throws (failing) and falls to the next', async () => {
+      const fetchImpl = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('network error'))
+        .mockResolvedValueOnce(anthropicOkResponse());
+      const adapter = createResolvingModelAdapter({
+        defaultProvider: 'gemini',
+        defaultCredential: 'default-key',
+        listProvidersForOrganisation: async () => [
+          { provider: 'gemini', credentialReference: 'flaky-ref' },
+          { provider: 'anthropic', credentialReference: 'org-anthropic-ref' },
+        ],
+        resolveCredential: async () => 'some-key',
+        fetchImpl,
+      });
+
+      const result = await adapter.invoke(REQUEST);
+
+      expect(result.result).toEqual({ from: 'anthropic' });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('falls through to the platform default when every candidate is unconfigured or failing', async () => {
+      const fetchImpl = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('network error'))
+        .mockResolvedValueOnce(geminiOkResponse());
+      const adapter = createResolvingModelAdapter({
+        defaultProvider: 'gemini',
+        defaultCredential: 'default-key',
+        listProvidersForOrganisation: async () => [
+          { provider: 'anthropic', credentialReference: 'unconfigured-ref' },
+          { provider: 'gemini', credentialReference: 'flaky-ref' },
+        ],
+        resolveCredential: async (reference) => (reference === 'flaky-ref' ? 'flaky-key' : null),
+        fetchImpl,
+      });
+
+      const result = await adapter.invoke(REQUEST);
+
+      expect(result.result).toEqual({ from: 'gemini' });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      const [, secondInit] = fetchImpl.mock.calls[1] as [string, RequestInit];
+      expect((secondInit.headers as Record<string, string>)['x-goog-api-key']).toBe('default-key');
+    });
+
+    it('skips a candidate registering an unknown provider key', async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(anthropicOkResponse());
+      const adapter = createResolvingModelAdapter({
+        defaultProvider: 'gemini',
+        defaultCredential: 'default-key',
+        listProvidersForOrganisation: async () => [
+          { provider: 'openai', credentialReference: 'unregistered-ref' },
+          { provider: 'anthropic', credentialReference: 'org-anthropic-ref' },
+        ],
+        resolveCredential: async () => 'some-key',
+        fetchImpl,
+      });
+
+      const result = await adapter.invoke(REQUEST);
+
+      expect(result.result).toEqual({ from: 'anthropic' });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+  });
 });

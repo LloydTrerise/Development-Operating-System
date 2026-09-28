@@ -3,7 +3,27 @@ import type {
   AgentInvocationResult,
   AgentModelAdapter,
 } from '../model-adapter.js';
-import { createModelAdapterForProvider, type LlmProviderKey } from './registry.js';
+import {
+  createModelAdapterForProvider,
+  isLlmProviderKey,
+  type LlmProviderKey,
+  type ModelAdapterCredentialOptions,
+} from './registry.js';
+
+/**
+ * DEVOS-319 (Sprint 54): the narrow shape this module needs from an
+ * organisation's own ranked provider row — deliberately not
+ * `@devos/domain`'s `OrganisationLlmProvider` (id/status/timestamps and
+ * all), keeping `@devos/agents` exactly as decoupled from `@devos/domain`/
+ * `@devos/database` as it was before this sprint. The caller (`apps/worker/
+ * src/main.ts`) is responsible for `ACTIVE`-filtering and priority-ordering
+ * before handing candidates here — this module tries them in the order
+ * given, nothing more.
+ */
+export interface RankedLlmProviderCandidate {
+  provider: string;
+  credentialReference: string;
+}
 
 export interface ResolvingModelAdapterOptions {
   /**
@@ -18,6 +38,37 @@ export interface ResolvingModelAdapterOptions {
   baseUrlsByProvider?: Partial<Record<LlmProviderKey, string>>;
   /** Injectable for tests — defaults to the global fetch. */
   fetchImpl?: typeof fetch;
+  /**
+   * DEVOS-319 (Sprint 54): an organisation's own ranked provider list,
+   * ordered priority-ascending, `ACTIVE`-only — optional and additive,
+   * mirroring this codebase's own established `auditRecords?`/
+   * `organisations?` precedent (DEVOS-098/155): omitted, `invoke()` behaves
+   * exactly as Sprint 53 left it. `apps/worker/src/main.ts` supplies the
+   * real implementation backed by `OrganisationLlmProviderRepository`.
+   */
+  listProvidersForOrganisation?: (
+    organisationId: AgentInvocationRequest['organisationId'],
+  ) => Promise<RankedLlmProviderCandidate[]>;
+  /**
+   * Resolves a `credentialReference` to a real secret value — `null` means
+   * unconfigured (skip this candidate). `apps/worker/src/main.ts` supplies
+   * the same real `CredentialResolver.resolve` instance already used for
+   * Git/Deployment integration credentials (DEVOS-104/106).
+   */
+  resolveCredential?: (credentialReference: string) => Promise<string | null>;
+}
+
+function buildCredentialOptions(
+  options: ResolvingModelAdapterOptions,
+  provider: LlmProviderKey,
+  apiKey: string,
+): ModelAdapterCredentialOptions {
+  const baseUrl = options.baseUrlsByProvider?.[provider];
+  return {
+    apiKey,
+    ...(baseUrl !== undefined ? { baseUrl } : {}),
+    ...(options.fetchImpl !== undefined ? { fetchImpl: options.fetchImpl } : {}),
+  };
 }
 
 /**
@@ -26,25 +77,55 @@ export interface ResolvingModelAdapterOptions {
  * §2.1-named gap) — this `AgentModelAdapter`'s `invoke()` constructs a real
  * concrete provider adapter fresh on every call via the DEVOS-314 registry,
  * instead of one instance built once at boot and reused for the process's
- * lifetime. Real per-task resolution, not a placeholder — but, per this
- * sprint's own disclosed scope (`specs/sprints/sprint-53/README.md`), every
- * `request.organisationId` resolves to the same real platform-wide default
- * given here: Sprint 54's own `organisation_llm_providers`-backed ranked
- * fallback chain is what makes that value start actually differentiating
- * which provider gets used.
+ * lifetime.
+ *
+ * DEVOS-319 (Sprint 54): `request.organisationId` now genuinely
+ * differentiates provider selection — if `listProvidersForOrganisation` is
+ * supplied, its real ranked candidates are tried in order first. A
+ * candidate is skipped (not thrown) when: its `provider` isn't a registered
+ * `LlmProviderKey`; its `credentialReference` resolves to `null`
+ * (unconfigured); or its own `invoke()` call throws (failing — network
+ * error, non-ok response, malformed body). Exhausting the candidate list —
+ * or having none at all, the unchanged Sprint 53 behavior for any
+ * organisation with no configured providers — falls through to the
+ * platform-wide `defaultProvider`/`defaultCredential`, unchanged.
  */
 export function createResolvingModelAdapter(
   options: ResolvingModelAdapterOptions,
 ): AgentModelAdapter {
   return {
     async invoke(request: AgentInvocationRequest): Promise<AgentInvocationResult> {
-      const provider = options.defaultProvider;
-      const baseUrl = options.baseUrlsByProvider?.[provider];
-      const adapter = createModelAdapterForProvider(provider, {
-        apiKey: options.defaultCredential,
-        ...(baseUrl !== undefined ? { baseUrl } : {}),
-        ...(options.fetchImpl !== undefined ? { fetchImpl: options.fetchImpl } : {}),
-      });
+      const candidates =
+        (await options.listProvidersForOrganisation?.(request.organisationId)) ?? [];
+
+      for (const candidate of candidates) {
+        if (!isLlmProviderKey(candidate.provider)) continue;
+        const credential =
+          (await options.resolveCredential?.(candidate.credentialReference)) ?? null;
+        if (credential === null) continue;
+
+        try {
+          const adapter = createModelAdapterForProvider(
+            candidate.provider,
+            buildCredentialOptions(options, candidate.provider, credential),
+          );
+          const result = await adapter.invoke(request);
+          // Every concrete provider adapter (gemini.ts/anthropic.ts) catches
+          // its own network/HTTP errors internally and returns a `FAILED`
+          // result rather than throwing — so "failing" must be checked on
+          // the result's own status, not just on a thrown exception, for
+          // this candidate to genuinely fall through to the next one.
+          if (result.status === 'SUCCEEDED') return result;
+          continue;
+        } catch {
+          continue;
+        }
+      }
+
+      const adapter = createModelAdapterForProvider(
+        options.defaultProvider,
+        buildCredentialOptions(options, options.defaultProvider, options.defaultCredential),
+      );
       return adapter.invoke(request);
     },
   };

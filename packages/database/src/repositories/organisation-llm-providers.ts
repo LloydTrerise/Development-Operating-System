@@ -4,8 +4,9 @@ import type {
   OrganisationLlmProviderStatus,
 } from '@devos/contracts';
 import type { OrganisationLlmProvider, OrganisationLlmProviderRepository } from '@devos/domain';
-import type { OrganisationLlmProvidersTable } from '../database.js';
-import type { QueryExecutor } from './base.js';
+import type { Kysely } from 'kysely';
+import type { Database, OrganisationLlmProvidersTable } from '../database.js';
+import { withTransaction, type QueryExecutor } from './base.js';
 
 function toDomain(row: OrganisationLlmProvidersTable): OrganisationLlmProvider {
   return {
@@ -58,5 +59,66 @@ export function createOrganisationLlmProviderRepository(
         })
         .execute();
     },
+
+    async update(id, changes, updatedAt) {
+      await db
+        .updateTable('organisation_llm_providers')
+        .set({
+          ...(changes.credentialReference !== undefined
+            ? { credential_reference: changes.credentialReference }
+            : {}),
+          ...(changes.status !== undefined ? { status: changes.status } : {}),
+          updated_at: updatedAt,
+        })
+        .where('id', '=', id)
+        .execute();
+    },
+
+    async delete(id) {
+      await db.deleteFrom('organisation_llm_providers').where('id', '=', id).execute();
+    },
+  };
+}
+
+/**
+ * DEVOS-321 (Sprint 54): see `packages/domain/src/organisations/
+ * organisation-llm-provider.ts`'s own doc comment for why this is a
+ * standalone primitive, not a repository method. Takes the concrete
+ * `Kysely<Database>` (not the narrower `QueryExecutor` union the plain CRUD
+ * methods above accept) because it needs `.transaction()`, mirroring
+ * `createWorkItemCloser`'s identical signature.
+ */
+export function createOrganisationLlmProviderReorderer(
+  db: Kysely<Database>,
+): (
+  organisationId: OrganisationId,
+  orderedIds: OrganisationLlmProviderId[],
+  updatedAt: string,
+) => Promise<void> {
+  return async (organisationId, orderedIds, updatedAt) => {
+    await withTransaction(db, async (trx) => {
+      // Phase 1: bump every row to a unique negative priority — guaranteed
+      // distinct from every real (positive) priority and from each other,
+      // so the non-deferred `(organisation_id, priority)` unique constraint
+      // never fires mid-reorder.
+      for (const [index, id] of orderedIds.entries()) {
+        await trx
+          .updateTable('organisation_llm_providers')
+          .set({ priority: -(index + 1), updated_at: updatedAt })
+          .where('id', '=', id)
+          .where('organisation_id', '=', organisationId)
+          .execute();
+      }
+      // Phase 2: assign each row its final, positive priority in the
+      // caller's given order.
+      for (const [index, id] of orderedIds.entries()) {
+        await trx
+          .updateTable('organisation_llm_providers')
+          .set({ priority: index + 1, updated_at: updatedAt })
+          .where('id', '=', id)
+          .where('organisation_id', '=', organisationId)
+          .execute();
+      }
+    });
   };
 }
