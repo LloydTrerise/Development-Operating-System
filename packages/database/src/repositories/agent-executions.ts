@@ -84,7 +84,7 @@ export function createAgentExecutionRepository(db: QueryExecutor): AgentExecutio
         .execute();
     },
 
-    async complete(id, output, uncertainty, completedAt, usage, estimatedCostUsd) {
+    async complete(id, output, uncertainty, completedAt, usage, estimatedCostUsd, modelReference) {
       await db
         .updateTable('agent_executions')
         .set({
@@ -93,6 +93,10 @@ export function createAgentExecutionRepository(db: QueryExecutor): AgentExecutio
           uncertainty: uncertainty !== undefined ? JSON.stringify(uncertainty) : null,
           usage_metadata: usage !== undefined ? JSON.stringify(usage) : null,
           estimated_cost_usd: estimatedCostUsd?.toString() ?? null,
+          // DEVOS-323 (Sprint 55): the real gap this task closes — column
+          // existed and was already read back by toDomain() above, but no
+          // caller ever wrote it here.
+          model_reference: modelReference ?? null,
           completed_at: completedAt,
         })
         .where('id', '=', id)

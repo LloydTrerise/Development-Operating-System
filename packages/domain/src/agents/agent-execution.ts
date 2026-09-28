@@ -52,6 +52,22 @@ export interface AgentExecutionRepository {
     completedAt: string,
     usage?: AgentExecutionUsage,
     estimatedCostUsd?: number,
+    /**
+     * DEVOS-323 (Sprint 55): the real model/provider identifier the
+     * invocation actually succeeded against (`AgentInvocationResult
+     * .modelReference` — already computed and used to select this
+     * execution's own `estimatedCostUsd` rate, per `pricing.ts`'s own
+     * per-model table, but never previously persisted anywhere). A real,
+     * disclosed gap found during this epic's own closing pilot: the
+     * `model_reference` column and this same domain field have existed
+     * since DEVOS-089, but no caller of `complete()` ever supplied a
+     * value — the fallback chain's own actual provider choice (DEVOS-319)
+     * was therefore genuinely unrecorded on the one entity built to record
+     * it. Optional and additive: omitting it leaves the column `null`,
+     * exactly as it already was for every execution completed before this
+     * fix.
+     */
+    modelReference?: string,
   ) => Promise<void>;
   fail: (
     id: AgentExecutionId,

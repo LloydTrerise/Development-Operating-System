@@ -449,6 +449,15 @@ export async function runAgentTask(
     completedAt,
     invocation.usage,
     estimatedCostUsd,
+    // DEVOS-323 (Sprint 55): the real provider/model that actually served
+    // this invocation — with a ranked fallback chain (DEVOS-319), not
+    // necessarily the one the agent's own configuration.modelRef nominally
+    // names. Durably closes the "is the choice audit-recorded" gap this
+    // epic's own closing pilot found: this AgentExecution row (not a new
+    // audit_records write — this codebase's own established execution
+    // ledger, mirroring usage/estimatedCostUsd's identical precedent) is
+    // now the real, queryable record of which provider ran.
+    invocation.modelReference,
   );
 
   await maybeAlertOnBudgetExceeded(deps, run.projectId, estimatedCostUsd);

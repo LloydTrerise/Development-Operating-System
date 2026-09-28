@@ -149,7 +149,15 @@ function buildScenario() {
     create: async (execution) => {
       executions.push(execution);
     },
-    complete: async (id, output, uncertainty, completedAt, usage, estimatedCostUsd) => {
+    complete: async (
+      id,
+      output,
+      uncertainty,
+      completedAt,
+      usage,
+      estimatedCostUsd,
+      modelReference,
+    ) => {
       const index = executions.findIndex((e) => e.id === id);
       executions[index] = {
         ...executions[index]!,
@@ -158,6 +166,7 @@ function buildScenario() {
         ...(uncertainty !== undefined ? { uncertainty } : {}),
         ...(usage !== undefined ? { usage } : {}),
         ...(estimatedCostUsd !== undefined ? { estimatedCostUsd } : {}),
+        ...(modelReference !== undefined ? { modelReference } : {}),
         completedAt,
       };
     },
@@ -432,6 +441,10 @@ describe('runAgentTask', () => {
       status: 'SUCCEEDED',
       agentVersionId: scenario.version.id,
       workflowTaskId: scenario.task.id,
+      // DEVOS-323 (Sprint 55): the real provider/model that actually
+      // served this invocation is now durably persisted, not silently
+      // dropped — the gap this task's own pilot found and fixed.
+      modelReference: 'fake-model@1',
     });
   });
 
