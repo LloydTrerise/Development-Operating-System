@@ -14,6 +14,7 @@ import type {
   JobRoleUseCaseDeps,
   KnowledgeUseCaseDeps,
   NotificationUseCaseDeps,
+  OrganisationInitialisationStatusDeps,
   OrganisationLlmProviderUseCaseDeps,
   OrganisationUseCaseDeps,
   PlatformOperatorUseCaseDeps,
@@ -4233,6 +4234,130 @@ describe('organisation LLM provider routes (DEVOS-319/320/321)', () => {
     expect((await finalList.json()).data).toEqual([
       expect.objectContaining({ id: second.id, provider: 'anthropic' }),
     ]);
+  });
+});
+
+describe('organisation initialisation status route (DEVOS-333/334, Sprint 58)', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const organisationDeps = createInMemoryOrganisationDeps(projectDeps);
+    const organisationLlmProviderDeps = createInMemoryOrganisationLlmProviderDeps(organisationDeps);
+    const policyDeps = createInMemoryPolicyDeps(projectDeps, organisationDeps.organisations);
+    const organisationInitialisationStatusDeps: OrganisationInitialisationStatusDeps = {
+      organisations: organisationDeps.organisations,
+      memberships: organisationDeps.memberships,
+      projects: projectDeps.projects,
+      organisationLlmProviders: organisationLlmProviderDeps.organisationLlmProviders,
+      policies: policyDeps.policies,
+    };
+    const started = await startServer({
+      projectDeps,
+      organisationDeps,
+      organisationLlmProviderDeps,
+      policyDeps,
+      organisationInitialisationStatusDeps,
+    });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('reports incremental completion as each of the three requirements is genuinely created, and rejects a non-member', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Init Org',
+        slug: 'init-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
+    });
+    const organisation = (await orgResponse.json()).data as { id: string };
+
+    const statusPath = `/api/v1/organisations/${organisation.id}/initialisation-status`;
+
+    const initial = await (await authed(statusPath, 'alice')).json();
+    expect(initial.data).toEqual({
+      organisationId: organisation.id,
+      hasProjectType: false,
+      hasLlmProvider: false,
+      hasPolicy: false,
+      initialised: false,
+    });
+
+    const rejected = await authed(statusPath, 'mallory');
+    expect(rejected.status).toBe(404);
+
+    const projectResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Init Project',
+        slug: 'init-project',
+        organisationId: organisation.id,
+      }),
+    });
+    expect(projectResponse.status).toBe(200);
+
+    const afterProject = await (await authed(statusPath, 'alice')).json();
+    expect(afterProject.data).toMatchObject({
+      hasProjectType: true,
+      hasLlmProvider: false,
+      hasPolicy: false,
+      initialised: false,
+    });
+
+    const llmProviderResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: 'gemini', credentialReference: 'ref', priority: 1 }),
+      },
+    );
+    expect(llmProviderResponse.status).toBe(200);
+
+    const afterLlmProvider = await (await authed(statusPath, 'alice')).json();
+    expect(afterLlmProvider.data).toMatchObject({
+      hasProjectType: true,
+      hasLlmProvider: true,
+      hasPolicy: false,
+      initialised: false,
+    });
+
+    const policyResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/policies`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: 'default', definition: { rule: 'example' } }),
+      },
+    );
+    expect(policyResponse.status).toBe(200);
+
+    const afterPolicy = await (await authed(statusPath, 'alice')).json();
+    expect(afterPolicy.data).toEqual({
+      organisationId: organisation.id,
+      hasProjectType: true,
+      hasLlmProvider: true,
+      hasPolicy: true,
+      initialised: true,
+    });
   });
 });
 

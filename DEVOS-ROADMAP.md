@@ -2,7 +2,7 @@
 
 **Product:** DevOS
 **Purpose:** Authoritative task-level implementation roadmap
-**Last Updated:** 2026-09-28 — condensed for context management. This file previously accumulated a full per-sprint narrative inline (in its "Authority"/"Current position" sections) that grew unboundedly across 55 sprints; that narrative is preserved in this file's own git history (`git log -p -- DEVOS-ROADMAP.md`) and, per sprint, in `specs/sprints/sprint-NN/README.md`. Nothing was deleted — only removed from this file's live working copy.
+**Last Updated:** 2026-09-29 — Sprint 58 marked complete. This file previously accumulated a full per-sprint narrative inline (in its "Authority"/"Current position" sections) that grew unboundedly across 55 sprints; that narrative is preserved in this file's own git history (`git log -p -- DEVOS-ROADMAP.md`) and, per sprint, in `specs/sprints/sprint-NN/README.md`. Nothing was deleted — only removed from this file's live working copy.
 
 ---
 
@@ -14,9 +14,9 @@ Sprint task specifications under `specs/sprints/` are the authority for task-lev
 
 ## Current position
 
-As of 2026-09-29, **Sprint 57 (DEVOS-329–332) is COMPLETE** (candidate Epic E31, Organisation Onboarding, Registration Gating & Mandatory Initialisation, part 2 of 5) — full implementation, validation, and live verification against real Postgres, including the disclosed, deliberate reversal of `organisation.create`'s previously ungated design; see `specs/sprints/sprint-57/DEVOS-332.md` for evidence. `DEVOS-BUILD-STATE.md`'s own "Current position"/"Next state transition" sections are the authoritative record of this — this file's own job is the task-ID/sprint-outcome index below, not the day-to-day state narrative.
+As of 2026-09-29, **Sprint 58 (DEVOS-333–336) is COMPLETE** (candidate Epic E31, Organisation Onboarding, Registration Gating & Mandatory Initialisation, part 3 of 5) — full implementation, validation, and live verification against real Postgres, including two disclosed deviations from the backlog: (1) `INITIALISED` and its three requirements are computed live from three already-real tables (`projects`, `organisation_llm_providers`, `policies`), not persisted via either backlog-named option (a widened `Organisation.status` or a new tracking table); (2) organisation-wide policy creation (DEVOS-335) was found already fully built (DEVOS-139, predating this epic) — verified, not newly constructed. See `specs/sprints/sprint-58/DEVOS-336.md` for full evidence. `DEVOS-BUILD-STATE.md`'s own "Current position"/"Next state transition" sections are the authoritative record of this — this file's own job is the task-ID/sprint-outcome index below, not the day-to-day state narrative.
 
-Candidate Epic E31's backlog (`specs/DEVOS-ORGANISATION-ONBOARDING-BACKLOG.md`, v2.0, all open decisions resolved by the user) proposes Sprints 56–60 (DEVOS-325–344). Sprint 58 (Mandatory Initialisation Requirements, DEVOS-333–336) is next. Per `AGENTS.md` §4.1, Sprints 58–60 remain unconverted; per `AGENTS.md` §35/§4.2, conversion and implementation are separate, explicit approvals not yet given.
+Candidate Epic E31's backlog (`specs/DEVOS-ORGANISATION-ONBOARDING-BACKLOG.md`, v2.0, all open decisions resolved by the user) proposes Sprints 56–60 (DEVOS-325–344). Sprint 59 (Server-Side Enforcement, DEVOS-337–340) is next. Per `AGENTS.md` §4.1, Sprints 59–60 remain unconverted; per `AGENTS.md` §35/§4.2, conversion and implementation are separate, explicit approvals not yet given.
 
 ---
 
@@ -81,8 +81,9 @@ Candidate Epic E31's backlog (`specs/DEVOS-ORGANISATION-ONBOARDING-BACKLOG.md`, 
 | 55     | DEVOS-323–324 | Full-Epic Pilot & Close-Out — real end-to-end fallback pilot against a real second provider; closes candidate Epic E30 Organisation LLM Provider & Credential Gateway                                                                                                                                              | COMPLETE |
 | 56     | DEVOS-325–328 | Platform Operator Foundation — a new, principal-attached platform-operator grant, deploy-time-bootstrapped, with zero visible behavior change to any existing route (candidate E31, part 1)                                                                                                                        | COMPLETE |
 | 57     | DEVOS-329–332 | Registration Token & Invite-Gated Organisation Creation — `registration_tokens` table; `createOrganisation` gated behind redeeming a valid, platform-operator-issued token (the disclosed reversal of its previously ungated design); platform-operator UI/API to issue/list/revoke tokens (candidate E31, part 2) | COMPLETE |
+| 58     | DEVOS-333–336 | Mandatory Initialisation Requirements — a real, live-computed `INITIALISED` status derived from three existing subsystems (a first `Project`/`ProjectType`, a default LLM provider, an initial organisation-wide `Policy`); no new migration, per this sprint's own disclosed persistence-shape decision (candidate E31, part 3) | COMPLETE |
 
-Sprints 58–60 (§ Current position above) remain unconverted, pending user approval.
+Sprints 59–60 (§ Current position above) remain unconverted, pending user approval.
 
 ---
 

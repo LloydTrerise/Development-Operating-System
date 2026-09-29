@@ -4,6 +4,8 @@ import type {
   MembershipRepository,
   OrganisationLlmProviderRepository,
   OrganisationRepository,
+  PolicyRepository,
+  ProjectRepository,
   RegistrationTokenRepository,
 } from '@devos/domain';
 
@@ -52,4 +54,24 @@ export interface OrganisationLlmProviderUseCaseDeps {
   organisationLlmProviders: OrganisationLlmProviderRepository;
   reorderOrganisationLlmProviders: ReorderOrganisationLlmProviders;
   auditRecords: AuditRecordRepository;
+}
+
+/**
+ * DEVOS-333 (Sprint 58, candidate epic E31 part 3): narrower than widening
+ * `OrganisationUseCaseDeps` itself, mirroring `OrganisationLlmProviderUseCaseDeps`'s
+ * own established narrowing precedent immediately above — only
+ * `getOrganisationInitialisationStatus` needs `projects`/`organisationLlmProviders`/
+ * `policies` together. Per this sprint's own disclosed persistence-shape
+ * decision (`specs/sprints/sprint-58/README.md`), there is no new table or
+ * column behind this — all three fields are the same, already-real
+ * repositories `ProjectUseCaseDeps`/`OrganisationLlmProviderUseCaseDeps`/
+ * `PolicyUseCaseDeps` already construct against real Postgres; this
+ * interface only composes read access to them for one new query.
+ */
+export interface OrganisationInitialisationStatusDeps {
+  organisations: OrganisationRepository;
+  memberships: MembershipRepository;
+  projects: ProjectRepository;
+  organisationLlmProviders: OrganisationLlmProviderRepository;
+  policies: PolicyRepository;
 }

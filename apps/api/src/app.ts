@@ -87,6 +87,7 @@ import type {
   JobRoleUseCaseDeps,
   KnowledgeUseCaseDeps,
   NotificationUseCaseDeps,
+  OrganisationInitialisationStatusDeps,
   OrganisationLlmProviderUseCaseDeps,
   OrganisationUseCaseDeps,
   PlatformOperatorUseCaseDeps,
@@ -129,6 +130,7 @@ import { createJobRoleRoutes } from './routes/job-roles.js';
 import { createKnowledgeSourceRoutes } from './routes/knowledge-sources.js';
 import { createMeRoutes } from './routes/me.js';
 import { createNotificationRoutes } from './routes/notifications.js';
+import { createOrganisationInitialisationRoutes } from './routes/organisation-initialisation.js';
 import { createOrganisationLlmProviderRoutes } from './routes/organisation-llm-providers.js';
 import { createOrganisationRoutes } from './routes/organisations.js';
 import { createPlatformOperatorRoutes } from './routes/platform-operators.js';
@@ -267,6 +269,7 @@ export interface CreateAppOptions {
   integrationDeps?: IntegrationUseCaseDeps;
   organisationDeps?: OrganisationUseCaseDeps;
   organisationLlmProviderDeps?: OrganisationLlmProviderUseCaseDeps;
+  organisationInitialisationStatusDeps?: OrganisationInitialisationStatusDeps;
   platformOperatorDeps?: PlatformOperatorUseCaseDeps;
   registrationTokenDeps?: RegistrationTokenUseCaseDeps;
   jobRoleDeps?: JobRoleUseCaseDeps;
@@ -564,6 +567,18 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     policies: createPolicyRepository(database.db),
     auditRecords: auditRecordRepository,
   };
+  // DEVOS-333/334 (Sprint 58): reuses every repository instance already
+  // constructed above (all stateless wrappers over the same real
+  // `database.db`) — per this sprint's own disclosed persistence-shape
+  // decision, there is no new repository to construct here at all.
+  const organisationInitialisationStatusDeps: OrganisationInitialisationStatusDeps =
+    options.organisationInitialisationStatusDeps ?? {
+      organisations: organisationDeps.organisations,
+      memberships: projectDeps.memberships,
+      projects: projectDeps.projects,
+      organisationLlmProviders: organisationLlmProviderDeps.organisationLlmProviders,
+      policies: policyDeps.policies,
+    };
   const approvalDeps: ApprovalUseCaseDeps = options.approvalDeps ?? {
     projects: projectDeps.projects,
     memberships: projectDeps.memberships,
@@ -620,6 +635,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createMeRoutes(API_PREFIX),
     ...createOrganisationRoutes(API_PREFIX, organisationDeps),
     ...createOrganisationLlmProviderRoutes(API_PREFIX, organisationLlmProviderDeps),
+    ...createOrganisationInitialisationRoutes(API_PREFIX, organisationInitialisationStatusDeps),
     ...createPlatformOperatorRoutes(API_PREFIX, platformOperatorDeps),
     ...createRegistrationTokenRoutes(
       API_PREFIX,

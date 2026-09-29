@@ -66,6 +66,7 @@ export * from './organisations/create-organisation-llm-provider.js';
 export * from './organisations/delete-organisation-llm-provider.js';
 export * from './organisations/deps.js';
 export * from './organisations/get-organisation.js';
+export * from './organisations/get-organisation-initialisation-status.js';
 export * from './organisations/list-members.js';
 export * from './organisations/list-organisation-llm-providers.js';
 export * from './organisations/list-organisations-for-principal.js';
