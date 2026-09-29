@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   Box,
   Button,
@@ -487,6 +487,11 @@ function OrganisationRow({
   const [aiProvidersOpen, setAiProvidersOpen] = useState(false);
   const [setupOpen, setSetupOpen] = useState(autoOpenSetup);
   const [setupIncomplete, setSetupIncomplete] = useState(false);
+  // DEVOS-348 (Sprint 61, Epic E31 gap closure): scrolls this row into view
+  // when its own setup checklist opens the AI Providers panel — otherwise a
+  // row far down a long organisation list opens its panel off-screen with
+  // no visible feedback.
+  const rowRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState(currentName);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -513,7 +518,7 @@ function OrganisationRow({
   }
 
   return (
-    <Box>
+    <Box ref={rowRef}>
       <ListItemButton selected={selected} onClick={onSelect}>
         <ListItemText primary={`${currentName} (${slug})`} sx={{ flex: 1 }} />
         {setupIncomplete && (
@@ -575,7 +580,10 @@ function OrganisationRow({
       <Collapse in={setupOpen} unmountOnExit>
         <OrganisationSetupChecklist
           organisationId={organisationId}
-          onOpenAiProviders={() => setAiProvidersOpen(true)}
+          onOpenAiProviders={() => {
+            setAiProvidersOpen(true);
+            rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }}
           onStatusChange={(initialised) => setSetupIncomplete(!initialised)}
         />
       </Collapse>

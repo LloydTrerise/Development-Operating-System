@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import type { PlatformAuditId } from '@devos/contracts';
+import type { PlatformAuditRecord } from '@devos/domain';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors.js';
 import type { PlatformOperatorUseCaseDeps } from './deps.js';
 
@@ -29,4 +32,16 @@ export async function revokePlatformOperator(
   }
 
   await deps.platformOperators.delete(targetPrincipalId);
+
+  // DEVOS-345 (Sprint 61): see `grant-platform-operator.ts`'s identical
+  // audit-record doc comment.
+  const auditRecord: PlatformAuditRecord = {
+    id: randomUUID() as PlatformAuditId,
+    actorPrincipalId: actingPrincipalId,
+    action: 'platform_operator.revoked',
+    targetPrincipalId: targetPrincipalId,
+    outcome: 'SUCCESS',
+    createdAt: new Date().toISOString(),
+  };
+  await deps.platformAuditRecords.create(auditRecord);
 }

@@ -2,7 +2,7 @@
 
 **Product:** DevOS
 **Purpose:** Authoritative task-level implementation roadmap
-**Last Updated:** 2026-09-29 — Sprint 60 marked complete, closing candidate Epic E31 in full. This file previously accumulated a full per-sprint narrative inline (in its "Authority"/"Current position" sections) that grew unboundedly across 55 sprints; that narrative is preserved in this file's own git history (`git log -p -- DEVOS-ROADMAP.md`) and, per sprint, in `specs/sprints/sprint-NN/README.md`. Nothing was deleted — only removed from this file's live working copy.
+**Last Updated:** 2026-09-29 — Sprint 61 marked complete (standalone Epic E31 gap-closure sprint, not part of any epic). This file previously accumulated a full per-sprint narrative inline (in its "Authority"/"Current position" sections) that grew unboundedly across 55 sprints; that narrative is preserved in this file's own git history (`git log -p -- DEVOS-ROADMAP.md`) and, per sprint, in `specs/sprints/sprint-NN/README.md`. Nothing was deleted — only removed from this file's live working copy.
 
 ---
 
@@ -14,9 +14,9 @@ Sprint task specifications under `specs/sprints/` are the authority for task-lev
 
 ## Current position
 
-As of 2026-09-29, **Sprint 60 (DEVOS-341–344) is COMPLETE** (candidate Epic E31, Organisation Onboarding, Registration Gating & Mandatory Initialisation, part 5 of 5) — a guided registration-token redemption + organisation-creation wizard and a real-time mandatory-setup checklist (both in `apps/web`), plus a real, live, full-chain pilot proving the whole epic end-to-end against real Postgres: a bootstrap platform operator issued a real registration token, a second, previously-unaffiliated principal redeemed it to create a real organisation, a genuinely gated mutating route was confirmed rejected before setup and confirmed to succeed after all three mandatory requirements were completed. See `specs/sprints/sprint-60/DEVOS-343.md` for the pilot's own full evidence and `DEVOS-344.md` for the closing disclosure covering the whole epic. `DEVOS-BUILD-STATE.md`'s own "Current position"/"Next state transition" sections are the authoritative record of this — this file's own job is the task-ID/sprint-outcome index below, not the day-to-day state narrative.
+As of 2026-09-29, **Sprint 61 (DEVOS-345–349) is COMPLETE** — a standalone gap-closure sprint (not part of any epic, mirroring Sprint 45's own precedent) closing four of the six gaps `specs/sprints/sprint-60/DEVOS-344.md`'s own closing disclosure left open at candidate Epic E31's close: a new, separate `platform_audit_records` concept for platform-operator grant/revoke auditing (DEVOS-345); a real database transaction spanning organisation creation and registration-token redemption (DEVOS-346); a corrected record for gap 3, whose originally-planned fix was reverted after its own test proved the disclosed scenario does not reproduce against the real code (DEVOS-347); and a scroll-to-panel fix on the organisation setup checklist (DEVOS-348). See `specs/DEVOS-E31-GAP-CLOSURE-SPRINT.md` for the sprint's own scoping document and resolved decisions, and `specs/sprints/sprint-61/DEVOS-349.md` for the closing disclosure. `DEVOS-BUILD-STATE.md`'s own "Current position"/"Next state transition" sections are the authoritative record of this — this file's own job is the task-ID/sprint-outcome index below, not the day-to-day state narrative.
 
-**Candidate Epic E31 is now CLOSED** — every sprint in its backlog (`specs/DEVOS-ORGANISATION-ONBOARDING-BACKLOG.md`, v2.0, Sprints 56–60, DEVOS-325–344) is implemented, validated, and complete. No further sprint or epic is currently authorized or scoped.
+**Candidate Epic E31 remains CLOSED** (Sprints 56–60). Sprint 61 is a standalone gap-closure sprint over that already-closed epic, not a reopening of it. No further sprint or epic is currently authorized or scoped.
 
 ---
 
@@ -84,6 +84,7 @@ As of 2026-09-29, **Sprint 60 (DEVOS-341–344) is COMPLETE** (candidate Epic E3
 | 58     | DEVOS-333–336 | Mandatory Initialisation Requirements — a real, live-computed `INITIALISED` status derived from three existing subsystems (a first `Project`/`ProjectType`, a default LLM provider, an initial organisation-wide `Policy`); no new migration, per this sprint's own disclosed persistence-shape decision (candidate E31, part 3)                       | COMPLETE |
 | 59     | DEVOS-337–340 | Server-Side Enforcement — a new initialisation-gate guard genuinely rejecting mutating requests against a non-`INITIALISED`, non-exempt organisation (47 of 62 real mutating routes gated), with every pre-existing organisation backfilled to exempt via a new, narrow `Organisation.initialisationEnforcementExemptAt` field (candidate E31, part 4) | COMPLETE |
 | 60     | DEVOS-341–344 | Guided First-Run UI & Full-Epic Pilot — a guided registration-token redemption + organisation-creation wizard and a real-time mandatory-setup checklist, plus a real, live, full-chain pilot proving bootstrap → token → redemption-by-a-second-principal → blocked-then-unblocked gated mutation end to end (candidate E31, part 5 — closes the epic) | COMPLETE |
+| 61     | DEVOS-345–349 | Epic E31 Gap Closure — a new, separate platform-operator audit-trail concept; a real transaction spanning organisation creation and token redemption; a corrected (not code-fixed) record for a gap 3 scenario that does not reproduce; a setup-checklist scroll-to-panel fix (standalone, not part of any epic) | COMPLETE |
 
 ---
 

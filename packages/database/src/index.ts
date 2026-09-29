@@ -13,6 +13,8 @@ export * from './repositories/artifact-versions.js';
 export * from './repositories/artifacts.js';
 export * from './repositories/audit-helper.js';
 export * from './repositories/audit-records.js';
+export * from './repositories/create-organisation.js';
+export * from './repositories/platform-audit-records.js';
 export * from './repositories/base.js';
 export * from './repositories/close-work-item.js';
 export * from './repositories/create-agent-draft.js';

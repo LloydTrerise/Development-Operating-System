@@ -1,13 +1,30 @@
 import type { OrganisationId, OrganisationLlmProviderId } from '@devos/contracts';
 import type {
   AuditRecordRepository,
+  Membership,
   MembershipRepository,
+  Organisation,
   OrganisationLlmProviderRepository,
   OrganisationRepository,
   PolicyRepository,
   ProjectRepository,
   RegistrationTokenRepository,
 } from '@devos/domain';
+
+/**
+ * DEVOS-346 (Sprint 61, Epic E31 gap closure): the create→membership→owner→
+ * redeem sequence `createOrganisation` (`create-organisation.ts`) runs, as
+ * one atomic transaction — a port declared here, implemented in
+ * `@devos/database` (`createOrganisationTransactionCreator`), mirroring
+ * `ReorderOrganisationLlmProviders`'s own identical "declared port, real
+ * `withTransaction` adapter" precedent immediately below.
+ */
+export type CreateOrganisationTransactionally = (
+  organisation: Organisation,
+  membership: Membership,
+  tokenId: string,
+  now: string,
+) => Promise<void>;
 
 export interface OrganisationUseCaseDeps {
   organisations: OrganisationRepository;
@@ -22,6 +39,9 @@ export interface OrganisationUseCaseDeps {
    * use case through this one deps object already, mirroring `auditRecords`
    * itself (only touched by the membership use cases, not `getOrganisation`). */
   registrationTokens: RegistrationTokenRepository;
+  /** DEVOS-346: only `createOrganisation` uses this — bundled onto the
+   * shared deps for the same reason `registrationTokens` is. */
+  createOrganisationTransactionally: CreateOrganisationTransactionally;
 }
 
 /**

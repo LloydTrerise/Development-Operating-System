@@ -161,6 +161,26 @@ function createInMemoryDeps(): OrganisationUseCaseDeps {
     memberships: membershipRepository,
     auditRecords,
     registrationTokens,
+    // DEVOS-346 (Sprint 61): an in-memory fake of the real
+    // `createOrganisationTransactionCreator` (`@devos/database`) — same four
+    // steps, same order, against this file's own in-memory stores/repos
+    // rather than a real Postgres transaction (this suite has no real
+    // database at all, consistent with every other use case tested here).
+    createOrganisationTransactionally: async (organisation, membership, tokenId, now) => {
+      await organisationRepository.create(organisation);
+      await membershipRepository.create(membership);
+      await organisationRepository.setOwnerPrincipalId(
+        organisation.id,
+        membership.principalId,
+        now,
+      );
+      await registrationTokens.markRedeemed(
+        tokenId as RegistrationTokenId,
+        membership.principalId,
+        organisation.id,
+        now,
+      );
+    },
   };
 }
 

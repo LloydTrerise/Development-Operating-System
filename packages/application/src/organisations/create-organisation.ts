@@ -70,11 +70,18 @@ export async function createOrganisation(
   // exist (`memberships.organisation_id`'s own FK). So the organisation is
   // created without an owner first, then the membership (creating the
   // backing principal row as a side effect), then `owner_principal_id` is
-  // set — a real ordering bug found and fixed during this task's own live
+  // set — a real ordering bug found and fixed during DEVOS-330's own live
   // verification (a naive create-with-owner-inline attempt failed on a real
   // Postgres foreign-key violation).
-  await deps.organisations.create(organisation);
-
+  //
+  // DEVOS-346 (Sprint 61, Epic E31 gap closure): this create→membership→
+  // owner→redeem sequence previously ran as four separate, sequentially-
+  // committed writes, with a disclosed crash window between them
+  // (`specs/sprints/sprint-57/DEVOS-332.md`). Now runs as one atomic
+  // transaction via `deps.createOrganisationTransactionally`, mirroring
+  // `ReorderOrganisationLlmProviders`'s own established port/adapter
+  // pattern — the ordering above (organisation, then membership, then
+  // owner, then redeem) is preserved exactly inside that transaction.
   const membership: Membership = {
     id: randomUUID() as Membership['id'],
     organisationId: organisation.id,
@@ -86,19 +93,7 @@ export async function createOrganisation(
     updatedAt: now,
   };
 
-  await deps.memberships.create(membership);
-  await deps.organisations.setOwnerPrincipalId(organisation.id, principalId, now);
-
-  // DEVOS-330: marks the token consumed only after every prior step
-  // succeeded — a failure partway through the organisation/membership
-  // creation sequence above leaves the token still `ACTIVE`, so the
-  // principal isn't left holding a burned token for an organisation that
-  // was never actually created. Decided and disclosed rather than wrapped
-  // in a database transaction spanning both concerns (`DEVOS-332`) — no
-  // existing repository method here supports one, and DEVOS-290's own
-  // create-then-membership-then-owner sequence already accepts the same
-  // kind of partial-failure window for the same reason.
-  await deps.registrationTokens.markRedeemed(token.id, principalId, organisation.id, now);
+  await deps.createOrganisationTransactionally(organisation, membership, token.id, now);
 
   return { ...organisation, ownerPrincipalId: principalId };
 }

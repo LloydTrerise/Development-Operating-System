@@ -3,6 +3,8 @@ import type { RegistrationTokenId } from '@devos/contracts';
 import type {
   HumanProfile,
   HumanProfileRepository,
+  PlatformAuditRecord,
+  PlatformAuditRecordRepository,
   PlatformOperator,
   PlatformOperatorRepository,
   Principal,
@@ -21,6 +23,7 @@ import { ensureHumanPrincipal } from '../src/principals/ensure-human-principal.j
 import { ensureUserIdentityForLogin } from '../src/principals/ensure-user-identity.js';
 import { grantPlatformOperator } from '../src/principals/grant-platform-operator.js';
 import { issueRegistrationToken } from '../src/principals/issue-registration-token.js';
+import { listPlatformAuditRecords } from '../src/principals/list-platform-audit-records.js';
 import { listPlatformOperators } from '../src/principals/list-platform-operators.js';
 import { listRegistrationTokens } from '../src/principals/list-registration-tokens.js';
 import { hashRegistrationToken } from '../src/principals/registration-token-crypto.js';
@@ -224,12 +227,24 @@ describe('ensureBootstrapPlatformOperator (DEVOS-326)', () => {
 function createPlatformOperatorUseCaseDeps(seedOperatorPrincipalIds: string[] = []): {
   deps: PlatformOperatorUseCaseDeps;
   platformOperatorsStore: PlatformOperator[];
+  platformAuditRecordsStore: PlatformAuditRecord[];
 } {
-  const { deps, platformOperatorsStore } = createBootstrapDeps(undefined);
+  const { deps: bootstrapDeps, platformOperatorsStore } = createBootstrapDeps(undefined);
   for (const principalId of seedOperatorPrincipalIds) {
     platformOperatorsStore.push({ principalId, grantedAt: '2026-01-01T00:00:00Z' });
   }
-  return { deps, platformOperatorsStore };
+  const platformAuditRecordsStore: PlatformAuditRecord[] = [];
+  const platformAuditRecords: PlatformAuditRecordRepository = {
+    create: async (record) => {
+      platformAuditRecordsStore.push(record);
+    },
+    list: async (limit = 100) => [...platformAuditRecordsStore].reverse().slice(0, limit),
+  };
+  return {
+    deps: { ...bootstrapDeps, platformAuditRecords },
+    platformOperatorsStore,
+    platformAuditRecordsStore,
+  };
 }
 
 describe('grantPlatformOperator (DEVOS-327)', () => {
@@ -248,6 +263,20 @@ describe('grantPlatformOperator (DEVOS-327)', () => {
 
     expect(granted).toMatchObject({ principalId: 'bob', grantedByPrincipalId: 'alice' });
     expect(platformOperatorsStore).toHaveLength(2);
+  });
+
+  it('writes a platform_audit_records row on a successful grant (DEVOS-345)', async () => {
+    const { deps, platformAuditRecordsStore } = createPlatformOperatorUseCaseDeps(['alice']);
+
+    await grantPlatformOperator(deps, 'alice', 'bob');
+
+    expect(platformAuditRecordsStore).toHaveLength(1);
+    expect(platformAuditRecordsStore[0]).toMatchObject({
+      actorPrincipalId: 'alice',
+      action: 'platform_operator.granted',
+      targetPrincipalId: 'bob',
+      outcome: 'SUCCESS',
+    });
   });
 
   it('rejects granting a principal who is already a platform operator', async () => {
@@ -287,6 +316,20 @@ describe('revokePlatformOperator (DEVOS-327)', () => {
     expect(platformOperatorsStore).toHaveLength(1);
     expect(platformOperatorsStore[0]?.principalId).toBe('alice');
   });
+
+  it('writes a platform_audit_records row on a successful revoke (DEVOS-345)', async () => {
+    const { deps, platformAuditRecordsStore } = createPlatformOperatorUseCaseDeps(['alice', 'bob']);
+
+    await revokePlatformOperator(deps, 'alice', 'bob');
+
+    expect(platformAuditRecordsStore).toHaveLength(1);
+    expect(platformAuditRecordsStore[0]).toMatchObject({
+      actorPrincipalId: 'alice',
+      action: 'platform_operator.revoked',
+      targetPrincipalId: 'bob',
+      outcome: 'SUCCESS',
+    });
+  });
 });
 
 describe('listPlatformOperators (DEVOS-327)', () => {
@@ -302,6 +345,28 @@ describe('listPlatformOperators (DEVOS-327)', () => {
     const result = await listPlatformOperators(deps, 'alice');
 
     expect(result.map((op) => op.principalId).sort()).toEqual(['alice', 'bob']);
+  });
+});
+
+describe('listPlatformAuditRecords (DEVOS-345)', () => {
+  it('rejects a non-operator actor', async () => {
+    const { deps } = createPlatformOperatorUseCaseDeps(['alice']);
+
+    await expect(listPlatformAuditRecords(deps, 'not-an-operator')).rejects.toThrow(ForbiddenError);
+  });
+
+  it('returns the grant/revoke trail for an existing operator', async () => {
+    const { deps } = createPlatformOperatorUseCaseDeps(['alice']);
+
+    await grantPlatformOperator(deps, 'alice', 'bob');
+    await revokePlatformOperator(deps, 'alice', 'bob');
+
+    const result = await listPlatformAuditRecords(deps, 'alice');
+
+    expect(result.map((r) => r.action)).toEqual([
+      'platform_operator.revoked',
+      'platform_operator.granted',
+    ]);
   });
 });
 

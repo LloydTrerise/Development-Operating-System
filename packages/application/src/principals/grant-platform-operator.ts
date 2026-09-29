@@ -1,4 +1,6 @@
-import type { PlatformOperator } from '@devos/domain';
+import { randomUUID } from 'node:crypto';
+import type { PlatformAuditId } from '@devos/contracts';
+import type { PlatformAuditRecord, PlatformOperator } from '@devos/domain';
 import { ForbiddenError, ValidationError } from '../errors.js';
 import type { PlatformOperatorUseCaseDeps } from './deps.js';
 import { ensureHumanPrincipal } from './ensure-human-principal.js';
@@ -30,11 +32,26 @@ export async function grantPlatformOperator(
 
   await ensureHumanPrincipal(deps, { id: targetPrincipalId });
 
+  const now = new Date().toISOString();
   const operator: PlatformOperator = {
     principalId: targetPrincipalId,
-    grantedAt: new Date().toISOString(),
+    grantedAt: now,
     grantedByPrincipalId: actingPrincipalId,
   };
   await deps.platformOperators.create(operator);
+
+  // DEVOS-345 (Sprint 61): a separate, dedicated platform-level audit
+  // record — `AuditRecord.organisationId` is required and a platform
+  // operator has none by design, per this sprint's own Decision 1.
+  const auditRecord: PlatformAuditRecord = {
+    id: randomUUID() as PlatformAuditId,
+    actorPrincipalId: actingPrincipalId,
+    action: 'platform_operator.granted',
+    targetPrincipalId: targetPrincipalId,
+    outcome: 'SUCCESS',
+    createdAt: now,
+  };
+  await deps.platformAuditRecords.create(auditRecord);
+
   return operator;
 }

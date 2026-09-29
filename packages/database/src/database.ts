@@ -289,6 +289,18 @@ export interface AuditRecordsTable {
   created_at: string;
 }
 
+/** DEVOS-345 (Sprint 61): no `organisation_id` at all, unlike
+ * `AuditRecordsTable` above — see migration `0063`'s own doc comment. */
+export interface PlatformAuditRecordsTable {
+  id: string;
+  actor_principal_id: string;
+  action: string;
+  target_principal_id: string;
+  outcome: string;
+  metadata: unknown | null;
+  created_at: string;
+}
+
 export interface KnowledgeSourcesTable {
   id: string;
   project_id: string;
@@ -547,6 +559,7 @@ export interface Database {
   artifact_versions: ArtifactVersionsTable;
   outbox_events: OutboxEventsTable;
   audit_records: AuditRecordsTable;
+  platform_audit_records: PlatformAuditRecordsTable;
   knowledge_sources: KnowledgeSourcesTable;
   knowledge_references: KnowledgeReferencesTable;
   notifications: NotificationsTable;

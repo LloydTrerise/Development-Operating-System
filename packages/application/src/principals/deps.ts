@@ -1,5 +1,6 @@
 import type {
   HumanProfileRepository,
+  PlatformAuditRecordRepository,
   PlatformOperatorRepository,
   PrincipalRepository,
   RegistrationTokenRepository,
@@ -19,6 +20,13 @@ export interface PlatformOperatorUseCaseDeps {
   principals: PrincipalRepository;
   humanProfiles: HumanProfileRepository;
   platformOperators: PlatformOperatorRepository;
+  /**
+   * DEVOS-345 (Sprint 61, Epic E31 gap closure): backs the new grant/revoke
+   * audit trail — a separate, dedicated platform-level concept, not the
+   * existing organisation-scoped `AuditRecordRepository`
+   * (`specs/DEVOS-E31-GAP-CLOSURE-SPRINT.md` §6 Decision 1).
+   */
+  platformAuditRecords: PlatformAuditRecordRepository;
 }
 
 /**

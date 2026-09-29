@@ -91,6 +91,7 @@ export * from './principals/ensure-human-principal.js';
 export * from './principals/ensure-user-identity.js';
 export * from './principals/grant-platform-operator.js';
 export * from './principals/issue-registration-token.js';
+export * from './principals/list-platform-audit-records.js';
 export * from './principals/list-platform-operators.js';
 export * from './principals/list-registration-tokens.js';
 export * from './principals/registration-token-crypto.js';

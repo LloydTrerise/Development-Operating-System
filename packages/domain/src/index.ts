@@ -13,6 +13,7 @@ export * from './approval/approval.js';
 export * from './artifacts/artifact-version.js';
 export * from './artifacts/artifact.js';
 export * from './audit/audit-record.js';
+export * from './audit/platform-audit-record.js';
 export * from './engineering-intelligence/compute-dora-release-metrics.js';
 export * from './engineering-intelligence/compute-lead-time.js';
 export * from './engineering-intelligence/compute-release-recovery-proxy.js';

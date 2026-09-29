@@ -43,6 +43,8 @@ import {
   createOrganisationLlmProviderReorderer,
   createOrganisationLlmProviderRepository,
   createOrganisationRepository,
+  createOrganisationTransactionCreator,
+  createPlatformAuditRecordRepository,
   createPlatformOperatorRepository,
   createPolicyRepository,
   createPrincipalJobRoleRepository,
@@ -135,6 +137,7 @@ import { createNotificationRoutes } from './routes/notifications.js';
 import { createOrganisationInitialisationRoutes } from './routes/organisation-initialisation.js';
 import { createOrganisationLlmProviderRoutes } from './routes/organisation-llm-providers.js';
 import { createOrganisationRoutes } from './routes/organisations.js';
+import { createPlatformAuditRecordRoutes } from './routes/platform-audit-records.js';
 import { createPlatformOperatorRoutes } from './routes/platform-operators.js';
 import { createPolicyRoutes } from './routes/policies.js';
 import { createProjectTypeRoutes } from './routes/project-types.js';
@@ -382,6 +385,10 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     console.error('Failed to load access control catalogue', error);
   });
   const auditRecordRepository = createAuditRecordRepository(database.db);
+  // DEVOS-345 (Sprint 61): a separate, dedicated repository from
+  // `auditRecordRepository` above — see `platform-audit-record.ts`'s own
+  // doc comment for why this isn't the same `AuditRecord` concept.
+  const platformAuditRecordRepository = createPlatformAuditRecordRepository(database.db);
   const projectTypeRepository = createProjectTypeRepository(database.db);
   const projectTypeWorkflowRepository = createProjectTypeWorkflowRepository(database.db);
   const projectTypeAgentRepository = createProjectTypeAgentRepository(database.db);
@@ -528,6 +535,9 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     // `createOrganisation` — the disclosed reversal of this route's
     // previously ungated design.
     registrationTokens: registrationTokenRepository,
+    // DEVOS-346 (Sprint 61): the real transactional create→membership→
+    // owner→redeem adapter, closing gap 2a.
+    createOrganisationTransactionally: createOrganisationTransactionCreator(database.db),
   };
   const organisationLlmProviderDeps: OrganisationLlmProviderUseCaseDeps =
     options.organisationLlmProviderDeps ?? {
@@ -545,8 +555,14 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   // wrappers over the same real `database.db`) — no separate construction
   // needed, unlike `organisationLlmProviderDeps`'s own "separate instance"
   // precedent, since nothing here needs distinct instances.
-  const platformOperatorDeps: PlatformOperatorUseCaseDeps =
-    options.platformOperatorDeps ?? platformOperatorBootstrapDeps;
+  const platformOperatorDeps: PlatformOperatorUseCaseDeps = options.platformOperatorDeps ?? {
+    ...platformOperatorBootstrapDeps,
+    // DEVOS-345: a separate instance from `platformOperatorBootstrapDeps`'s
+    // own fields — a stateless wrapper over the same real `database.db`,
+    // mirroring `platformOperatorDeps.organisations`'s own established
+    // "separate instance" precedent throughout this file.
+    platformAuditRecords: platformAuditRecordRepository,
+  };
   // DEVOS-331: reuses `platformOperatorBootstrapDeps.platformOperators` (the
   // same instance every other platform-operator-gated deps object already
   // shares) plus the `registrationTokenRepository` constructed above.
@@ -649,6 +665,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createOrganisationLlmProviderRoutes(API_PREFIX, organisationLlmProviderDeps),
     ...createOrganisationInitialisationRoutes(API_PREFIX, organisationInitialisationStatusDeps),
     ...createPlatformOperatorRoutes(API_PREFIX, platformOperatorDeps),
+    ...createPlatformAuditRecordRoutes(API_PREFIX, platformOperatorDeps),
     ...createRegistrationTokenRoutes(
       API_PREFIX,
       registrationTokenDeps,

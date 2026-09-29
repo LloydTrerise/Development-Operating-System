@@ -75,6 +75,8 @@ import {
   type OrganisationLlmProvider,
   type OrganisationLlmProviderRepository,
   type OrganisationRepository,
+  type PlatformAuditRecord,
+  type PlatformAuditRecordRepository,
   type PlatformOperator,
   type PlatformOperatorRepository,
   type Policy,
@@ -373,10 +375,19 @@ function createInMemoryProjectDeps(): ProjectUseCaseDeps {
  */
 const TEST_REGISTRATION_TOKEN = 'test-registration-token';
 
-function createInMemoryOrganisationDeps(projectDeps: ProjectUseCaseDeps): OrganisationUseCaseDeps {
-  const organisations = new Map<string, Organisation>();
-
-  const registrationTokens: RegistrationTokenRepository = {
+function createInMemoryOrganisationDeps(
+  projectDeps: ProjectUseCaseDeps,
+  // DEVOS-346 (Sprint 61): overridable so a caller sharing a real (seeded,
+  // single-use) `registrationTokens` fake — e.g. `registrationTokenDeps`
+  // below — gets that same instance threaded through
+  // `createOrganisationTransactionally` too, not just the `registrationTokens`
+  // field itself. Previously (before this sprint) `createOrganisation`
+  // called `deps.registrationTokens.markRedeemed` directly, so a caller's
+  // later `{ ...organisationDeps, registrationTokens: overridden }` spread
+  // was enough; now redemption happens inside
+  // `createOrganisationTransactionally`'s own closure, so that override must
+  // reach this function, not just its return value.
+  registrationTokens: RegistrationTokenRepository = {
     getByTokenHash: async (tokenHash) => ({
       id: randomUUID() as RegistrationTokenId,
       tokenHash,
@@ -391,7 +402,9 @@ function createInMemoryOrganisationDeps(projectDeps: ProjectUseCaseDeps): Organi
     create: async () => {},
     markRedeemed: async () => {},
     markRevoked: async () => {},
-  };
+  },
+): OrganisationUseCaseDeps {
+  const organisations = new Map<string, Organisation>();
 
   const organisationRepository: OrganisationRepository = {
     getById: async (id) => organisations.get(id) ?? null,
@@ -416,6 +429,25 @@ function createInMemoryOrganisationDeps(projectDeps: ProjectUseCaseDeps): Organi
     memberships: projectDeps.memberships,
     auditRecords: projectDeps.auditRecords,
     registrationTokens,
+    // DEVOS-346 (Sprint 61): an in-memory fake mirroring the real
+    // `createOrganisationTransactionCreator` (`@devos/database`)'s own
+    // sequence, against this file's own in-memory fakes rather than a real
+    // transaction.
+    createOrganisationTransactionally: async (organisation, membership, tokenId, now) => {
+      await organisationRepository.create(organisation);
+      await projectDeps.memberships.create(membership);
+      await organisationRepository.setOwnerPrincipalId(
+        organisation.id,
+        membership.principalId,
+        now,
+      );
+      await registrationTokens.markRedeemed(
+        tokenId as RegistrationTokenId,
+        membership.principalId,
+        organisation.id,
+        now,
+      );
+    },
   };
 }
 
@@ -475,10 +507,12 @@ function createInMemoryPlatformOperatorDeps(seedOperatorPrincipalIds: string[] =
   principals: PrincipalRepository;
   humanProfiles: HumanProfileRepository;
   platformOperators: PlatformOperatorRepository;
+  platformAuditRecords: PlatformAuditRecordRepository;
 } {
   const principalsStore = new Map<string, Principal>();
   const humanProfilesStore = new Map<string, HumanProfile>();
   const platformOperatorsStore = new Map<string, PlatformOperator>();
+  const platformAuditRecordsStore: PlatformAuditRecord[] = [];
 
   for (const principalId of seedOperatorPrincipalIds) {
     platformOperatorsStore.set(principalId, {
@@ -511,7 +545,14 @@ function createInMemoryPlatformOperatorDeps(seedOperatorPrincipalIds: string[] =
     },
   };
 
-  return { principals, humanProfiles, platformOperators };
+  const platformAuditRecords: PlatformAuditRecordRepository = {
+    create: async (record) => {
+      platformAuditRecordsStore.push(record);
+    },
+    list: async (limit = 100) => [...platformAuditRecordsStore].reverse().slice(0, limit),
+  };
+
+  return { principals, humanProfiles, platformOperators, platformAuditRecords };
 }
 
 /** DEVOS-299/300/301 (Sprint 49): shares `organisationDeps`'/`projectDeps`'
@@ -4618,6 +4659,66 @@ describe('DEVOS-337/338/339: server-side initialisation enforcement (Sprint 59)'
     expect(response.status).toBe(200);
     expect((await response.json()).data.name).toBe('Exempt Org Renamed');
   });
+
+  it('DEVOS-347 (Sprint 61, correcting DEVOS-344\'s own gap 3 disclosure): disabling an organisation\'s only LLM provider does NOT lose INITIALISED status — hasLlmProvider checks row existence, not status, so the previously-disclosed "disable your only provider, then get stuck" scenario does not reproduce', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Disable Provider Org',
+        slug: 'disable-provider-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
+    });
+    const organisation = (await orgResponse.json()).data as { id: string };
+
+    await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Disable Provider Project',
+        slug: 'disable-provider-project',
+        organisationId: organisation.id,
+      }),
+    });
+    const providerResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: 'gemini', credentialReference: 'ref' }),
+      },
+    );
+    const provider = (await providerResponse.json()).data as { id: string };
+    await authed(`/api/v1/organisations/${organisation.id}/policies`, 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'default', definition: { rule: 'example' } }),
+    });
+
+    const disableResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers/${provider.id}`,
+      'alice',
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status: 'DISABLED' }),
+      },
+    );
+    expect(disableResponse.status).toBe(200);
+
+    // The disabled row still exists, so `hasLlmProvider` (row existence,
+    // not status) stays true — a genuinely unrelated Gated mutation
+    // (renaming, via the direct resolver) confirms the organisation is
+    // still `INITIALISED`, not blocked.
+    const stillUnblocked = await authed(`/api/v1/organisations/${organisation.id}`, 'alice', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Still Unblocked' }),
+    });
+    expect(stillUnblocked.status).toBe(200);
+  });
 });
 
 describe('platform operator routes (DEVOS-325/326/327)', () => {
@@ -4625,13 +4726,13 @@ describe('platform operator routes (DEVOS-325/326/327)', () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    const { principals, humanProfiles, platformOperators } = createInMemoryPlatformOperatorDeps([
-      'alice',
-    ]);
+    const { principals, humanProfiles, platformOperators, platformAuditRecords } =
+      createInMemoryPlatformOperatorDeps(['alice']);
     const platformOperatorDeps: PlatformOperatorUseCaseDeps = {
       principals,
       humanProfiles,
       platformOperators,
+      platformAuditRecords,
     };
     const started = await startServer({ platformOperatorDeps });
     server = started.server;
@@ -4705,6 +4806,29 @@ describe('platform operator routes (DEVOS-325/326/327)', () => {
       expect.objectContaining({ principalId: 'bob' }),
     ]);
   });
+
+  it('records a real audit trail for the grant/revoke sequence above, visible only to platform operators (DEVOS-345)', async () => {
+    const rejected = await authed('/api/v1/platform-audit-records', 'someone-else');
+    expect(rejected.status).toBe(403);
+
+    const response = await authed('/api/v1/platform-audit-records', 'bob');
+    expect(response.status).toBe(200);
+    const records = (await response.json()).data;
+    expect(records).toEqual([
+      expect.objectContaining({
+        actorPrincipalId: 'bob',
+        action: 'platform_operator.revoked',
+        targetPrincipalId: 'alice',
+        outcome: 'SUCCESS',
+      }),
+      expect.objectContaining({
+        actorPrincipalId: 'alice',
+        action: 'platform_operator.granted',
+        targetPrincipalId: 'bob',
+        outcome: 'SUCCESS',
+      }),
+    ]);
+  });
 });
 
 function createInMemoryRegistrationTokenDeps(seedOperatorPrincipalIds: string[] = []): {
@@ -4749,13 +4873,13 @@ describe('registration token routes (DEVOS-329/330/331)', () => {
 
   beforeAll(async () => {
     const registrationTokenDeps = createInMemoryRegistrationTokenDeps(['alice']);
-    const organisationDeps = createInMemoryOrganisationDeps(createInMemoryProjectDeps());
+    const organisationDeps = createInMemoryOrganisationDeps(
+      createInMemoryProjectDeps(),
+      registrationTokenDeps.registrationTokens,
+    );
     const started = await startServer({
       registrationTokenDeps,
-      organisationDeps: {
-        ...organisationDeps,
-        registrationTokens: registrationTokenDeps.registrationTokens,
-      },
+      organisationDeps,
     });
     server = started.server;
     baseUrl = started.baseUrl;
@@ -4878,7 +5002,8 @@ describe('DEVOS-326: deploy-time bootstrap platform operator, wired end-to-end',
   let baseUrl: string;
 
   beforeAll(async () => {
-    const { principals, humanProfiles, platformOperators } = createInMemoryPlatformOperatorDeps([]);
+    const { principals, humanProfiles, platformOperators, platformAuditRecords } =
+      createInMemoryPlatformOperatorDeps([]);
     const platformOperatorBootstrapDeps: EnsureBootstrapPlatformOperatorDeps = {
       principals,
       humanProfiles,
@@ -4889,6 +5014,7 @@ describe('DEVOS-326: deploy-time bootstrap platform operator, wired end-to-end',
       principals,
       humanProfiles,
       platformOperators,
+      platformAuditRecords,
     };
     const started = await startServer({ platformOperatorBootstrapDeps, platformOperatorDeps });
     server = started.server;
