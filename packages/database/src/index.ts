@@ -30,6 +30,7 @@ export * from './repositories/organisation-llm-providers.js';
 export * from './repositories/organisations.js';
 export * from './repositories/outbox-events.js';
 export * from './repositories/human-profiles.js';
+export * from './repositories/platform-operators.js';
 export * from './repositories/policies.js';
 export * from './repositories/principals.js';
 export * from './repositories/project-type-agents.js';

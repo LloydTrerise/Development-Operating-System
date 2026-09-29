@@ -495,6 +495,14 @@ export interface OrganisationLlmProvidersTable {
   updated_at: string;
 }
 
+/** DEVOS-325 (migration `0060`): dormant this sprint — see
+ * `packages/domain/src/principals/platform-operator.ts`. */
+export interface PlatformOperatorsTable {
+  principal_id: string;
+  granted_at: string;
+  granted_by_principal_id: string | null;
+}
+
 export interface Database {
   organisations: OrganisationsTable;
   projects: ProjectsTable;
@@ -529,6 +537,7 @@ export interface Database {
   integrations: IntegrationsTable;
   organisation_llm_providers: OrganisationLlmProvidersTable;
   principals: PrincipalsTable;
+  platform_operators: PlatformOperatorsTable;
   human_profiles: HumanProfilesTable;
   user_identities: UserIdentitiesTable;
   access_roles: AccessRolesTable;

@@ -16,6 +16,7 @@ import type {
   NotificationUseCaseDeps,
   OrganisationLlmProviderUseCaseDeps,
   OrganisationUseCaseDeps,
+  PlatformOperatorUseCaseDeps,
   PolicyUseCaseDeps,
   ProjectTypeUseCaseDeps,
   ProjectUseCaseDeps,
@@ -27,6 +28,7 @@ import type {
   WorkflowLibraryUseCaseDeps,
   WorkItemUseCaseDeps,
   WorkflowUseCaseDeps,
+  EnsureBootstrapPlatformOperatorDeps,
   EnsureUserIdentityDeps,
 } from '@devos/application';
 import type { DatabaseClient } from '@devos/database';
@@ -71,6 +73,8 @@ import {
   type OrganisationLlmProvider,
   type OrganisationLlmProviderRepository,
   type OrganisationRepository,
+  type PlatformOperator,
+  type PlatformOperatorRepository,
   type Policy,
   type PolicyRepository,
   type PrincipalJobRole,
@@ -355,6 +359,54 @@ function createInMemoryOrganisationLlmProviderDeps(
     },
     auditRecords: organisationDeps.auditRecords,
   };
+}
+
+/** DEVOS-325/326/327 (Sprint 56, candidate epic E31): a self-contained
+ * in-memory fake — platform operators aren't scoped to any organisation, so
+ * unlike every sibling `createInMemoryXDeps` above, this shares nothing with
+ * `organisationDeps`/`projectDeps`. `seedOperatorPrincipalIds` lets a test
+ * start from a non-empty table without going through the bootstrap path. */
+function createInMemoryPlatformOperatorDeps(seedOperatorPrincipalIds: string[] = []): {
+  principals: PrincipalRepository;
+  humanProfiles: HumanProfileRepository;
+  platformOperators: PlatformOperatorRepository;
+} {
+  const principalsStore = new Map<string, Principal>();
+  const humanProfilesStore = new Map<string, HumanProfile>();
+  const platformOperatorsStore = new Map<string, PlatformOperator>();
+
+  for (const principalId of seedOperatorPrincipalIds) {
+    platformOperatorsStore.set(principalId, {
+      principalId,
+      grantedAt: '2026-01-01T00:00:00Z',
+    });
+  }
+
+  const principals: PrincipalRepository = {
+    getById: async (id) => principalsStore.get(id) ?? null,
+    create: async (principal) => {
+      principalsStore.set(principal.id, principal);
+    },
+  };
+  const humanProfiles: HumanProfileRepository = {
+    getByPrincipalId: async (principalId) => humanProfilesStore.get(principalId) ?? null,
+    create: async (profile) => {
+      humanProfilesStore.set(profile.principalId, profile);
+    },
+  };
+  const platformOperators: PlatformOperatorRepository = {
+    getByPrincipalId: async (principalId) => platformOperatorsStore.get(principalId) ?? null,
+    list: async () => [...platformOperatorsStore.values()],
+    count: async () => platformOperatorsStore.size,
+    create: async (operator) => {
+      platformOperatorsStore.set(operator.principalId, operator);
+    },
+    delete: async (principalId) => {
+      platformOperatorsStore.delete(principalId);
+    },
+  };
+
+  return { principals, humanProfiles, platformOperators };
 }
 
 /** DEVOS-299/300/301 (Sprint 49): shares `organisationDeps`'/`projectDeps`'
@@ -4121,6 +4173,144 @@ describe('organisation LLM provider routes (DEVOS-319/320/321)', () => {
     expect((await finalList.json()).data).toEqual([
       expect.objectContaining({ id: second.id, provider: 'anthropic' }),
     ]);
+  });
+});
+
+describe('platform operator routes (DEVOS-325/326/327)', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const { principals, humanProfiles, platformOperators } = createInMemoryPlatformOperatorDeps([
+      'alice',
+    ]);
+    const platformOperatorDeps: PlatformOperatorUseCaseDeps = {
+      principals,
+      humanProfiles,
+      platformOperators,
+    };
+    const started = await startServer({ platformOperatorDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('rejects every route for a non-operator principal', async () => {
+    const listResponse = await authed('/api/v1/platform-operators', 'bob');
+    expect(listResponse.status).toBe(403);
+
+    const grantResponse = await authed('/api/v1/platform-operators', 'bob', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ principalId: 'carol' }),
+    });
+    expect(grantResponse.status).toBe(403);
+
+    const revokeResponse = await authed('/api/v1/platform-operators/alice', 'bob', {
+      method: 'DELETE',
+    });
+    expect(revokeResponse.status).toBe(403);
+  });
+
+  it('lets an existing operator list operators, grant a second, and blocks revoking the sole remaining one', async () => {
+    const listResponse = await authed('/api/v1/platform-operators', 'alice');
+    expect(listResponse.status).toBe(200);
+    expect((await listResponse.json()).data).toEqual([
+      expect.objectContaining({ principalId: 'alice' }),
+    ]);
+
+    const grantResponse = await authed('/api/v1/platform-operators', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ principalId: 'bob' }),
+    });
+    expect(grantResponse.status).toBe(200);
+    expect((await grantResponse.json()).data).toEqual(
+      expect.objectContaining({ principalId: 'bob', grantedByPrincipalId: 'alice' }),
+    );
+
+    const duplicateGrant = await authed('/api/v1/platform-operators', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ principalId: 'bob' }),
+    });
+    expect(duplicateGrant.status).toBe(400);
+
+    const revokeAlice = await authed('/api/v1/platform-operators/alice', 'bob', {
+      method: 'DELETE',
+    });
+    expect(revokeAlice.status).toBe(200);
+
+    const blockedRevokeBob = await authed('/api/v1/platform-operators/bob', 'bob', {
+      method: 'DELETE',
+    });
+    expect(blockedRevokeBob.status).toBe(400);
+
+    const finalList = await authed('/api/v1/platform-operators', 'bob');
+    expect((await finalList.json()).data).toEqual([
+      expect.objectContaining({ principalId: 'bob' }),
+    ]);
+  });
+});
+
+describe('DEVOS-326: deploy-time bootstrap platform operator, wired end-to-end', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const { principals, humanProfiles, platformOperators } = createInMemoryPlatformOperatorDeps([]);
+    const platformOperatorBootstrapDeps: EnsureBootstrapPlatformOperatorDeps = {
+      principals,
+      humanProfiles,
+      platformOperators,
+      bootstrapSubject: 'first-operator',
+    };
+    const platformOperatorDeps: PlatformOperatorUseCaseDeps = {
+      principals,
+      humanProfiles,
+      platformOperators,
+    };
+    const started = await startServer({ platformOperatorBootstrapDeps, platformOperatorDeps });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('grants the configured bootstrap subject platform-operator status on their first authenticated request', async () => {
+    const rejectedBeforeBootstrap = await authed('/api/v1/platform-operators', 'someone-else');
+    expect(rejectedBeforeBootstrap.status).toBe(403);
+
+    await authed('/api/v1/me', 'first-operator');
+
+    const listResponse = await authed('/api/v1/platform-operators', 'first-operator');
+    expect(listResponse.status).toBe(200);
+    const operators = (await listResponse.json()).data as Array<{
+      principalId: string;
+      grantedByPrincipalId?: string;
+    }>;
+    expect(operators).toHaveLength(1);
+    expect(operators[0]?.principalId).toBe('first-operator');
+    expect(operators[0]?.grantedByPrincipalId).toBeUndefined();
   });
 });
 

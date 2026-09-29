@@ -147,6 +147,19 @@ export function validateEnvironment(env: RawEnvironment): ConfigValidationResult
   // above.
   validUrl(env.REDIS_URL, 'REDIS_URL', issues);
 
+  // DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT (DEVOS-326): optional here,
+  // same shape as GEMINI_API_KEY above — a plain principal-id string, not a
+  // URL, so only rejected when blank-when-provided.
+  if (
+    env.DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT !== undefined &&
+    env.DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT.trim().length === 0
+  ) {
+    issues.push({
+      key: 'DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT',
+      message: 'DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT must not be empty when provided.',
+    });
+  }
+
   if (env.LOG_LEVEL !== undefined && !['debug', 'info', 'warn', 'error'].includes(env.LOG_LEVEL)) {
     issues.push({
       key: 'LOG_LEVEL',

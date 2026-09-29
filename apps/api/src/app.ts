@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
+  ensureBootstrapPlatformOperator,
   ensureUserIdentityForLogin,
   loadAccessControlCatalogueFromRepository,
   ForbiddenError as UseCaseForbiddenError,
   NotFoundError as UseCaseNotFoundError,
   ValidationError as UseCaseValidationError,
+  type EnsureBootstrapPlatformOperatorDeps,
   type EnsureUserIdentityDeps,
   type LoadAccessControlCatalogueDeps,
 } from '@devos/application';
@@ -39,6 +41,7 @@ import {
   createOrganisationLlmProviderReorderer,
   createOrganisationLlmProviderRepository,
   createOrganisationRepository,
+  createPlatformOperatorRepository,
   createPolicyRepository,
   createPrincipalJobRoleRepository,
   createPrincipalRepository,
@@ -85,6 +88,7 @@ import type {
   NotificationUseCaseDeps,
   OrganisationLlmProviderUseCaseDeps,
   OrganisationUseCaseDeps,
+  PlatformOperatorUseCaseDeps,
   PolicyUseCaseDeps,
   ProjectTypeUseCaseDeps,
   ProjectUseCaseDeps,
@@ -125,6 +129,7 @@ import { createMeRoutes } from './routes/me.js';
 import { createNotificationRoutes } from './routes/notifications.js';
 import { createOrganisationLlmProviderRoutes } from './routes/organisation-llm-providers.js';
 import { createOrganisationRoutes } from './routes/organisations.js';
+import { createPlatformOperatorRoutes } from './routes/platform-operators.js';
 import { createPolicyRoutes } from './routes/policies.js';
 import { createProjectTypeRoutes } from './routes/project-types.js';
 import { createProjectRoutes } from './routes/projects.js';
@@ -239,6 +244,11 @@ export interface CreateAppOptions {
    * instead of a real (here, fake/null) database connection — mirrors
    * `userIdentityDeps`'s own established shape. */
   accessControlDeps?: LoadAccessControlCatalogueDeps;
+  /** DEVOS-326: overridable so tests can exercise
+   * `ensureBootstrapPlatformOperator` against in-memory fakes instead of a
+   * real (here, fake/null) database connection — mirrors `userIdentityDeps`'s
+   * own established shape. */
+  platformOperatorBootstrapDeps?: EnsureBootstrapPlatformOperatorDeps;
   projectDeps?: ProjectUseCaseDeps;
   workItemDeps?: WorkItemUseCaseDeps;
   workflowDeps?: WorkflowUseCaseDeps;
@@ -254,6 +264,7 @@ export interface CreateAppOptions {
   integrationDeps?: IntegrationUseCaseDeps;
   organisationDeps?: OrganisationUseCaseDeps;
   organisationLlmProviderDeps?: OrganisationLlmProviderUseCaseDeps;
+  platformOperatorDeps?: PlatformOperatorUseCaseDeps;
   jobRoleDeps?: JobRoleUseCaseDeps;
   projectTypeDeps?: ProjectTypeUseCaseDeps;
   policyDeps?: PolicyUseCaseDeps;
@@ -304,6 +315,20 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
           userIdentities: createUserIdentityRepository(database.db),
         }
       : undefined);
+  // DEVOS-326: constructed unconditionally (unlike `userIdentityDeps` above,
+  // which is OIDC-only) — the bootstrap subject may be a local-dev bearer
+  // token id, since this codebase never assumes OIDC is configured. A
+  // no-op for every existing deployment/test, which never sets
+  // `DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT`.
+  const platformOperatorBootstrapDeps: EnsureBootstrapPlatformOperatorDeps =
+    options.platformOperatorBootstrapDeps ?? {
+      principals: createPrincipalRepository(database.db),
+      humanProfiles: createHumanProfileRepository(database.db),
+      platformOperators: createPlatformOperatorRepository(database.db),
+      ...(config.platformOperators.bootstrapSubject === undefined
+        ? {}
+        : { bootstrapSubject: config.platformOperators.bootstrapSubject }),
+    };
   // DEVOS-091: only mutating requests count as "expensive" for rate-limiting
   // purposes — a read has no write/agent/tool-invocation cost behind it.
   // 60 requests per 10s per principal is generous enough not to interfere
@@ -486,6 +511,13 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
       reorderOrganisationLlmProviders: createOrganisationLlmProviderReorderer(database.db),
       auditRecords: auditRecordRepository,
     };
+  // DEVOS-327: reuses the exact same repository instances
+  // `platformOperatorBootstrapDeps` already constructed above (all stateless
+  // wrappers over the same real `database.db`) — no separate construction
+  // needed, unlike `organisationLlmProviderDeps`'s own "separate instance"
+  // precedent, since nothing here needs distinct instances.
+  const platformOperatorDeps: PlatformOperatorUseCaseDeps =
+    options.platformOperatorDeps ?? platformOperatorBootstrapDeps;
   const jobRoleDeps: JobRoleUseCaseDeps = options.jobRoleDeps ?? {
     // DEVOS-299/300/301: separate instances from `organisationDeps.organisations`/
     // `projectDeps.projects` above (construction order) — all stateless
@@ -567,6 +599,7 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createMeRoutes(API_PREFIX),
     ...createOrganisationRoutes(API_PREFIX, organisationDeps),
     ...createOrganisationLlmProviderRoutes(API_PREFIX, organisationLlmProviderDeps),
+    ...createPlatformOperatorRoutes(API_PREFIX, platformOperatorDeps),
     ...createJobRoleRoutes(API_PREFIX, jobRoleDeps),
     ...createProjectTypeRoutes(API_PREFIX, projectTypeDeps),
     ...createProjectRoutes(API_PREFIX, projectDeps),
@@ -626,6 +659,22 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
 
       const principal = await authProvider.authenticate(req.headers.authorization);
       if (match.route.protected && principal === null) throw new AuthenticationError();
+
+      // DEVOS-326: awaited (unlike DEVOS-285's fire-and-forget
+      // `ensureUserIdentityForLogin` below) — the bootstrap grant's own
+      // correctness is what a fresh deployment's very first platform
+      // operator depends on, so the response should not complete before it
+      // has genuinely happened. A no-op for every existing deployment/test
+      // (unset `DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT`) returns
+      // immediately without touching the database. Never allowed to fail
+      // the real request it rode in on.
+      if (principal !== null) {
+        try {
+          await ensureBootstrapPlatformOperator(platformOperatorBootstrapDeps, principal.id);
+        } catch (error) {
+          console.error('Failed to ensure bootstrap platform operator', error);
+        }
+      }
 
       // DEVOS-285: best-effort — a USER_IDENTITY recording failure must
       // never fail the real request it rode in on; only reachable when a

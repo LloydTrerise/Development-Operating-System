@@ -65,6 +65,18 @@ export interface RateLimitConfig {
   redisUrl?: string;
 }
 
+/**
+ * DEVOS-326 (Sprint 56, candidate epic E31): like `AgentsConfig.geminiApiKey`,
+ * a single optional deploy-time environment variable, following that exact
+ * established single-env-var-secret precedent
+ * (`specs/DEVOS-ORGANISATION-ONBOARDING-BACKLOG.md` §2.10). Enforced only at
+ * the one call site that consumes it (`ensureBootstrapPlatformOperator`), not
+ * globally in this shared schema.
+ */
+export interface PlatformOperatorsConfig {
+  bootstrapSubject?: string;
+}
+
 export interface DevosConfig {
   environment: NodeEnvironment;
   port: number;
@@ -76,6 +88,7 @@ export interface DevosConfig {
   agents: AgentsConfig;
   secrets: SecretsConfig;
   rateLimit: RateLimitConfig;
+  platformOperators: PlatformOperatorsConfig;
 }
 
 function parseEnvironment(value: string | undefined): NodeEnvironment {
@@ -114,6 +127,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DevosConfig {
   const vaultAddress = optional(raw.VAULT_ADDR);
   const vaultToken = optional(raw.VAULT_TOKEN);
   const redisUrl = optional(raw.REDIS_URL);
+  const platformOperatorBootstrapSubject = optional(raw.DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT);
 
   return {
     environment: parseEnvironment(raw.NODE_ENV),
@@ -149,6 +163,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DevosConfig {
     },
     rateLimit: {
       ...(redisUrl === undefined ? {} : { redisUrl }),
+    },
+    platformOperators: {
+      ...(platformOperatorBootstrapSubject === undefined
+        ? {}
+        : { bootstrapSubject: platformOperatorBootstrapSubject }),
     },
   };
 }

@@ -244,4 +244,45 @@ describe('configuration', () => {
     expect(result.valid).toBe(false);
     expect(result.issues.map((issue) => issue.key)).toContain('REDIS_URL');
   });
+
+  it('DEVOS-326: loads DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT as optional platformOperators config when provided', () => {
+    const config = loadConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://localhost/devos',
+      DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT: 'bootstrap-subject-id',
+    });
+
+    expect(config.platformOperators).toEqual({ bootstrapSubject: 'bootstrap-subject-id' });
+  });
+
+  it('DEVOS-326: omits platformOperators.bootstrapSubject when not provided', () => {
+    const config = loadConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://localhost/devos',
+    });
+
+    expect(config.platformOperators).toEqual({});
+  });
+
+  it('DEVOS-326: treats a blank DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT as absent, not invalid', () => {
+    const config = loadConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://localhost/devos',
+      DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT: '',
+    });
+
+    expect(config.platformOperators).toEqual({});
+  });
+
+  it('DEVOS-326: rejects a whitespace-only DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT when provided', () => {
+    const result = validateEnvironment({
+      DATABASE_URL: 'postgresql://localhost/devos',
+      DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT: '   ',
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.map((issue) => issue.key)).toContain(
+      'DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT',
+    );
+  });
 });

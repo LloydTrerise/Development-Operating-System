@@ -20,6 +20,7 @@ export interface RawEnvironment {
   VAULT_ADDR?: string;
   VAULT_TOKEN?: string;
   REDIS_URL?: string;
+  DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT?: string;
 }
 
 /**
@@ -81,6 +82,13 @@ export function readEnvironment(env: Environment = process.env): RawEnvironment 
   if (vaultToken !== undefined) result.VAULT_TOKEN = vaultToken;
   const redisUrl = optionalValue(env.REDIS_URL);
   if (redisUrl !== undefined) result.REDIS_URL = redisUrl;
+
+  const platformOperatorBootstrapSubject = optionalValue(
+    env.DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT,
+  );
+  if (platformOperatorBootstrapSubject !== undefined) {
+    result.DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT = platformOperatorBootstrapSubject;
+  }
 
   return result;
 }

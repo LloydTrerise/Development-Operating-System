@@ -1746,3 +1746,36 @@ export function markNotificationRead(notificationId: string): Promise<ApiResult<
     method: 'PATCH',
   });
 }
+
+/** DEVOS-327 (Sprint 56, candidate epic E31): mirrors `toPlatformOperatorDto`
+ * (`apps/api/src/dto/platform-operator.ts`) exactly. Not scoped to any
+ * organisation — a platform operator sits above and outside every one. */
+export interface PlatformOperator {
+  principalId: string;
+  grantedAt: string;
+  grantedByPrincipalId?: string;
+}
+
+/** DEVOS-327: every route 403s for a non-operator principal — the page
+ * calling this uses that to decide its own visibility, mirroring how
+ * organisation-admin-only panels elsewhere in this codebase already
+ * condition on a 403 rather than a separate "am I allowed" check. */
+export function listPlatformOperators(): Promise<ApiResult<PlatformOperator[]>> {
+  return request<PlatformOperator[]>('/api/v1/platform-operators');
+}
+
+export function grantPlatformOperator(principalId: string): Promise<ApiResult<PlatformOperator>> {
+  return request<PlatformOperator>('/api/v1/platform-operators', {
+    method: 'POST',
+    body: { principalId },
+  });
+}
+
+export function revokePlatformOperator(
+  principalId: string,
+): Promise<ApiResult<{ revoked: boolean }>> {
+  return request<{ revoked: boolean }>(
+    `/api/v1/platform-operators/${encodeURIComponent(principalId)}`,
+    { method: 'DELETE' },
+  );
+}

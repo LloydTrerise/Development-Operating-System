@@ -19,6 +19,7 @@ import {
   Typography,
 } from '@mui/material';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import AltRouteIcon from '@mui/icons-material/AltRoute';
 import CableIcon from '@mui/icons-material/Cable';
 import CategoryIcon from '@mui/icons-material/Category';
@@ -38,7 +39,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import VerifiedIcon from '@mui/icons-material/Verified';
 import type { SvgIconProps } from '@mui/material/SvgIcon';
-import { getHealth } from './api-client.js';
+import { getHealth, listPlatformOperators } from './api-client.js';
 import { AgentDetailPage } from './features/agents/AgentDetailPage.js';
 import { AgentMarketplacePage } from './features/agents/AgentMarketplacePage.js';
 import { AgentsPage } from './features/agents/AgentsPage.js';
@@ -54,6 +55,7 @@ import { KnowledgeMarketplacePage } from './features/knowledge/KnowledgeMarketpl
 import { KnowledgeSourceDetailPage } from './features/knowledge/KnowledgeSourceDetailPage.js';
 import { KnowledgeSourcesPage } from './features/knowledge/KnowledgeSourcesPage.js';
 import { OrganisationsPage } from './features/organisations/OrganisationsPage.js';
+import { PlatformOperatorsPage } from './features/platform/PlatformOperatorsPage.js';
 import { ProjectTypesPage } from './features/project-types/ProjectTypesPage.js';
 import { ProjectDetailPage } from './features/projects/ProjectDetailPage.js';
 import { ProjectsPage } from './features/projects/ProjectsPage.js';
@@ -139,6 +141,43 @@ const NAV_GROUPS = [
   label: string;
   items: { to: string; label: string; icon: ComponentType<SvgIconProps> }[];
 }[];
+
+/**
+ * DEVOS-327: no nav-item change beyond this conditional entry — shown only
+ * when `GET /platform-operators` succeeds rather than 403s, mirroring how
+ * organisation-admin-only panels elsewhere in this codebase already
+ * condition their own visibility on the same real authorization outcome
+ * (`OrganisationsPage.tsx`'s AI Providers panel) rather than a separate
+ * "am I allowed" check.
+ */
+function PlatformOperatorsNavItem() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    listPlatformOperators().then((result) => {
+      if (!cancelled) setVisible(result.ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <ListItemButton
+      component={NavLink}
+      to="/platform-operators"
+      sx={{ '&.active': { bgcolor: 'action.selected' } }}
+    >
+      <ListItemIcon sx={{ minWidth: 36 }}>
+        <AdminPanelSettingsIcon fontSize="small" />
+      </ListItemIcon>
+      <ListItemText primary="Platform Operators" />
+    </ListItemButton>
+  );
+}
 
 function OrganisationSelector() {
   const { organisations, selectedOrganisationId, selectOrganisation, loading, error } =
@@ -401,12 +440,18 @@ export function App() {
               </ul>
             </li>
           ))}
+          <li>
+            <ul style={{ padding: 0 }}>
+              <PlatformOperatorsNavItem />
+            </ul>
+          </li>
         </List>
       </Drawer>
       <Box component="main" sx={{ flexGrow: 1, p: 3, mt: 8 }}>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/organisations" element={<OrganisationsPage />} />
+          <Route path="/platform-operators" element={<PlatformOperatorsPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           {/* DEVOS-225/226/227: the `/{area}/:id` convention's real Projects
               detail page — identity, membership panel, rename settings. */}
