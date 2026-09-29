@@ -12,6 +12,9 @@ function toDomain(row: OrganisationsTable): Organisation {
     status: row.status,
     ...(row.budget_usd !== null ? { budgetUsd: Number(row.budget_usd) } : {}),
     ...(row.owner_principal_id !== null ? { ownerPrincipalId: row.owner_principal_id } : {}),
+    ...(row.initialisation_enforcement_exempt_at !== null
+      ? { initialisationEnforcementExemptAt: row.initialisation_enforcement_exempt_at }
+      : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -43,6 +46,17 @@ export function createOrganisationRepository(db: QueryExecutor): OrganisationRep
           status: organisation.status,
           budget_usd: organisation.budgetUsd?.toString() ?? null,
           owner_principal_id: organisation.ownerPrincipalId ?? null,
+          // DEVOS-339: mirrors `owner_principal_id`'s own established
+          // pattern — this repository persists whatever the caller passes,
+          // it does not itself enforce "never grandfathered." In practice
+          // `createOrganisation` (the only application-layer writer) never
+          // sets this field, so every organisation created through the real
+          // API is `null` here exactly as intended; a test fixture writing
+          // directly through this repository (bypassing the use case, this
+          // codebase's own established fixture convention) may still set it
+          // to simulate a real, migration-`0062`-backfilled organisation.
+          initialisation_enforcement_exempt_at:
+            organisation.initialisationEnforcementExemptAt ?? null,
           created_at: organisation.createdAt,
           updated_at: organisation.updatedAt,
         })

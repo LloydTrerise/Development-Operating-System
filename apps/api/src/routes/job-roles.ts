@@ -15,6 +15,10 @@ import {
   toProjectJobRolesOverviewDto,
   toProjectMemberJobRoleDto,
 } from '../dto/job-role.js';
+import {
+  organisationIdFromParams,
+  organisationIdViaProjectParam,
+} from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 /**
@@ -62,6 +66,7 @@ export function createJobRoleRoutes(prefix: string, deps: JobRoleUseCaseDeps): R
       method: 'POST',
       pattern: `${prefix}/organisations/:organisationId/principals/:principalId/job-roles`,
       protected: true,
+      resolveOrganisationId: organisationIdFromParams(),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseJobRoleIdBody(body);
@@ -79,6 +84,7 @@ export function createJobRoleRoutes(prefix: string, deps: JobRoleUseCaseDeps): R
       method: 'DELETE',
       pattern: `${prefix}/organisations/:organisationId/principals/:principalId/job-roles/:jobRoleId`,
       protected: true,
+      resolveOrganisationId: organisationIdFromParams(),
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         await removePrincipalJobRole(
@@ -109,6 +115,7 @@ export function createJobRoleRoutes(prefix: string, deps: JobRoleUseCaseDeps): R
       method: 'POST',
       pattern: `${prefix}/projects/:projectId/members/:principalId/job-roles`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseJobRoleIdBody(body);
@@ -126,6 +133,7 @@ export function createJobRoleRoutes(prefix: string, deps: JobRoleUseCaseDeps): R
       method: 'DELETE',
       pattern: `${prefix}/projects/:projectId/members/:principalId/job-roles/:jobRoleId`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         await removeProjectMemberJobRole(

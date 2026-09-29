@@ -73,6 +73,7 @@ export * from './organisations/list-organisations-for-principal.js';
 export * from './organisations/membership-access.js';
 export * from './organisations/remove-member.js';
 export * from './organisations/reorder-organisation-llm-providers.js';
+export * from './organisations/require-organisation-initialised.js';
 export * from './organisations/transfer-organisation-ownership.js';
 export * from './organisations/update-organisation.js';
 export * from './organisations/update-organisation-llm-provider.js';

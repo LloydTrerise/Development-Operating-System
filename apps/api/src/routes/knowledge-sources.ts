@@ -20,6 +20,11 @@ import {
   toKnowledgeSourceDto,
   toSharedKnowledgeSourceDto,
 } from '../dto/knowledge-source.js';
+import {
+  organisationIdViaEntityProject,
+  organisationIdViaProjectBodyField,
+  organisationIdViaProjectParam,
+} from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 export function createKnowledgeSourceRoutes(prefix: string, deps: KnowledgeUseCaseDeps): Route[] {
@@ -42,6 +47,7 @@ export function createKnowledgeSourceRoutes(prefix: string, deps: KnowledgeUseCa
       method: 'POST',
       pattern: `${prefix}/projects/:projectId/knowledge-sources`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseCreateKnowledgeSourceBody(body);
@@ -72,6 +78,12 @@ export function createKnowledgeSourceRoutes(prefix: string, deps: KnowledgeUseCa
       method: 'PATCH',
       pattern: `${prefix}/knowledge-sources/:knowledgeSourceId`,
       protected: true,
+      resolveOrganisationId: organisationIdViaEntityProject(
+        (context) =>
+          deps.knowledgeSources.getById(context.params.knowledgeSourceId as KnowledgeSourceId),
+        (source) => source.projectId,
+        deps.projects,
+      ),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseUpdateKnowledgeSourceBody(body);
@@ -88,6 +100,12 @@ export function createKnowledgeSourceRoutes(prefix: string, deps: KnowledgeUseCa
       method: 'POST',
       pattern: `${prefix}/knowledge-sources/:knowledgeSourceId/archive`,
       protected: true,
+      resolveOrganisationId: organisationIdViaEntityProject(
+        (context) =>
+          deps.knowledgeSources.getById(context.params.knowledgeSourceId as KnowledgeSourceId),
+        (source) => source.projectId,
+        deps.projects,
+      ),
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         const source = await archiveKnowledgeSource(
@@ -116,6 +134,12 @@ export function createKnowledgeSourceRoutes(prefix: string, deps: KnowledgeUseCa
       method: 'POST',
       pattern: `${prefix}/knowledge-sources/:knowledgeSourceId/share`,
       protected: true,
+      resolveOrganisationId: organisationIdViaEntityProject(
+        (context) =>
+          deps.knowledgeSources.getById(context.params.knowledgeSourceId as KnowledgeSourceId),
+        (source) => source.projectId,
+        deps.projects,
+      ),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const { shared } = parseShareKnowledgeSourceBody(body);
@@ -146,6 +170,11 @@ export function createKnowledgeSourceRoutes(prefix: string, deps: KnowledgeUseCa
       method: 'POST',
       pattern: `${prefix}/organisations/:organisationId/shared-knowledge-sources/:knowledgeSourceId/install`,
       protected: true,
+      // DEVOS-338 (Sprint 59): gated on the *target* project's organisation
+      // (what this route actually mutates), not the `:organisationId` param
+      // (which only names where the shared marketplace is being browsed
+      // from) — see `organisationIdViaProjectBodyField`'s own doc comment.
+      resolveOrganisationId: organisationIdViaProjectBodyField(deps.projects, 'targetProjectId'),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const { targetProjectId } = parseInstallKnowledgeSourceBody(body);

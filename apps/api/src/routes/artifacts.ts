@@ -16,6 +16,7 @@ import {
   toArtifactVersionDto,
   toArtifactVersionWithArtifactDto,
 } from '../dto/artifact.js';
+import { organisationIdViaProjectParam } from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 export function createArtifactRoutes(prefix: string, deps: ArtifactUseCaseDeps): Route[] {
@@ -38,6 +39,7 @@ export function createArtifactRoutes(prefix: string, deps: ArtifactUseCaseDeps):
       method: 'POST',
       pattern: `${prefix}/projects/:projectId/artifacts`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseCreateArtifactBody(body);

@@ -1,3 +1,4 @@
+import type { OrganisationId } from '@devos/contracts';
 import type { Principal } from '@devos/identity';
 import { AuthenticationError } from './errors.js';
 
@@ -28,6 +29,22 @@ export interface Route {
   pattern: string;
   protected: boolean;
   handler: RouteHandler;
+  /**
+   * DEVOS-337/338 (Sprint 59, candidate epic E31 part 4): when present, a
+   * mutating (`POST`/`PATCH`/`DELETE`) request matching this route is gated
+   * by `requireOrganisationInitialised` against the organisation id this
+   * function resolves — `apps/api/src/app.ts`'s `handleRequest` calls it at
+   * the same chokepoint the existing DEVOS-091 mutation rate limiter already
+   * uses. `undefined` means "never gated": either the route is not
+   * organisation-scoped at all (health/me/platform-operators/registration-
+   * tokens/project-types — see `specs/sprints/sprint-59/DEVOS-338.md`'s own
+   * audit table), or it is one of the three setup-completing routes that
+   * sprint deliberately leaves unset. A resolver returning `null` (e.g. the
+   * referenced project/entity does not exist) is also never gated — an
+   * already-nonexistent-resource 404 is the existing handler's own job to
+   * raise, not this guard's.
+   */
+  resolveOrganisationId?: (context: RouteContext) => Promise<OrganisationId | null>;
 }
 
 export function requirePrincipal(principal: Principal | null): Principal {

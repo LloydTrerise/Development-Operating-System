@@ -10,6 +10,10 @@ import {
   type PolicyUseCaseDeps,
 } from '@devos/application';
 import { parseCreatePolicyBody, toPolicyDto } from '../dto/policy.js';
+import {
+  organisationIdViaEntity,
+  organisationIdViaProjectParam,
+} from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 export function createPolicyRoutes(prefix: string, deps: PolicyUseCaseDeps): Route[] {
@@ -28,6 +32,7 @@ export function createPolicyRoutes(prefix: string, deps: PolicyUseCaseDeps): Rou
       method: 'POST',
       pattern: `${prefix}/projects/:projectId/policies`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseCreatePolicyBody(body);
@@ -51,6 +56,11 @@ export function createPolicyRoutes(prefix: string, deps: PolicyUseCaseDeps): Rou
       },
     },
     {
+      // DEVOS-338 (Sprint 59): deliberately exempt from the initialisation
+      // gate — this is one of the three routes that let a non-initialised
+      // organisation become initialised (`hasPolicy`, DEVOS-334); no
+      // `resolveOrganisationId`, per `specs/sprints/sprint-59/DEVOS-338.md`'s
+      // own audit table.
       method: 'POST',
       pattern: `${prefix}/organisations/:organisationId/policies`,
       protected: true,
@@ -80,6 +90,10 @@ export function createPolicyRoutes(prefix: string, deps: PolicyUseCaseDeps): Rou
       method: 'POST',
       pattern: `${prefix}/policies/:policyId/publish`,
       protected: true,
+      resolveOrganisationId: organisationIdViaEntity(
+        (context) => deps.policies.getById(context.params.policyId as PolicyId),
+        (policy) => policy.organisationId,
+      ),
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         const policy = await publishPolicy(deps, user.id, params.policyId as PolicyId);

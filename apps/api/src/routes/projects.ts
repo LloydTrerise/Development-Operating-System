@@ -20,6 +20,7 @@ import {
   toMembershipDto,
   toProjectDto,
 } from '../dto/project.js';
+import { organisationIdViaProjectParam } from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 async function requireMembershipByPrincipal(
@@ -45,6 +46,11 @@ export function createProjectRoutes(prefix: string, deps: ProjectUseCaseDeps): R
       },
     },
     {
+      // DEVOS-338 (Sprint 59): deliberately exempt from the initialisation
+      // gate — this is one of the three routes that let a non-initialised
+      // organisation become initialised (`hasProjectType`, DEVOS-334); no
+      // `resolveOrganisationId`, per `specs/sprints/sprint-59/DEVOS-338.md`'s
+      // own audit table.
       method: 'POST',
       pattern: `${prefix}/projects`,
       protected: true,
@@ -73,6 +79,7 @@ export function createProjectRoutes(prefix: string, deps: ProjectUseCaseDeps): R
       method: 'PATCH',
       pattern: `${prefix}/projects/:projectId`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const changes = parseUpdateProjectBody(body);
@@ -94,6 +101,7 @@ export function createProjectRoutes(prefix: string, deps: ProjectUseCaseDeps): R
       method: 'POST',
       pattern: `${prefix}/projects/:projectId/members`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseAddMemberBody(body);
@@ -108,6 +116,7 @@ export function createProjectRoutes(prefix: string, deps: ProjectUseCaseDeps): R
       method: 'PATCH',
       pattern: `${prefix}/projects/:projectId/members/:userId`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const role = parseRoleBody(body);
@@ -121,6 +130,7 @@ export function createProjectRoutes(prefix: string, deps: ProjectUseCaseDeps): R
       method: 'DELETE',
       pattern: `${prefix}/projects/:projectId/members/:userId`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         const projectId = params.projectId as ProjectId;

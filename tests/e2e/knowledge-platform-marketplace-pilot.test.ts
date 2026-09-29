@@ -234,11 +234,14 @@ async function cleanupProject(project: Project, agentIds: string[] = []): Promis
     .where(
       'workflow_task_id',
       'in',
-      database.db.selectFrom('workflow_tasks').select('id').where(
-        'workflow_run_id',
-        'in',
-        database.db.selectFrom('workflow_runs').select('id').where('project_id', '=', project.id),
-      ),
+      database.db
+        .selectFrom('workflow_tasks')
+        .select('id')
+        .where(
+          'workflow_run_id',
+          'in',
+          database.db.selectFrom('workflow_runs').select('id').where('project_id', '=', project.id),
+        ),
     )
     .execute();
   if (agentIds.length > 0) {
@@ -268,10 +271,16 @@ async function cleanupProject(project: Project, agentIds: string[] = []): Promis
     .where(
       'workflow_definition_id',
       'in',
-      database.db.selectFrom('workflow_definitions').select('id').where('project_id', '=', project.id),
+      database.db
+        .selectFrom('workflow_definitions')
+        .select('id')
+        .where('project_id', '=', project.id),
     )
     .execute();
-  await database.db.deleteFrom('workflow_definitions').where('project_id', '=', project.id).execute();
+  await database.db
+    .deleteFrom('workflow_definitions')
+    .where('project_id', '=', project.id)
+    .execute();
   await database.db.deleteFrom('work_items').where('project_id', '=', project.id).execute();
   await database.db.deleteFrom('outbox_events').where('project_id', '=', project.id).execute();
   await database.db.deleteFrom('audit_records').where('project_id', '=', project.id).execute();
@@ -437,6 +446,20 @@ describe('DEVOS-190 real E2E pilot — knowledge marketplace share/install and r
       name: `Other Org ${randomUUID()}`,
       slug: `other-org-${randomUUID()}`,
       status: 'ACTIVE',
+      // DEVOS-339 (Sprint 59): this scenario tests cross-organisation
+      // authorization, not initialisation enforcement — marked exempt (as a
+      // real pre-existing organisation would be, post-migration-0062
+      // backfill) so DEVOS-337's new, unrelated initialisation gate never
+      // intercepts this request before `installKnowledgeSource`'s own real
+      // cross-org check gets to run and produce the masked 404 this test is
+      // actually about. Without this, ACTOR_ID's own project-level
+      // membership in `projectC` (as its creator) gives it real standing to
+      // read this organisation's live status via `resolveOrganisationMembership`'s
+      // own established project-level fallback (Sprint 58, predates this
+      // epic) — so the request would instead be rejected 403
+      // DEVOS_ORGANISATION_NOT_INITIALISED, a real but differently-scoped
+      // rejection this test was never trying to exercise.
+      initialisationEnforcementExemptAt: now,
       createdAt: now,
       updatedAt: now,
     };

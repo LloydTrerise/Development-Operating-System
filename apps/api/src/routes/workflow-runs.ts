@@ -7,6 +7,7 @@ import {
   type WorkflowUseCaseDeps,
 } from '@devos/application';
 import { parseStartRunBody, toWorkflowRunDto, toWorkflowTaskDto } from '../dto/workflow-run.js';
+import { organisationIdViaEntityProject } from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 export function createWorkflowRunRoutes(prefix: string, deps: WorkflowUseCaseDeps): Route[] {
@@ -15,6 +16,11 @@ export function createWorkflowRunRoutes(prefix: string, deps: WorkflowUseCaseDep
       method: 'POST',
       pattern: `${prefix}/workflows/:workflowId/runs`,
       protected: true,
+      resolveOrganisationId: organisationIdViaEntityProject(
+        (context) => deps.workflowDefinitions.getById(context.params.workflowId as WorkflowId),
+        (definition) => definition.projectId,
+        deps.projects,
+      ),
       handler: async ({ principal, params, body, correlationId }) => {
         const user = requirePrincipal(principal);
         const input = parseStartRunBody(body);
@@ -31,6 +37,19 @@ export function createWorkflowRunRoutes(prefix: string, deps: WorkflowUseCaseDep
       method: 'POST',
       pattern: `${prefix}/workflow-versions/:workflowVersionId/runs`,
       protected: true,
+      // DEVOS-338 (Sprint 59): a two-hop lookup (version -> definition ->
+      // project) — too specific to fit the shared single-hop
+      // `organisationIdViaEntityProject` helper, so resolved inline here.
+      resolveOrganisationId: async (context) => {
+        const version = await deps.workflowVersions.getById(
+          context.params.workflowVersionId as WorkflowVersionId,
+        );
+        if (!version) return null;
+        const definition = await deps.workflowDefinitions.getById(version.workflowDefinitionId);
+        if (!definition) return null;
+        const project = await deps.projects.getById(definition.projectId);
+        return project ? project.organisationId : null;
+      },
       handler: async ({ principal, params, body, correlationId }) => {
         const user = requirePrincipal(principal);
         const input = parseStartRunBody(body);

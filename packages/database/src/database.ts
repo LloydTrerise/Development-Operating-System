@@ -7,6 +7,10 @@ export interface OrganisationsTable {
   /** DEVOS-290 (migration `0048`): nullable only for the theoretical
    * ownerless-org edge case that migration's own backfill discloses. */
   owner_principal_id: string | null;
+  /** DEVOS-339 (migration `0062`): null for every organisation created after
+   * Sprint 59's initialisation-gate guard went live; a real backfilled
+   * timestamp for every organisation that existed before it. */
+  initialisation_enforcement_exempt_at: string | null;
   created_at: string;
   updated_at: string;
 }

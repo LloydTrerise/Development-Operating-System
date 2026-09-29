@@ -22,12 +22,24 @@ import {
   toWorkflowVersionDto,
 } from '../dto/workflow.js';
 import { toWorkflowRunDto } from '../dto/workflow-run.js';
+import {
+  organisationIdViaEntityProject,
+  organisationIdViaProjectParam,
+} from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 export function createWorkflowRoutes(
   prefix: string,
   deps: CreateWorkflowDefinitionDeps & ListWorkflowRunsForDefinitionDeps,
 ): Route[] {
+  // DEVOS-338 (Sprint 59): every `:workflowId`-keyed mutating route below
+  // shares this one resolver.
+  const resolveOrganisationIdViaWorkflow = organisationIdViaEntityProject(
+    (context) => deps.workflowDefinitions.getById(context.params.workflowId as WorkflowId),
+    (definition) => definition.projectId,
+    deps.projects,
+  );
+
   return [
     {
       method: 'GET',
@@ -47,6 +59,7 @@ export function createWorkflowRoutes(
       method: 'POST',
       pattern: `${prefix}/projects/:projectId/workflows`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseCreateWorkflowBody(body);
@@ -77,6 +90,7 @@ export function createWorkflowRoutes(
       method: 'PATCH',
       pattern: `${prefix}/workflows/:workflowId`,
       protected: true,
+      resolveOrganisationId: resolveOrganisationIdViaWorkflow,
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const graph = parseWorkflowGraphBody(body);
@@ -106,6 +120,7 @@ export function createWorkflowRoutes(
       method: 'POST',
       pattern: `${prefix}/workflows/:workflowId/versions`,
       protected: true,
+      resolveOrganisationId: resolveOrganisationIdViaWorkflow,
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         const version = await createNewWorkflowVersion(
@@ -136,6 +151,7 @@ export function createWorkflowRoutes(
       method: 'POST',
       pattern: `${prefix}/workflows/:workflowId/validate`,
       protected: true,
+      resolveOrganisationId: resolveOrganisationIdViaWorkflow,
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         return validateDraftWorkflow(deps, user.id, params.workflowId as WorkflowId);
@@ -161,6 +177,7 @@ export function createWorkflowRoutes(
       method: 'POST',
       pattern: `${prefix}/workflows/:workflowId/publish`,
       protected: true,
+      resolveOrganisationId: resolveOrganisationIdViaWorkflow,
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         const version = await publishWorkflowVersion(

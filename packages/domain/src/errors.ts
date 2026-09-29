@@ -30,6 +30,27 @@ export class ValidationError extends ApplicationError {
 }
 
 /**
+ * DEVOS-337 (Sprint 59, candidate epic E31 part 4): none of the three
+ * classes above carries a structured payload — this is the first
+ * application-layer error that needs one (which of the three mandatory
+ * initialisation requirements, Sprint 58/DEVOS-333, are still outstanding),
+ * so a new, narrowly-typed class is added rather than overloading
+ * `ForbiddenError`'s plain `message` string with parseable text.
+ */
+export class OrganisationNotInitialisedError extends ApplicationError {
+  public readonly missingRequirements: readonly (
+    'hasProjectType' | 'hasLlmProvider' | 'hasPolicy'
+  )[];
+
+  constructor(missingRequirements: readonly ('hasProjectType' | 'hasLlmProvider' | 'hasPolicy')[]) {
+    super(
+      `This organisation must complete setup before this action is available. Missing: ${missingRequirements.join(', ')}.`,
+    );
+    this.missingRequirements = missingRequirements;
+  }
+}
+
+/**
  * DEVOS-077: signals to the task dispatcher (`apps/worker/src/task-dispatcher.ts`)
  * that a task failure must not be automatically retried (§24 Retry Rules,
  * specs/workflows/software-change-workflow.md: "Do not automatically retry

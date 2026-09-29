@@ -19,6 +19,17 @@ export interface Organisation {
    * principal to assign (disclosed there, not expected against real data).
    */
   ownerPrincipalId?: string;
+  /**
+   * DEVOS-339 (Sprint 59, candidate epic E31 part 4): set once, by that
+   * sprint's own backfill migration, for every organisation that already
+   * existed before server-side initialisation enforcement went live — never
+   * set for any organisation created afterward. A categorically different
+   * fact from `INITIALISED` itself (Sprint 58): this never changes once set,
+   * and is consulted only by `requireOrganisationInitialised` as an
+   * up-front bypass — `getOrganisationInitialisationStatus`'s own live
+   * computation never reads it and is completely unaffected by it.
+   */
+  initialisationEnforcementExemptAt?: string;
   createdAt: string;
   updatedAt: string;
 }

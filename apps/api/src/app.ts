@@ -4,8 +4,10 @@ import {
   ensureBootstrapPlatformOperator,
   ensureUserIdentityForLogin,
   loadAccessControlCatalogueFromRepository,
+  requireOrganisationInitialised,
   ForbiddenError as UseCaseForbiddenError,
   NotFoundError as UseCaseNotFoundError,
+  OrganisationNotInitialisedError as UseCaseOrganisationNotInitialisedError,
   ValidationError as UseCaseValidationError,
   type EnsureBootstrapPlatformOperatorDeps,
   type EnsureUserIdentityDeps,
@@ -225,6 +227,16 @@ function toErrorBody(error: unknown): { status: number; body: ApiError } {
   }
   if (error instanceof UseCaseValidationError) {
     return { status: 400, body: { code: 'DEVOS_VALIDATION_ERROR', message: error.message } };
+  }
+  if (error instanceof UseCaseOrganisationNotInitialisedError) {
+    return {
+      status: 403,
+      body: {
+        code: 'DEVOS_ORGANISATION_NOT_INITIALISED',
+        message: error.message,
+        details: { missingRequirements: error.missingRequirements },
+      },
+    };
   }
 
   return {
@@ -734,6 +746,32 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
         req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE';
       if (isMutatingMethod && principal !== null) {
         if (!(await mutationRateLimiter.tryAcquire(principal.id))) throw new RateLimitError();
+      }
+
+      // DEVOS-337/338 (Sprint 59): the real server-side enforcement
+      // counterpart to Sprint 58's read-only initialisation status. Only
+      // ever consulted for a mutating request whose route has opted in via
+      // `resolveOrganisationId` (see that field's own doc comment,
+      // `apps/api/src/http/router.ts`) — every other route is completely
+      // unaffected. `principal !== null` is guaranteed by this point for
+      // every route that actually sets `resolveOrganisationId` (all are
+      // `protected: true`, already checked above); the check itself only
+      // satisfies the type checker, mirroring the rate-limiter block above.
+      if (isMutatingMethod && match.route.resolveOrganisationId && principal !== null) {
+        const organisationId = await match.route.resolveOrganisationId({
+          principal,
+          params: match.params,
+          query: Object.fromEntries(url.searchParams),
+          body,
+          correlationId: requestId,
+        });
+        if (organisationId !== null) {
+          await requireOrganisationInitialised(
+            organisationInitialisationStatusDeps,
+            principal.id,
+            organisationId,
+          );
+        }
       }
 
       const data = await match.route.handler({

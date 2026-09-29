@@ -20,6 +20,11 @@ import {
   toAgentVersionDto,
   toSharedAgentVersionDto,
 } from '../dto/agent.js';
+import {
+  organisationIdViaEntityProject,
+  organisationIdViaProjectBodyField,
+  organisationIdViaProjectParam,
+} from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 export function createAgentRoutes(prefix: string, deps: AgentUseCaseDeps): Route[] {
@@ -38,6 +43,7 @@ export function createAgentRoutes(prefix: string, deps: AgentUseCaseDeps): Route
       method: 'POST',
       pattern: `${prefix}/projects/:projectId/agents`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseCreateAgentBody(body);
@@ -64,6 +70,11 @@ export function createAgentRoutes(prefix: string, deps: AgentUseCaseDeps): Route
       method: 'POST',
       pattern: `${prefix}/agents/:agentId/publish`,
       protected: true,
+      resolveOrganisationId: organisationIdViaEntityProject(
+        (context) => deps.agents.getById(context.params.agentId as AgentId),
+        (agent) => agent.projectId,
+        deps.projects,
+      ),
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         const version = await publishAgentVersion(deps, user.id, params.agentId as AgentId);
@@ -74,6 +85,11 @@ export function createAgentRoutes(prefix: string, deps: AgentUseCaseDeps): Route
       method: 'POST',
       pattern: `${prefix}/agents/:agentId/versions`,
       protected: true,
+      resolveOrganisationId: organisationIdViaEntityProject(
+        (context) => deps.agents.getById(context.params.agentId as AgentId),
+        (agent) => agent.projectId,
+        deps.projects,
+      ),
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         const version = await createNewAgentVersion(deps, user.id, params.agentId as AgentId);
@@ -103,6 +119,11 @@ export function createAgentRoutes(prefix: string, deps: AgentUseCaseDeps): Route
       method: 'POST',
       pattern: `${prefix}/agents/:agentId/versions/:version/share`,
       protected: true,
+      resolveOrganisationId: organisationIdViaEntityProject(
+        (context) => deps.agents.getById(context.params.agentId as AgentId),
+        (agent) => agent.projectId,
+        deps.projects,
+      ),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const { shared } = parseShareAgentVersionBody(body);
@@ -134,6 +155,10 @@ export function createAgentRoutes(prefix: string, deps: AgentUseCaseDeps): Route
       method: 'POST',
       pattern: `${prefix}/organisations/:organisationId/shared-agents/:agentVersionId/install`,
       protected: true,
+      // DEVOS-338 (Sprint 59): gated on the *target* project's organisation
+      // (what this route actually mutates), not the `:organisationId` param
+      // — mirrors `knowledge-sources.ts`'s own identical install-route shape.
+      resolveOrganisationId: organisationIdViaProjectBodyField(deps.projects, 'targetProjectId'),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const { targetProjectId } = parseInstallAgentVersionBody(body);

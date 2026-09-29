@@ -13,6 +13,7 @@ import {
   parseUpdateOrganisationLlmProviderBody,
   toOrganisationLlmProviderDto,
 } from '../dto/organisation-llm-provider.js';
+import { organisationIdFromParams } from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 /**
@@ -42,6 +43,11 @@ export function createOrganisationLlmProviderRoutes(
       },
     },
     {
+      // DEVOS-338 (Sprint 59): deliberately exempt from the initialisation
+      // gate — this is one of the three routes that let a non-initialised
+      // organisation become initialised (`hasLlmProvider`, DEVOS-334); no
+      // `resolveOrganisationId`, per `specs/sprints/sprint-59/DEVOS-338.md`'s
+      // own audit table.
       method: 'POST',
       pattern: `${prefix}/organisations/:organisationId/llm-providers`,
       protected: true,
@@ -61,6 +67,7 @@ export function createOrganisationLlmProviderRoutes(
       method: 'PATCH',
       pattern: `${prefix}/organisations/:organisationId/llm-providers/:providerId`,
       protected: true,
+      resolveOrganisationId: organisationIdFromParams(),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const changes = parseUpdateOrganisationLlmProviderBody(body);
@@ -78,6 +85,7 @@ export function createOrganisationLlmProviderRoutes(
       method: 'DELETE',
       pattern: `${prefix}/organisations/:organisationId/llm-providers/:providerId`,
       protected: true,
+      resolveOrganisationId: organisationIdFromParams(),
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         await deleteOrganisationLlmProvider(
@@ -93,6 +101,7 @@ export function createOrganisationLlmProviderRoutes(
       method: 'POST',
       pattern: `${prefix}/organisations/:organisationId/llm-providers/reorder`,
       protected: true,
+      resolveOrganisationId: organisationIdFromParams(),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseReorderOrganisationLlmProvidersBody(body);

@@ -19,6 +19,7 @@ import {
   parseUpdateOrganisationBody,
   toOrganisationDto,
 } from '../dto/organisation.js';
+import { organisationIdFromParams } from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 async function requireOrganisationMembershipByPrincipal(
@@ -74,6 +75,7 @@ export function createOrganisationRoutes(prefix: string, deps: OrganisationUseCa
       method: 'PATCH',
       pattern: `${prefix}/organisations/:organisationId`,
       protected: true,
+      resolveOrganisationId: organisationIdFromParams(),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const changes = parseUpdateOrganisationBody(body);
@@ -104,6 +106,7 @@ export function createOrganisationRoutes(prefix: string, deps: OrganisationUseCa
       method: 'POST',
       pattern: `${prefix}/organisations/:organisationId/members`,
       protected: true,
+      resolveOrganisationId: organisationIdFromParams(),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseAddMemberBody(body);
@@ -120,6 +123,7 @@ export function createOrganisationRoutes(prefix: string, deps: OrganisationUseCa
       method: 'PATCH',
       pattern: `${prefix}/organisations/:organisationId/members/:userId`,
       protected: true,
+      resolveOrganisationId: organisationIdFromParams(),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const role = parseRoleBody(body);
@@ -143,6 +147,7 @@ export function createOrganisationRoutes(prefix: string, deps: OrganisationUseCa
       method: 'POST',
       pattern: `${prefix}/organisations/:organisationId/transfer-ownership`,
       protected: true,
+      resolveOrganisationId: organisationIdFromParams(),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseTransferOwnershipBody(body);
@@ -159,6 +164,7 @@ export function createOrganisationRoutes(prefix: string, deps: OrganisationUseCa
       method: 'DELETE',
       pattern: `${prefix}/organisations/:organisationId/members/:userId`,
       protected: true,
+      resolveOrganisationId: organisationIdFromParams(),
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         const organisationId = params.organisationId as OrganisationId;

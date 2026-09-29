@@ -24,12 +24,25 @@ import {
   toWorkItemDto,
 } from '../dto/work-item.js';
 import { toWorkflowRunDto } from '../dto/workflow-run.js';
+import {
+  organisationIdViaEntityProject,
+  organisationIdViaProjectParam,
+} from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 export function createWorkItemRoutes(
   prefix: string,
   deps: WorkItemUseCaseDeps & GetWorkflowRunsForWorkItemDeps,
 ): Route[] {
+  // DEVOS-338 (Sprint 59): every `:workItemId`-keyed mutating route below
+  // shares this one resolver — load the work item, resolve via its own
+  // `projectId`, same as every other entity-keyed route in this sprint.
+  const resolveOrganisationIdViaWorkItem = organisationIdViaEntityProject(
+    (context) => deps.workItems.getById(context.params.workItemId as WorkItemId),
+    (workItem) => workItem.projectId,
+    deps.projects,
+  );
+
   return [
     {
       method: 'GET',
@@ -49,6 +62,7 @@ export function createWorkItemRoutes(
       method: 'POST',
       pattern: `${prefix}/projects/:projectId/work-items`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const { parentId, ...input } = parseCreateWorkItemBody(body);
@@ -77,6 +91,7 @@ export function createWorkItemRoutes(
       method: 'PATCH',
       pattern: `${prefix}/work-items/:workItemId`,
       protected: true,
+      resolveOrganisationId: resolveOrganisationIdViaWorkItem,
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const { parentId, ...changes } = parseUpdateWorkItemBody(body);
@@ -125,6 +140,7 @@ export function createWorkItemRoutes(
       method: 'POST',
       pattern: `${prefix}/work-items/:workItemId/assignments`,
       protected: true,
+      resolveOrganisationId: resolveOrganisationIdViaWorkItem,
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseAssignWorkItemBody(body);
@@ -142,6 +158,7 @@ export function createWorkItemRoutes(
       method: 'DELETE',
       pattern: `${prefix}/work-items/:workItemId/assignments/:principalId/:role`,
       protected: true,
+      resolveOrganisationId: resolveOrganisationIdViaWorkItem,
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         await removeWorkItemAssignment(
@@ -169,6 +186,7 @@ export function createWorkItemRoutes(
       method: 'POST',
       pattern: `${prefix}/work-items/:workItemId/comments`,
       protected: true,
+      resolveOrganisationId: resolveOrganisationIdViaWorkItem,
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseAddWorkItemCommentBody(body);
@@ -187,6 +205,7 @@ export function createWorkItemRoutes(
       method: 'POST',
       pattern: `${prefix}/work-items/:workItemId/archive`,
       protected: true,
+      resolveOrganisationId: resolveOrganisationIdViaWorkItem,
       handler: async ({ principal, params }) => {
         const user = requirePrincipal(principal);
         const workItem = await archiveWorkItem(deps, user.id, params.workItemId as WorkItemId);

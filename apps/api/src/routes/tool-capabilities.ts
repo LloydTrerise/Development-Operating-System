@@ -5,6 +5,7 @@ import {
   type ToolUseCaseDeps,
 } from '@devos/application';
 import { parseSetToolCapabilityStatusBody, toToolCapabilityDto } from '../dto/tool-capability.js';
+import { organisationIdViaProjectParam } from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 /**
@@ -34,6 +35,7 @@ export function createToolCapabilityRoutes(prefix: string, deps: ToolUseCaseDeps
       method: 'PATCH',
       pattern: `${prefix}/projects/:projectId/tool-capabilities/:capabilityId`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const status = parseSetToolCapabilityStatusBody(body);

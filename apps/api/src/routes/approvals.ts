@@ -13,6 +13,10 @@ import {
   parseRequestApprovalBody,
   toApprovalDto,
 } from '../dto/approval.js';
+import {
+  organisationIdViaEntityProject,
+  organisationIdViaProjectParam,
+} from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 export function createApprovalRoutes(prefix: string, deps: ApprovalUseCaseDeps): Route[] {
@@ -35,6 +39,7 @@ export function createApprovalRoutes(prefix: string, deps: ApprovalUseCaseDeps):
       method: 'POST',
       pattern: `${prefix}/projects/:projectId/approvals`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseRequestApprovalBody(body);
@@ -74,6 +79,11 @@ export function createApprovalRoutes(prefix: string, deps: ApprovalUseCaseDeps):
       method: 'POST',
       pattern: `${prefix}/approvals/:approvalId/approve`,
       protected: true,
+      resolveOrganisationId: organisationIdViaEntityProject(
+        (context) => deps.approvals.getById(context.params.approvalId as ApprovalId),
+        (approval) => approval.projectId,
+        deps.projects,
+      ),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseDecideApprovalBody(body);
@@ -90,6 +100,11 @@ export function createApprovalRoutes(prefix: string, deps: ApprovalUseCaseDeps):
       method: 'POST',
       pattern: `${prefix}/approvals/:approvalId/reject`,
       protected: true,
+      resolveOrganisationId: organisationIdViaEntityProject(
+        (context) => deps.approvals.getById(context.params.approvalId as ApprovalId),
+        (approval) => approval.projectId,
+        deps.projects,
+      ),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseDecideApprovalBody(body);

@@ -5,6 +5,7 @@ import {
   type IntegrationUseCaseDeps,
 } from '@devos/application';
 import { parseCreateIntegrationBody, toIntegrationDto } from '../dto/integration.js';
+import { organisationIdViaProjectParam } from '../http/organisation-scope.js';
 import { requirePrincipal, type Route } from '../http/router.js';
 
 /**
@@ -36,6 +37,7 @@ export function createIntegrationRoutes(prefix: string, deps: IntegrationUseCase
       method: 'POST',
       pattern: `${prefix}/projects/:projectId/integrations`,
       protected: true,
+      resolveOrganisationId: organisationIdViaProjectParam(deps.projects),
       handler: async ({ principal, params, body }) => {
         const user = requirePrincipal(principal);
         const input = parseCreateIntegrationBody(body);

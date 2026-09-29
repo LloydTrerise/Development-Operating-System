@@ -127,6 +127,78 @@ function createFakeDatabaseClient(healthy: boolean): DatabaseClient {
   };
 }
 
+/**
+ * DEVOS-337/338 (Sprint 59): the vast majority of this file's ~30 describe
+ * blocks exercise one narrow feature area and, correctly, never bother
+ * wiring organisation-related deps at all — until this sprint, nothing on
+ * a mutating request's path ever touched them. `apps/api/src/app.ts`'s own
+ * `organisationInitialisationStatusDeps` fallback, absent an explicit
+ * override, constructs real repositories against `database.db`, which this
+ * file's own `createFakeDatabaseClient` deliberately sets to `null` — so
+ * the new guard's very first call would crash every such test with a raw
+ * 500, even for routes utterly unrelated to organisations.
+ *
+ * This permissive fixture (test-only; production always builds the real
+ * thing from real Postgres) treats every organisation as exempt — mirroring
+ * real production's own DEVOS-339 backfill guarantee that no organisation
+ * already in use is ever blocked by this sprint. `startServer` wires it in
+ * by default; the dedicated gate tests below override it explicitly with a
+ * real, non-exempt fixture instead.
+ */
+function createPermissiveOrganisationInitialisationStatusDeps(): OrganisationInitialisationStatusDeps {
+  const exemptOrganisation: Organisation = {
+    id: '' as Organisation['id'],
+    name: 'permissive-test-organisation',
+    slug: 'permissive-test-organisation',
+    status: 'ACTIVE',
+    initialisationEnforcementExemptAt: new Date(0).toISOString(),
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  };
+  return {
+    organisations: {
+      getById: async (id) => ({ ...exemptOrganisation, id }),
+      list: async () => [],
+      create: async () => {},
+      update: async () => {},
+      setOwnerPrincipalId: async () => {},
+    },
+    memberships: {
+      getById: async () => null,
+      getForPrincipalAndProject: async () => null,
+      listForPrincipal: async () => [],
+      listForProject: async () => [],
+      listForOrganisation: async () => [],
+      create: async () => {},
+      updateRole: async () => {},
+      remove: async () => {},
+    },
+    projects: {
+      getById: async () => null,
+      listForOrganisation: async () => [],
+      create: async () => {},
+      update: async () => {},
+    },
+    organisationLlmProviders: {
+      getById: async () => null,
+      listForOrganisation: async () => [],
+      create: async () => {},
+      update: async () => {},
+      delete: async () => {},
+    },
+    policies: {
+      getById: async () => null,
+      getByProjectAndKeyAndVersion: async () => null,
+      getLatestForProjectAndKey: async () => null,
+      listForProject: async () => [],
+      getLatestForOrganisationAndKey: async () => null,
+      listForOrganisation: async () => [],
+      create: async () => {},
+      publish: async () => {},
+    },
+  };
+}
+
 function createInMemoryAuditRecordRepository(): AuditRecordRepository {
   const store: AuditRecord[] = [];
   return {
@@ -1256,6 +1328,7 @@ async function startServer(
   const app = createApp({
     env: TEST_ENV,
     database: createFakeDatabaseClient(true),
+    organisationInitialisationStatusDeps: createPermissiveOrganisationInitialisationStatusDeps(),
     ...options,
   });
   const server = createServer((req, res) => {
@@ -4358,6 +4431,192 @@ describe('organisation initialisation status route (DEVOS-333/334, Sprint 58)', 
       hasPolicy: true,
       initialised: true,
     });
+  });
+});
+
+describe('DEVOS-337/338/339: server-side initialisation enforcement (Sprint 59)', () => {
+  let server: Server;
+  let baseUrl: string;
+  let organisationRepository: OrganisationRepository;
+  let membershipRepository: MembershipRepository;
+
+  beforeAll(async () => {
+    const projectDeps = createInMemoryProjectDeps();
+    const organisationDeps = createInMemoryOrganisationDeps(projectDeps);
+    const organisationLlmProviderDeps = createInMemoryOrganisationLlmProviderDeps(organisationDeps);
+    const policyDeps = createInMemoryPolicyDeps(projectDeps, organisationDeps.organisations);
+    organisationRepository = organisationDeps.organisations;
+    membershipRepository = organisationDeps.memberships;
+    const organisationInitialisationStatusDeps: OrganisationInitialisationStatusDeps = {
+      organisations: organisationDeps.organisations,
+      memberships: organisationDeps.memberships,
+      projects: projectDeps.projects,
+      organisationLlmProviders: organisationLlmProviderDeps.organisationLlmProviders,
+      policies: policyDeps.policies,
+    };
+    const started = await startServer({
+      projectDeps,
+      organisationDeps,
+      organisationLlmProviderDeps,
+      policyDeps,
+      // DEVOS-337/338: this describe block is the one place in this file
+      // that deliberately does *not* want `startServer`'s own permissive
+      // default — it exists specifically to exercise the real gate.
+      organisationInitialisationStatusDeps,
+    });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('blocks a direct-resolver gated mutation on a fresh organisation, lets every setup route through regardless, then unblocks it once all three requirements are met', async () => {
+    const orgResponse = await authed('/api/v1/organisations', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Gate Org',
+        slug: 'gate-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
+    });
+    const organisation = (await orgResponse.json()).data as { id: string };
+
+    // DEVOS-337: a direct-resolver gated route (`PATCH /organisations/:id`)
+    // is genuinely rejected while nothing has been set up yet.
+    const blocked = await authed(`/api/v1/organisations/${organisation.id}`, 'alice', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Renamed Too Soon' }),
+    });
+    expect(blocked.status).toBe(403);
+    const blockedBody = await blocked.json();
+    expect(blockedBody.error.code).toBe('DEVOS_ORGANISATION_NOT_INITIALISED');
+    expect(blockedBody.error.details.missingRequirements).toEqual([
+      'hasProjectType',
+      'hasLlmProvider',
+      'hasPolicy',
+    ]);
+
+    // DEVOS-338: all three setup-completing routes succeed regardless —
+    // otherwise this organisation could never become initialised at all.
+    const projectResponse = await authed('/api/v1/projects', 'alice', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Gate Project',
+        slug: 'gate-project',
+        organisationId: organisation.id,
+      }),
+    });
+    expect(projectResponse.status).toBe(200);
+    const project = (await projectResponse.json()).data as { id: string };
+
+    const llmProviderResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/llm-providers`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: 'gemini', credentialReference: 'ref', priority: 1 }),
+      },
+    );
+    expect(llmProviderResponse.status).toBe(200);
+
+    // DEVOS-337/338: a via-project-resolver gated route (`PATCH
+    // /projects/:projectId`) is still blocked — this organisation still
+    // lacks its own policy.
+    const stillBlocked = await authed(`/api/v1/projects/${project.id}`, 'alice', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Renamed Too Soon' }),
+    });
+    expect(stillBlocked.status).toBe(403);
+    expect((await stillBlocked.json()).error.code).toBe('DEVOS_ORGANISATION_NOT_INITIALISED');
+
+    const policyResponse = await authed(
+      `/api/v1/organisations/${organisation.id}/policies`,
+      'alice',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: 'default', definition: { rule: 'example' } }),
+      },
+    );
+    expect(policyResponse.status).toBe(200);
+    const policy = (await policyResponse.json()).data as { id: string };
+
+    // DEVOS-337: the direct-resolver route that was blocked above now
+    // succeeds, immediately, once all three requirements are genuinely met.
+    const unblocked = await authed(`/api/v1/organisations/${organisation.id}`, 'alice', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Renamed Now Allowed' }),
+    });
+    expect(unblocked.status).toBe(200);
+    expect((await unblocked.json()).data.name).toBe('Renamed Now Allowed');
+
+    // DEVOS-337: the via-project-resolver route also now succeeds.
+    const projectUnblocked = await authed(`/api/v1/projects/${project.id}`, 'alice', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Renamed Now Allowed Too' }),
+    });
+    expect(projectUnblocked.status).toBe(200);
+
+    // DEVOS-337: a via-entity-resolver gated route (`POST
+    // /policies/:policyId/publish`, which reads `Policy.organisationId`
+    // directly rather than going through a project) also succeeds now that
+    // the same organisation is initialised.
+    const publishResponse = await authed(`/api/v1/policies/${policy.id}/publish`, 'alice', {
+      method: 'POST',
+    });
+    expect(publishResponse.status).toBe(200);
+    expect((await publishResponse.json()).data.status).toBe('PUBLISHED');
+  });
+
+  it('never blocks a grandfathered (exempt) organisation, regardless of its real underlying status', async () => {
+    const exemptOrganisationId = randomUUID() as Organisation['id'];
+    await organisationRepository.create({
+      id: exemptOrganisationId,
+      name: 'Exempt Org',
+      slug: 'exempt-org',
+      status: 'ACTIVE',
+      ownerPrincipalId: 'alice',
+      // DEVOS-339: simulates a real organisation backfilled by migration
+      // `0062` before this sprint's guard went live — genuinely has none of
+      // the three requirements, and must still never be blocked.
+      initialisationEnforcementExemptAt: new Date(0).toISOString(),
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    });
+    await membershipRepository.create({
+      id: randomUUID() as Membership['id'],
+      organisationId: exemptOrganisationId,
+      projectId: null,
+      principalId: 'alice',
+      role: 'ORGANISATION_ADMIN',
+      status: 'ACTIVE',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    });
+
+    const response = await authed(`/api/v1/organisations/${exemptOrganisationId}`, 'alice', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Exempt Org Renamed' }),
+    });
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.name).toBe('Exempt Org Renamed');
   });
 });
 
