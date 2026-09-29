@@ -583,6 +583,7 @@ export function OrganisationsPage() {
   const currentPrincipalId = 'principalId' in session ? session.principalId : '';
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
+  const [registrationToken, setRegistrationToken] = useState('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -591,7 +592,7 @@ export function OrganisationsPage() {
     setSubmitting(true);
     setSubmitError(null);
 
-    const result = await createOrganisation({ name, slug });
+    const result = await createOrganisation({ name, slug, registrationToken });
     setSubmitting(false);
 
     if (!result.ok) {
@@ -601,6 +602,7 @@ export function OrganisationsPage() {
 
     setName('');
     setSlug('');
+    setRegistrationToken('');
     refresh();
     selectOrganisation(result.data.id);
   }
@@ -642,6 +644,13 @@ export function OrganisationsPage() {
       <Typography variant="h6" component="h3" sx={{ mt: 4 }} gutterBottom>
         New organisation
       </Typography>
+      {/* DEVOS-330 (Sprint 57, candidate epic E31): a bare registration-token
+          field — the minimum needed to keep this form functional against the
+          now-gated `organisation.create` route. Sprint 60's own guided
+          redemption flow (DEVOS-341) replaces this with a proper wizard that
+          also discloses the "this makes you the organisation's Admin" side
+          effect up front; deferred there per that task's own scope, not
+          built here. */}
       <Stack component="form" onSubmit={handleSubmit} spacing={2} sx={{ maxWidth: 360 }}>
         <TextField
           label="Name"
@@ -656,6 +665,14 @@ export function OrganisationsPage() {
           onChange={(event) => setSlug(event.target.value)}
           required
           size="small"
+        />
+        <TextField
+          label="Registration token"
+          value={registrationToken}
+          onChange={(event) => setRegistrationToken(event.target.value)}
+          required
+          size="small"
+          helperText="Ask a platform operator to issue you a registration token."
         />
         <Button
           type="submit"

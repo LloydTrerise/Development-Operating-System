@@ -4,6 +4,7 @@ import type {
   MembershipRepository,
   OrganisationLlmProviderRepository,
   OrganisationRepository,
+  RegistrationTokenRepository,
 } from '@devos/domain';
 
 export interface OrganisationUseCaseDeps {
@@ -12,6 +13,13 @@ export interface OrganisationUseCaseDeps {
   /** DEVOS-254: org-level membership add/remove/role-change are audited,
    * mirroring `ProjectUseCaseDeps`'s identical field. */
   auditRecords: AuditRecordRepository;
+  /** DEVOS-330 (Sprint 57): only `createOrganisation` actually reads/writes
+   * this — bundled onto the shared deps rather than a narrower dedicated
+   * type, since `createOrganisationRoutes` (unlike `organisation-llm-
+   * providers.ts`'s own split-by-resource routing) wires every organisation
+   * use case through this one deps object already, mirroring `auditRecords`
+   * itself (only touched by the membership use cases, not `getOrganisation`). */
+  registrationTokens: RegistrationTokenRepository;
 }
 
 /**

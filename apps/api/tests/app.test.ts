@@ -31,6 +31,7 @@ import type {
   EnsureBootstrapPlatformOperatorDeps,
   EnsureUserIdentityDeps,
 } from '@devos/application';
+import type { RegistrationTokenId } from '@devos/contracts';
 import type { DatabaseClient } from '@devos/database';
 import type {
   HumanProfile,
@@ -89,6 +90,8 @@ import {
   type ProjectTypeRepository,
   type ProjectTypeWorkflow,
   type ProjectTypeWorkflowRepository,
+  type RegistrationToken,
+  type RegistrationTokenRepository,
   type ToolCapability,
   type ToolCapabilityRepository,
   type ToolInvocation,
@@ -286,8 +289,36 @@ function createInMemoryProjectDeps(): ProjectUseCaseDeps {
   };
 }
 
+/**
+ * DEVOS-330: this file's own ~30 organisation/membership/ownership HTTP-
+ * route tests aren't about registration-token redemption semantics itself
+ * (that's `packages/application/tests/organisations.test.ts`'s own real,
+ * enforcing in-memory fake, plus DEVOS-332's live-Postgres proof) — every
+ * `POST /organisations` body below just needs *a* token that gets past the
+ * gate. Any real registration-token behavior test belongs in one of those
+ * two places, not here.
+ */
+const TEST_REGISTRATION_TOKEN = 'test-registration-token';
+
 function createInMemoryOrganisationDeps(projectDeps: ProjectUseCaseDeps): OrganisationUseCaseDeps {
   const organisations = new Map<string, Organisation>();
+
+  const registrationTokens: RegistrationTokenRepository = {
+    getByTokenHash: async (tokenHash) => ({
+      id: randomUUID() as RegistrationTokenId,
+      tokenHash,
+      issuedByPlatformOperatorId: 'test-platform-operator',
+      status: 'ACTIVE',
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    }),
+    getById: async () => null,
+    list: async () => [],
+    create: async () => {},
+    markRedeemed: async () => {},
+    markRevoked: async () => {},
+  };
 
   const organisationRepository: OrganisationRepository = {
     getById: async (id) => organisations.get(id) ?? null,
@@ -311,6 +342,7 @@ function createInMemoryOrganisationDeps(projectDeps: ProjectUseCaseDeps): Organi
     organisations: organisationRepository,
     memberships: projectDeps.memberships,
     auditRecords: projectDeps.auditRecords,
+    registrationTokens,
   };
 }
 
@@ -3629,7 +3661,11 @@ describe('organisation routes', () => {
     const createResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Acme Corp', slug: 'acme-corp' }),
+      body: JSON.stringify({
+        name: 'Acme Corp',
+        slug: 'acme-corp',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     expect(createResponse.status).toBe(200);
     const created = (await createResponse.json()).data;
@@ -3655,7 +3691,11 @@ describe('organisation routes', () => {
     const createResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Secret Org', slug: 'secret-org' }),
+      body: JSON.stringify({
+        name: 'Secret Org',
+        slug: 'secret-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const created = (await createResponse.json()).data;
 
@@ -3674,7 +3714,11 @@ describe('organisation routes', () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Second Org', slug: 'second-org' }),
+      body: JSON.stringify({
+        name: 'Second Org',
+        slug: 'second-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data;
 
@@ -3696,7 +3740,11 @@ describe('organisation routes', () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Member Org', slug: 'member-org' }),
+      body: JSON.stringify({
+        name: 'Member Org',
+        slug: 'member-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data;
     expect(organisation.ownerPrincipalId).toBe('alice');
@@ -3742,7 +3790,11 @@ describe('organisation routes', () => {
     const orgResponse = await authed('/api/v1/organisations', 'carol', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Guarded Org', slug: 'guarded-org' }),
+      body: JSON.stringify({
+        name: 'Guarded Org',
+        slug: 'guarded-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data;
 
@@ -3825,7 +3877,11 @@ describe('job role routes (DEVOS-299/300/301)', () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Job Role Org', slug: 'job-role-org' }),
+      body: JSON.stringify({
+        name: 'Job Role Org',
+        slug: 'job-role-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data as { id: string };
 
@@ -3991,7 +4047,11 @@ describe('organisation LLM provider routes (DEVOS-319/320/321)', () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'LLM Org', slug: 'llm-org' }),
+      body: JSON.stringify({
+        name: 'LLM Org',
+        slug: 'llm-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data as { id: string };
 
@@ -4263,6 +4323,172 @@ describe('platform operator routes (DEVOS-325/326/327)', () => {
   });
 });
 
+function createInMemoryRegistrationTokenDeps(seedOperatorPrincipalIds: string[] = []): {
+  platformOperators: PlatformOperatorRepository;
+  registrationTokens: RegistrationTokenRepository;
+} {
+  const { platformOperators } = createInMemoryPlatformOperatorDeps(seedOperatorPrincipalIds);
+  const tokensStore = new Map<string, RegistrationToken>();
+
+  const registrationTokens: RegistrationTokenRepository = {
+    getByTokenHash: async (tokenHash) =>
+      [...tokensStore.values()].find((t) => t.tokenHash === tokenHash) ?? null,
+    getById: async (id) => tokensStore.get(id) ?? null,
+    list: async () => [...tokensStore.values()],
+    create: async (token) => {
+      tokensStore.set(token.id, token);
+    },
+    markRedeemed: async (id, redeemedByPrincipalId, redeemedOrganisationId, updatedAt) => {
+      const existing = tokensStore.get(id);
+      if (existing) {
+        tokensStore.set(id, {
+          ...existing,
+          status: 'REDEEMED',
+          redeemedByPrincipalId,
+          redeemedOrganisationId,
+          updatedAt,
+        });
+      }
+    },
+    markRevoked: async (id, updatedAt) => {
+      const existing = tokensStore.get(id);
+      if (existing) tokensStore.set(id, { ...existing, status: 'REVOKED', updatedAt });
+    },
+  };
+
+  return { platformOperators, registrationTokens };
+}
+
+describe('registration token routes (DEVOS-329/330/331)', () => {
+  let server: Server;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    const registrationTokenDeps = createInMemoryRegistrationTokenDeps(['alice']);
+    const organisationDeps = createInMemoryOrganisationDeps(createInMemoryProjectDeps());
+    const started = await startServer({
+      registrationTokenDeps,
+      organisationDeps: {
+        ...organisationDeps,
+        registrationTokens: registrationTokenDeps.registrationTokens,
+      },
+    });
+    server = started.server;
+    baseUrl = started.baseUrl;
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  async function authed(path: string, principal: string, init: RequestInit = {}) {
+    return fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${principal}` },
+    });
+  }
+
+  it('rejects every route for a non-operator principal', async () => {
+    const listResponse = await authed('/api/v1/registration-tokens', 'bob');
+    expect(listResponse.status).toBe(403);
+
+    const issueResponse = await authed('/api/v1/registration-tokens', 'bob', { method: 'POST' });
+    expect(issueResponse.status).toBe(403);
+
+    const revokeResponse = await authed('/api/v1/registration-tokens/does-not-matter', 'bob', {
+      method: 'DELETE',
+    });
+    expect(revokeResponse.status).toBe(403);
+  });
+
+  it('lets an operator issue a token, never exposes the raw value again, and the token redeems exactly once', async () => {
+    const issueResponse = await authed('/api/v1/registration-tokens', 'alice', {
+      method: 'POST',
+    });
+    expect(issueResponse.status).toBe(200);
+    const issued = (await issueResponse.json()).data;
+    expect(typeof issued.rawToken).toBe('string');
+    expect(issued.rawToken.length).toBeGreaterThan(0);
+    expect(issued.status).toBe('ACTIVE');
+
+    const listResponse = await authed('/api/v1/registration-tokens', 'alice');
+    const listed = (await listResponse.json()).data;
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).not.toHaveProperty('rawToken');
+    expect(listed[0]).not.toHaveProperty('tokenHash');
+
+    const createOrgResponse = await authed('/api/v1/organisations', 'bob', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Redeemed Org',
+        slug: 'redeemed-org',
+        registrationToken: issued.rawToken,
+      }),
+    });
+    expect(createOrgResponse.status).toBe(200);
+
+    const reuseResponse = await authed('/api/v1/organisations', 'carol', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Should Fail',
+        slug: 'should-fail',
+        registrationToken: issued.rawToken,
+      }),
+    });
+    expect(reuseResponse.status).toBe(400);
+  });
+
+  it('lets an operator revoke an ACTIVE token, and blocks revoking it twice', async () => {
+    const issueResponse = await authed('/api/v1/registration-tokens', 'alice', {
+      method: 'POST',
+    });
+    const issued = (await issueResponse.json()).data;
+
+    const revokeResponse = await authed(`/api/v1/registration-tokens/${issued.id}`, 'alice', {
+      method: 'DELETE',
+    });
+    expect(revokeResponse.status).toBe(200);
+
+    const secondRevoke = await authed(`/api/v1/registration-tokens/${issued.id}`, 'alice', {
+      method: 'DELETE',
+    });
+    expect(secondRevoke.status).toBe(400);
+
+    const createOrgResponse = await authed('/api/v1/organisations', 'dave', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Revoked Org Attempt',
+        slug: 'revoked-org-attempt',
+        registrationToken: issued.rawToken,
+      }),
+    });
+    expect(createOrgResponse.status).toBe(400);
+  });
+
+  it('rejects organisation creation with no token, and with an unknown token', async () => {
+    const noTokenResponse = await authed('/api/v1/organisations', 'erin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'No Token Org', slug: 'no-token-org' }),
+    });
+    expect(noTokenResponse.status).toBe(400);
+
+    const unknownTokenResponse = await authed('/api/v1/organisations', 'erin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Unknown Token Org',
+        slug: 'unknown-token-org',
+        registrationToken: 'not-a-real-token',
+      }),
+    });
+    expect(unknownTokenResponse.status).toBe(400);
+  });
+});
+
 describe('DEVOS-326: deploy-time bootstrap platform operator, wired end-to-end', () => {
   let server: Server;
   let baseUrl: string;
@@ -4342,7 +4568,11 @@ describe('DEVOS-139: organisation-scoped policy routes', () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Policy Org', slug: 'policy-org' }),
+      body: JSON.stringify({
+        name: 'Policy Org',
+        slug: 'policy-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data;
 
@@ -4377,7 +4607,11 @@ describe('DEVOS-139: organisation-scoped policy routes', () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Isolated Org', slug: 'isolated-org' }),
+      body: JSON.stringify({
+        name: 'Isolated Org',
+        slug: 'isolated-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data;
 
@@ -4615,7 +4849,11 @@ describe('DEVOS-147: cross-project compliance reporting', () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Compliance Org', slug: 'compliance-org' }),
+      body: JSON.stringify({
+        name: 'Compliance Org',
+        slug: 'compliance-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data;
 
@@ -4673,7 +4911,11 @@ describe('DEVOS-147: cross-project compliance reporting', () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Isolated Compliance Org', slug: 'isolated-compliance-org' }),
+      body: JSON.stringify({
+        name: 'Isolated Compliance Org',
+        slug: 'isolated-compliance-org',
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data;
 
@@ -5124,7 +5366,11 @@ describe('workflow library route (Sprint 41 gap closure)', () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Library Org', slug: `library-org-${Math.random()}` }),
+      body: JSON.stringify({
+        name: 'Library Org',
+        slug: `library-org-${Math.random()}`,
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data;
 
@@ -5168,7 +5414,11 @@ describe('workflow library route (Sprint 41 gap closure)', () => {
     const orgResponse = await authed('/api/v1/organisations', 'alice', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Empty Org', slug: `empty-org-${Math.random()}` }),
+      body: JSON.stringify({
+        name: 'Empty Org',
+        slug: `empty-org-${Math.random()}`,
+        registrationToken: TEST_REGISTRATION_TOKEN,
+      }),
     });
     const organisation = (await orgResponse.json()).data;
 
@@ -5187,6 +5437,7 @@ describe('workflow library route (Sprint 41 gap closure)', () => {
       body: JSON.stringify({
         name: 'Private Library Org',
         slug: `private-library-${Math.random()}`,
+        registrationToken: TEST_REGISTRATION_TOKEN,
       }),
     });
     const organisation = (await orgResponse.json()).data;

@@ -2,6 +2,7 @@ import type {
   HumanProfileRepository,
   PlatformOperatorRepository,
   PrincipalRepository,
+  RegistrationTokenRepository,
 } from '@devos/domain';
 
 /**
@@ -18,4 +19,23 @@ export interface PlatformOperatorUseCaseDeps {
   principals: PrincipalRepository;
   humanProfiles: HumanProfileRepository;
   platformOperators: PlatformOperatorRepository;
+}
+
+/**
+ * DEVOS-331 (Sprint 57, candidate epic E31): `issueRegistrationToken`/
+ * `listRegistrationTokens`/`revokeRegistrationToken` all gate on
+ * `platformOperators` (the same `getByPrincipalId`-not-found-means-
+ * `ForbiddenError` check `grantPlatformOperator`/`revokePlatformOperator`/
+ * `listPlatformOperators` already established), plus the new
+ * `registrationTokens` repository itself. Kept separate from
+ * `PlatformOperatorUseCaseDeps` rather than widening it — nothing here
+ * needs `principals`/`humanProfiles` (unlike `grantPlatformOperator`, no
+ * target principal needs `ensureHumanPrincipal`; a registration token is
+ * issued to no one in particular, only redeemed later by whoever ends up
+ * using it, DEVOS-330), mirroring `OrganisationLlmProviderUseCaseDeps`'s
+ * own "narrower than the shared deps it's adjacent to" precedent.
+ */
+export interface RegistrationTokenUseCaseDeps {
+  platformOperators: PlatformOperatorRepository;
+  registrationTokens: RegistrationTokenRepository;
 }

@@ -726,9 +726,18 @@ export function listOrganisations(): Promise<ApiResult<Organisation[]>> {
   return request<Organisation[]>('/api/v1/organisations');
 }
 
+/**
+ * DEVOS-330 (Sprint 57, candidate epic E31): `registrationToken` is now
+ * required — the disclosed reversal of this route's previously ungated
+ * design. Sprint 60's own guided redemption flow (DEVOS-341) will replace
+ * `OrganisationsPage.tsx`'s current bare token field with a real wizard;
+ * this client function's shape only needs to match the real API contract
+ * today.
+ */
 export function createOrganisation(input: {
   name: string;
   slug: string;
+  registrationToken: string;
 }): Promise<ApiResult<Organisation>> {
   return request<Organisation>('/api/v1/organisations', { method: 'POST', body: input });
 }
@@ -1776,6 +1785,43 @@ export function revokePlatformOperator(
 ): Promise<ApiResult<{ revoked: boolean }>> {
   return request<{ revoked: boolean }>(
     `/api/v1/platform-operators/${encodeURIComponent(principalId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+/** DEVOS-331 (Sprint 57, candidate epic E31): mirrors `toRegistrationTokenDto`
+ * (`apps/api/src/dto/registration-token.ts`) — never carries a raw value or
+ * hash. Not scoped to any organisation, same as `PlatformOperator` above. */
+export interface RegistrationToken {
+  id: string;
+  issuedByPlatformOperatorId: string;
+  status: 'ACTIVE' | 'REDEEMED' | 'REVOKED' | 'EXPIRED';
+  expiresAt: string;
+  redeemedByPrincipalId?: string;
+  redeemedOrganisationId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** The one response shape that does carry the raw token value — only ever
+ * returned by `issueRegistrationToken` itself, never again after that. */
+export interface IssuedRegistrationToken extends RegistrationToken {
+  rawToken: string;
+}
+
+/** DEVOS-331: every route 403s for a non-operator principal, same
+ * visibility-by-403 convention `listPlatformOperators` already uses. */
+export function listRegistrationTokens(): Promise<ApiResult<RegistrationToken[]>> {
+  return request<RegistrationToken[]>('/api/v1/registration-tokens');
+}
+
+export function issueRegistrationToken(): Promise<ApiResult<IssuedRegistrationToken>> {
+  return request<IssuedRegistrationToken>('/api/v1/registration-tokens', { method: 'POST' });
+}
+
+export function revokeRegistrationToken(tokenId: string): Promise<ApiResult<{ revoked: boolean }>> {
+  return request<{ revoked: boolean }>(
+    `/api/v1/registration-tokens/${encodeURIComponent(tokenId)}`,
     { method: 'DELETE' },
   );
 }

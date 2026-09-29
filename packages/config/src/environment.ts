@@ -21,6 +21,7 @@ export interface RawEnvironment {
   VAULT_TOKEN?: string;
   REDIS_URL?: string;
   DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT?: string;
+  DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS?: string;
 }
 
 /**
@@ -88,6 +89,11 @@ export function readEnvironment(env: Environment = process.env): RawEnvironment 
   );
   if (platformOperatorBootstrapSubject !== undefined) {
     result.DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT = platformOperatorBootstrapSubject;
+  }
+
+  const registrationTokenExpiryDays = optionalValue(env.DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS);
+  if (registrationTokenExpiryDays !== undefined) {
+    result.DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS = registrationTokenExpiryDays;
   }
 
   return result;

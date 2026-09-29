@@ -51,6 +51,7 @@ import {
   createProjectTypeRepository,
   createProjectTypeWorkflowRepository,
   createProjectWithClonesCreator,
+  createRegistrationTokenRepository,
   createToolCapabilityRepository,
   createToolInvocationRepository,
   createUserIdentityRepository,
@@ -92,6 +93,7 @@ import type {
   PolicyUseCaseDeps,
   ProjectTypeUseCaseDeps,
   ProjectUseCaseDeps,
+  RegistrationTokenUseCaseDeps,
   ReleaseReadinessUseCaseDeps,
   SearchUseCaseDeps,
   SystemHealthUseCaseDeps,
@@ -133,6 +135,7 @@ import { createPlatformOperatorRoutes } from './routes/platform-operators.js';
 import { createPolicyRoutes } from './routes/policies.js';
 import { createProjectTypeRoutes } from './routes/project-types.js';
 import { createProjectRoutes } from './routes/projects.js';
+import { createRegistrationTokenRoutes } from './routes/registration-tokens.js';
 import { createReleaseReadinessRoutes } from './routes/release-readiness.js';
 import { createSearchRoutes } from './routes/search.js';
 import { createSystemHealthRoutes } from './routes/system-health.js';
@@ -265,6 +268,7 @@ export interface CreateAppOptions {
   organisationDeps?: OrganisationUseCaseDeps;
   organisationLlmProviderDeps?: OrganisationLlmProviderUseCaseDeps;
   platformOperatorDeps?: PlatformOperatorUseCaseDeps;
+  registrationTokenDeps?: RegistrationTokenUseCaseDeps;
   jobRoleDeps?: JobRoleUseCaseDeps;
   projectTypeDeps?: ProjectTypeUseCaseDeps;
   policyDeps?: PolicyUseCaseDeps;
@@ -495,10 +499,20 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     integrations: createIntegrationRepository(database.db),
     auditRecords: auditRecordRepository,
   };
+  // DEVOS-330/331 (Sprint 57): a single shared instance — a stateless
+  // wrapper over the same real `database.db`, reused by both
+  // `organisationDeps` (the redemption side, `createOrganisation`) and
+  // `registrationTokenDeps` (the issuance/list/revoke side) below, mirroring
+  // `platformOperatorDeps`'s own "reuse, don't duplicate" precedent.
+  const registrationTokenRepository = createRegistrationTokenRepository(database.db);
   const organisationDeps: OrganisationUseCaseDeps = options.organisationDeps ?? {
     organisations: createOrganisationRepository(database.db),
     memberships: projectDeps.memberships,
     auditRecords: auditRecordRepository,
+    // DEVOS-330 (Sprint 57): backs the new registration-token gate on
+    // `createOrganisation` — the disclosed reversal of this route's
+    // previously ungated design.
+    registrationTokens: registrationTokenRepository,
   };
   const organisationLlmProviderDeps: OrganisationLlmProviderUseCaseDeps =
     options.organisationLlmProviderDeps ?? {
@@ -518,6 +532,13 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
   // precedent, since nothing here needs distinct instances.
   const platformOperatorDeps: PlatformOperatorUseCaseDeps =
     options.platformOperatorDeps ?? platformOperatorBootstrapDeps;
+  // DEVOS-331: reuses `platformOperatorBootstrapDeps.platformOperators` (the
+  // same instance every other platform-operator-gated deps object already
+  // shares) plus the `registrationTokenRepository` constructed above.
+  const registrationTokenDeps: RegistrationTokenUseCaseDeps = options.registrationTokenDeps ?? {
+    platformOperators: platformOperatorBootstrapDeps.platformOperators,
+    registrationTokens: registrationTokenRepository,
+  };
   const jobRoleDeps: JobRoleUseCaseDeps = options.jobRoleDeps ?? {
     // DEVOS-299/300/301: separate instances from `organisationDeps.organisations`/
     // `projectDeps.projects` above (construction order) — all stateless
@@ -600,6 +621,11 @@ export function createApp(options: CreateAppOptions = {}): DevosApi {
     ...createOrganisationRoutes(API_PREFIX, organisationDeps),
     ...createOrganisationLlmProviderRoutes(API_PREFIX, organisationLlmProviderDeps),
     ...createPlatformOperatorRoutes(API_PREFIX, platformOperatorDeps),
+    ...createRegistrationTokenRoutes(
+      API_PREFIX,
+      registrationTokenDeps,
+      config.registrationTokens.expiryDays,
+    ),
     ...createJobRoleRoutes(API_PREFIX, jobRoleDeps),
     ...createProjectTypeRoutes(API_PREFIX, projectTypeDeps),
     ...createProjectRoutes(API_PREFIX, projectDeps),

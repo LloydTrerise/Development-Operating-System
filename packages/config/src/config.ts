@@ -77,6 +77,18 @@ export interface PlatformOperatorsConfig {
   bootstrapSubject?: string;
 }
 
+/**
+ * DEVOS-329 (Sprint 57, candidate epic E31): the backlog's own §9-resolved
+ * "sensible configurable default (e.g. 7 days), not hardcoded" — unlike
+ * `PlatformOperatorsConfig.bootstrapSubject`, this always has a concrete
+ * value (never `undefined`), since every issued token needs *some* expiry
+ * and 7 is a reasonable default that needs no explicit opt-in the way a
+ * bootstrap secret does.
+ */
+export interface RegistrationTokensConfig {
+  expiryDays: number;
+}
+
 export interface DevosConfig {
   environment: NodeEnvironment;
   port: number;
@@ -89,6 +101,7 @@ export interface DevosConfig {
   secrets: SecretsConfig;
   rateLimit: RateLimitConfig;
   platformOperators: PlatformOperatorsConfig;
+  registrationTokens: RegistrationTokensConfig;
 }
 
 function parseEnvironment(value: string | undefined): NodeEnvironment {
@@ -128,6 +141,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DevosConfig {
   const vaultToken = optional(raw.VAULT_TOKEN);
   const redisUrl = optional(raw.REDIS_URL);
   const platformOperatorBootstrapSubject = optional(raw.DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT);
+  const registrationTokenExpiryDays = optional(raw.DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS);
 
   return {
     environment: parseEnvironment(raw.NODE_ENV),
@@ -168,6 +182,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): DevosConfig {
       ...(platformOperatorBootstrapSubject === undefined
         ? {}
         : { bootstrapSubject: platformOperatorBootstrapSubject }),
+    },
+    registrationTokens: {
+      expiryDays:
+        registrationTokenExpiryDays === undefined ? 7 : Number(registrationTokenExpiryDays),
     },
   };
 }

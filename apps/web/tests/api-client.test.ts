@@ -400,12 +400,20 @@ describe('api client', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await createOrganisation({ name: 'Acme', slug: 'acme' });
+    const result = await createOrganisation({
+      name: 'Acme',
+      slug: 'acme',
+      registrationToken: 'a-valid-registration-token',
+    });
 
     expect(result.ok).toBe(true);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/api/v1/organisations');
-    expect(JSON.parse(init.body as string)).toEqual({ name: 'Acme', slug: 'acme' });
+    expect(JSON.parse(init.body as string)).toEqual({
+      name: 'Acme',
+      slug: 'acme',
+      registrationToken: 'a-valid-registration-token',
+    });
   });
 
   it('gets a single organisation at the real route', async () => {

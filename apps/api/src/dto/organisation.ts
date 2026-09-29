@@ -24,10 +24,20 @@ function asRecord(body: unknown): Record<string, unknown> {
 export interface CreateOrganisationBody {
   name: string;
   slug: string;
+  registrationToken: string;
 }
 
+/**
+ * DEVOS-330 (Sprint 57, candidate epic E31): `registrationToken` is a new
+ * required field — the disclosed reversal of this route's previously
+ * ungated `organisation.create` design. Missing/blank is rejected here
+ * (a plain `400`, mirroring `name`/`slug`'s own shape) before the request
+ * ever reaches `createOrganisation`'s own invalid/expired/redeemed/revoked
+ * checks, which map to a `400 DEVOS_VALIDATION_ERROR` instead (`app.ts`'s
+ * existing `UseCaseValidationError` mapping).
+ */
 export function parseCreateOrganisationBody(body: unknown): CreateOrganisationBody {
-  const { name, slug } = asRecord(body);
+  const { name, slug, registrationToken } = asRecord(body);
 
   if (typeof name !== 'string' || name.trim().length === 0) {
     throw new BadRequestError('name is required.');
@@ -35,8 +45,11 @@ export function parseCreateOrganisationBody(body: unknown): CreateOrganisationBo
   if (typeof slug !== 'string' || slug.trim().length === 0) {
     throw new BadRequestError('slug is required.');
   }
+  if (typeof registrationToken !== 'string' || registrationToken.trim().length === 0) {
+    throw new BadRequestError('registrationToken is required.');
+  }
 
-  return { name, slug };
+  return { name, slug, registrationToken };
 }
 
 export interface UpdateOrganisationBody {

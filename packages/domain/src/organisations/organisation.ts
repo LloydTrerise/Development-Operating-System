@@ -26,6 +26,16 @@ export interface Organisation {
 export interface CreateOrganisationInput {
   name: string;
   slug: string;
+  /**
+   * DEVOS-330 (Sprint 57, candidate epic E31): the disclosed reversal of
+   * this codebase's previously ungated `organisation.create` design (see
+   * `create-organisation.ts`'s own doc comment) — a valid, unredeemed,
+   * unexpired registration token a platform operator issued
+   * (`issueRegistrationToken`, DEVOS-331) is now required to create an
+   * organisation. The raw value only, never a hash — `createOrganisation`
+   * hashes it itself before lookup.
+   */
+  registrationToken: string;
 }
 
 export interface UpdateOrganisationInput {

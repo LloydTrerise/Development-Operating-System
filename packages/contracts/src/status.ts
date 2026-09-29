@@ -175,6 +175,21 @@ export type IntegrationStatus = (typeof integrationStatuses)[number];
 export const organisationLlmProviderStatuses = ['ACTIVE', 'DISABLED'] as const;
 export type OrganisationLlmProviderStatus = (typeof organisationLlmProviderStatuses)[number];
 
+/**
+ * DEVOS-329 (Sprint 57, `specs/DEVOS-ORGANISATION-ONBOARDING-BACKLOG.md`
+ * §6.2, candidate epic E31): `registration_tokens.status` — a token starts
+ * `ACTIVE`, then moves to exactly one terminal state: `REDEEMED` (consumed
+ * by a successful `createOrganisation` call, DEVOS-330), `REVOKED` (a
+ * platform operator withdrew it before redemption, DEVOS-331), or `EXPIRED`
+ * (its `expiresAt` passed unredeemed — computed at read time from
+ * `expiresAt` rather than a separately-transitioned stored value, since
+ * nothing needs to distinguish "still ACTIVE in the database but past its
+ * expiry" from "explicitly marked EXPIRED" — DEVOS-330's redemption check
+ * and DEVOS-331's listing both derive it the same way).
+ */
+export const registrationTokenStatuses = ['ACTIVE', 'REDEEMED', 'REVOKED', 'EXPIRED'] as const;
+export type RegistrationTokenStatus = (typeof registrationTokenStatuses)[number];
+
 export const workflowNodeTypes = [
   'TRIGGER',
   'TASK',

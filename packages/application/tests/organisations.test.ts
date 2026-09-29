@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { OrganisationId } from '@devos/contracts';
+import type { OrganisationId, RegistrationTokenId } from '@devos/contracts';
 import type {
   AuditRecord,
   AuditRecordRepository,
@@ -7,6 +7,8 @@ import type {
   MembershipRepository,
   Organisation,
   OrganisationRepository,
+  RegistrationToken,
+  RegistrationTokenRepository,
 } from '@devos/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { addOrganisationMember } from '../src/organisations/add-member.js';
@@ -16,14 +18,88 @@ import type { OrganisationUseCaseDeps } from '../src/organisations/deps.js';
 import { getOrganisationForPrincipal } from '../src/organisations/get-organisation.js';
 import { listOrganisationMembers } from '../src/organisations/list-members.js';
 import { listOrganisationsForPrincipal } from '../src/organisations/list-organisations-for-principal.js';
+import { hashRegistrationToken } from '../src/principals/registration-token-crypto.js';
 import { removeOrganisationMember } from '../src/organisations/remove-member.js';
 import { transferOrganisationOwnership } from '../src/organisations/transfer-organisation-ownership.js';
 import { updateOrganisation } from '../src/organisations/update-organisation.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
 
+/**
+ * DEVOS-330: every pre-existing test below that isn't itself testing token
+ * redemption just needs *a* valid token to get past the new gate — seeded
+ * fresh (via `createInMemoryDeps()`'s own `beforeEach` reset) with two
+ * always-available tokens, since a handful of tests create two
+ * organisations in the same test and a token is single-use once redeemed.
+ * The dedicated `describe('registration token gate (DEVOS-330)')` block
+ * below is where the actual redemption/single-use/expiry/revocation
+ * semantics are really exercised.
+ */
+const VALID_TOKEN = 'valid-registration-token';
+const VALID_TOKEN_2 = 'valid-registration-token-2';
+
 function createInMemoryDeps(): OrganisationUseCaseDeps {
   const organisations = new Map<string, Organisation>();
   const memberships = new Map<string, Membership>();
+  const registrationTokensByHash = new Map<string, RegistrationToken>();
+
+  function seedActiveToken(rawToken: string): void {
+    const tokenHash = hashRegistrationToken(rawToken);
+    registrationTokensByHash.set(tokenHash, {
+      id: randomUUID() as RegistrationTokenId,
+      tokenHash,
+      issuedByPlatformOperatorId: 'test-platform-operator',
+      status: 'ACTIVE',
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    });
+  }
+  seedActiveToken(VALID_TOKEN);
+  seedActiveToken(VALID_TOKEN_2);
+
+  // Mirrors `packages/database/src/repositories/registration-tokens.ts`'s
+  // own `toDomain`: `EXPIRED` is never a persisted `status` value, only
+  // derived at read time from `expiresAt`.
+  function withEffectiveStatus(token: RegistrationToken): RegistrationToken {
+    return token.status === 'ACTIVE' && new Date(token.expiresAt).getTime() < Date.now()
+      ? { ...token, status: 'EXPIRED' }
+      : token;
+  }
+
+  const registrationTokens: RegistrationTokenRepository = {
+    getByTokenHash: async (tokenHash) => {
+      const token = registrationTokensByHash.get(tokenHash);
+      return token ? withEffectiveStatus(token) : null;
+    },
+    getById: async (id) => {
+      const token = [...registrationTokensByHash.values()].find((t) => t.id === id);
+      return token ? withEffectiveStatus(token) : null;
+    },
+    list: async () => [...registrationTokensByHash.values()].map(withEffectiveStatus),
+    create: async (token) => {
+      registrationTokensByHash.set(token.tokenHash, token);
+    },
+    markRedeemed: async (id, redeemedByPrincipalId, redeemedOrganisationId, updatedAt) => {
+      for (const [hash, token] of registrationTokensByHash) {
+        if (token.id === id) {
+          registrationTokensByHash.set(hash, {
+            ...token,
+            status: 'REDEEMED',
+            redeemedByPrincipalId,
+            redeemedOrganisationId,
+            updatedAt,
+          });
+        }
+      }
+    },
+    markRevoked: async (id, updatedAt) => {
+      for (const [hash, token] of registrationTokensByHash) {
+        if (token.id === id) {
+          registrationTokensByHash.set(hash, { ...token, status: 'REVOKED', updatedAt });
+        }
+      }
+    },
+  };
 
   const organisationRepository: OrganisationRepository = {
     getById: async (id) => organisations.get(id) ?? null,
@@ -80,7 +156,12 @@ function createInMemoryDeps(): OrganisationUseCaseDeps {
       auditRecordsStore.filter((r) => r.organisationId === organisationId),
   };
 
-  return { organisations: organisationRepository, memberships: membershipRepository, auditRecords };
+  return {
+    organisations: organisationRepository,
+    memberships: membershipRepository,
+    auditRecords,
+    registrationTokens,
+  };
 }
 
 describe('organisation use cases', () => {
@@ -94,6 +175,7 @@ describe('organisation use cases', () => {
     const organisation = await createOrganisation(deps, 'alice', {
       name: 'Acme Corp',
       slug: 'acme-corp',
+      registrationToken: VALID_TOKEN,
     });
 
     expect(organisation).toMatchObject({
@@ -114,24 +196,36 @@ describe('organisation use cases', () => {
   });
 
   it('rejects an empty name or slug', async () => {
-    await expect(createOrganisation(deps, 'alice', { name: '', slug: 'x' })).rejects.toThrow(
-      ValidationError,
-    );
-    await expect(createOrganisation(deps, 'alice', { name: 'X', slug: '' })).rejects.toThrow(
-      ValidationError,
-    );
+    await expect(
+      createOrganisation(deps, 'alice', { name: '', slug: 'x', registrationToken: VALID_TOKEN }),
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      createOrganisation(deps, 'alice', { name: 'X', slug: '', registrationToken: VALID_TOKEN }),
+    ).rejects.toThrow(ValidationError);
   });
 
   it('lists only organisations the principal has a membership in', async () => {
-    const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
-    await createOrganisation(deps, 'bob', { name: 'Globex', slug: 'globex' });
+    const acme = await createOrganisation(deps, 'alice', {
+      name: 'Acme',
+      slug: 'acme',
+      registrationToken: VALID_TOKEN,
+    });
+    await createOrganisation(deps, 'bob', {
+      name: 'Globex',
+      slug: 'globex',
+      registrationToken: VALID_TOKEN_2,
+    });
 
     const aliceOrgs = await listOrganisationsForPrincipal(deps, 'alice');
     expect(aliceOrgs.map((o) => o.id)).toEqual([acme.id]);
   });
 
   it('rejects getOrganisationForPrincipal for a non-member', async () => {
-    const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+    const acme = await createOrganisation(deps, 'alice', {
+      name: 'Acme',
+      slug: 'acme',
+      registrationToken: VALID_TOKEN,
+    });
 
     await expect(getOrganisationForPrincipal(deps, 'mallory', acme.id)).rejects.toThrow(
       NotFoundError,
@@ -145,7 +239,11 @@ describe('organisation use cases', () => {
   });
 
   it('allows the org-level ORGANISATION_ADMIN to update the organisation, denies a non-member', async () => {
-    const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+    const acme = await createOrganisation(deps, 'alice', {
+      name: 'Acme',
+      slug: 'acme',
+      registrationToken: VALID_TOKEN,
+    });
 
     const updated = await updateOrganisation(deps, 'alice', acme.id, { name: 'Acme Renamed' });
     expect(updated.name).toBe('Acme Renamed');
@@ -156,7 +254,11 @@ describe('organisation use cases', () => {
   });
 
   it('denies a project-level OWNER with no org-level membership from updating the organisation (DEVOS-309)', async () => {
-    const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+    const acme = await createOrganisation(deps, 'alice', {
+      name: 'Acme',
+      slug: 'acme',
+      registrationToken: VALID_TOKEN,
+    });
 
     // DEVOS-309 (Sprint 51 reconciliation): this used to be a deliberate,
     // tested Sprint 39 (DEVOS-254) fallback for a real gap at the time (most
@@ -183,7 +285,11 @@ describe('organisation use cases', () => {
   });
 
   it('denies a project-level MEMBER (non-OWNER) with no org-level membership from updating the organisation', async () => {
-    const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+    const acme = await createOrganisation(deps, 'alice', {
+      name: 'Acme',
+      slug: 'acme',
+      registrationToken: VALID_TOKEN,
+    });
 
     await deps.memberships.create({
       id: randomUUID() as Membership['id'],
@@ -206,8 +312,16 @@ describe('organisation use cases', () => {
   });
 
   it('denies an org-level ORGANISATION_ADMIN from a different organisation (tenant isolation)', async () => {
-    const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
-    await createOrganisation(deps, 'erin', { name: 'Globex', slug: 'globex' });
+    const acme = await createOrganisation(deps, 'alice', {
+      name: 'Acme',
+      slug: 'acme',
+      registrationToken: VALID_TOKEN,
+    });
+    await createOrganisation(deps, 'erin', {
+      name: 'Globex',
+      slug: 'globex',
+      registrationToken: VALID_TOKEN_2,
+    });
 
     await expect(
       updateOrganisation(deps, 'erin', acme.id, { name: 'Should fail' }),
@@ -216,7 +330,11 @@ describe('organisation use cases', () => {
 
   describe('organisation-level membership (DEVOS-254, revised by DEVOS-290)', () => {
     it('lets an ORGANISATION_ADMIN add a co-admin, and denies a non-admin', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
 
       const membership = await addOrganisationMember(deps, 'alice', acme.id, {
         principalId: 'bob',
@@ -243,7 +361,11 @@ describe('organisation use cases', () => {
     });
 
     it('denies a project-level OWNER with no org-level membership from adding an org-level admin (DEVOS-309)', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
 
       // The specific privilege-escalation shape DEVOS-309 closed: a plain
       // project OWNER self-granting ORGANISATION_ADMIN would gain authority
@@ -270,7 +392,11 @@ describe('organisation use cases', () => {
     });
 
     it('rejects any org-level role other than ORGANISATION_ADMIN (decision §9.3 drops org-level MEMBER)', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
 
       await expect(
         addOrganisationMember(deps, 'alice', acme.id, { principalId: 'bob', role: 'MEMBER' }),
@@ -281,7 +407,11 @@ describe('organisation use cases', () => {
     });
 
     it('rejects adding a principal who is already an org-level member', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
       await addOrganisationMember(deps, 'alice', acme.id, {
         principalId: 'bob',
         role: 'ORGANISATION_ADMIN',
@@ -296,7 +426,11 @@ describe('organisation use cases', () => {
     });
 
     it('removes a co-admin and audits it', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
       const bob = await addOrganisationMember(deps, 'alice', acme.id, {
         principalId: 'bob',
         role: 'ORGANISATION_ADMIN',
@@ -312,7 +446,11 @@ describe('organisation use cases', () => {
     });
 
     it('refuses to remove the last org-level ORGANISATION_ADMIN', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
       const members = await listOrganisationMembers(deps, 'alice', acme.id);
       const admin = members.find((m) => m.principalId === 'alice')!;
 
@@ -322,7 +460,11 @@ describe('organisation use cases', () => {
     });
 
     it('allows removing a co-admin who is not the current owner when another admin remains', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
       const bob = await addOrganisationMember(deps, 'alice', acme.id, {
         principalId: 'bob',
         role: 'ORGANISATION_ADMIN',
@@ -335,7 +477,11 @@ describe('organisation use cases', () => {
     });
 
     it('refuses to remove the current owner even when another admin remains (DEVOS-290)', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
       const alice = (await listOrganisationMembers(deps, 'alice', acme.id))[0]!;
       await addOrganisationMember(deps, 'alice', acme.id, {
         principalId: 'bob',
@@ -348,7 +494,11 @@ describe('organisation use cases', () => {
     });
 
     it('changeOrganisationMemberRole only accepts ORGANISATION_ADMIN, idempotently', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
       const bob = await addOrganisationMember(deps, 'alice', acme.id, {
         principalId: 'bob',
         role: 'ORGANISATION_ADMIN',
@@ -371,7 +521,11 @@ describe('organisation use cases', () => {
 
   describe('organisation ownership transfer (DEVOS-290)', () => {
     it('lets the current owner transfer ownership to an existing co-admin', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
       await addOrganisationMember(deps, 'alice', acme.id, {
         principalId: 'bob',
         role: 'ORGANISATION_ADMIN',
@@ -387,7 +541,11 @@ describe('organisation use cases', () => {
     });
 
     it('denies a transfer attempted by anyone other than the current owner', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
       await addOrganisationMember(deps, 'alice', acme.id, {
         principalId: 'bob',
         role: 'ORGANISATION_ADMIN',
@@ -399,7 +557,11 @@ describe('organisation use cases', () => {
     });
 
     it('rejects transferring ownership to a principal who is not already a co-admin', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
 
       await expect(transferOrganisationOwnership(deps, 'alice', acme.id, 'carol')).rejects.toThrow(
         ValidationError,
@@ -407,7 +569,11 @@ describe('organisation use cases', () => {
     });
 
     it('lets the new owner remove the former owner after a transfer', async () => {
-      const acme = await createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme' });
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
       const alice = (await listOrganisationMembers(deps, 'alice', acme.id))[0]!;
       await addOrganisationMember(deps, 'alice', acme.id, {
         principalId: 'bob',
@@ -419,6 +585,93 @@ describe('organisation use cases', () => {
 
       const members = await listOrganisationMembers(deps, 'bob', acme.id);
       expect(members.map((m) => m.principalId)).toEqual(['bob']);
+    });
+  });
+
+  describe('registration token gate (DEVOS-330, candidate epic E31) — the disclosed reversal', () => {
+    it('rejects creation with no registration token', async () => {
+      await expect(
+        createOrganisation(deps, 'alice', { name: 'Acme', slug: 'acme', registrationToken: '' }),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('rejects creation with an unknown registration token', async () => {
+      await expect(
+        createOrganisation(deps, 'alice', {
+          name: 'Acme',
+          slug: 'acme',
+          registrationToken: 'not-a-real-token',
+        }),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('succeeds with a valid token and marks it redeemed, recording the principal and organisation', async () => {
+      const acme = await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
+
+      const redeemed = await deps.registrationTokens.getByTokenHash(
+        hashRegistrationToken(VALID_TOKEN),
+      );
+      expect(redeemed).toMatchObject({
+        status: 'REDEEMED',
+        redeemedByPrincipalId: 'alice',
+        redeemedOrganisationId: acme.id,
+      });
+    });
+
+    it('rejects reusing an already-redeemed token', async () => {
+      await createOrganisation(deps, 'alice', {
+        name: 'Acme',
+        slug: 'acme',
+        registrationToken: VALID_TOKEN,
+      });
+
+      await expect(
+        createOrganisation(deps, 'bob', {
+          name: 'Globex',
+          slug: 'globex',
+          registrationToken: VALID_TOKEN,
+        }),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('rejects a revoked token', async () => {
+      const token = await deps.registrationTokens.getByTokenHash(
+        hashRegistrationToken(VALID_TOKEN),
+      );
+      await deps.registrationTokens.markRevoked(token!.id, new Date().toISOString());
+
+      await expect(
+        createOrganisation(deps, 'alice', {
+          name: 'Acme',
+          slug: 'acme',
+          registrationToken: VALID_TOKEN,
+        }),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('rejects an expired token', async () => {
+      const expiredTokenHash = hashRegistrationToken('expired-token');
+      await deps.registrationTokens.create({
+        id: randomUUID() as RegistrationTokenId,
+        tokenHash: expiredTokenHash,
+        issuedByPlatformOperatorId: 'test-platform-operator',
+        status: 'ACTIVE',
+        expiresAt: new Date(Date.now() - 1000).toISOString(),
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      });
+
+      await expect(
+        createOrganisation(deps, 'alice', {
+          name: 'Acme',
+          slug: 'acme',
+          registrationToken: 'expired-token',
+        }),
+      ).rejects.toThrow(ValidationError);
     });
   });
 });

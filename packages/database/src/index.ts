@@ -33,6 +33,7 @@ export * from './repositories/human-profiles.js';
 export * from './repositories/platform-operators.js';
 export * from './repositories/policies.js';
 export * from './repositories/principals.js';
+export * from './repositories/registration-tokens.js';
 export * from './repositories/project-type-agents.js';
 export * from './repositories/project-type-workflows.js';
 export * from './repositories/principal-job-roles.js';

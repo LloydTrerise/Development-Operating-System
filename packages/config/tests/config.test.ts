@@ -285,4 +285,35 @@ describe('configuration', () => {
       'DEVOS_BOOTSTRAP_PLATFORM_OPERATOR_SUBJECT',
     );
   });
+
+  it('DEVOS-329: defaults registrationTokens.expiryDays to 7 when not provided', () => {
+    const config = loadConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://localhost/devos',
+    });
+
+    expect(config.registrationTokens).toEqual({ expiryDays: 7 });
+  });
+
+  it('DEVOS-329: loads DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS as registrationTokens.expiryDays when provided', () => {
+    const config = loadConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgresql://localhost/devos',
+      DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS: '14',
+    });
+
+    expect(config.registrationTokens).toEqual({ expiryDays: 14 });
+  });
+
+  it('DEVOS-329: rejects a non-positive-integer DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS', () => {
+    const result = validateEnvironment({
+      DATABASE_URL: 'postgresql://localhost/devos',
+      DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS: '0',
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.map((issue) => issue.key)).toContain(
+      'DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS',
+    );
+  });
 });

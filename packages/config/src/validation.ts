@@ -160,6 +160,21 @@ export function validateEnvironment(env: RawEnvironment): ConfigValidationResult
     });
   }
 
+  // DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS (DEVOS-329): optional here — an
+  // unset value falls back to a sensible default (7 days, `config.ts`),
+  // per the backlog's own §9 "a sensible configurable default... not
+  // hardcoded" resolution. When provided, must be a positive integer — no
+  // upper bound is meaningful the way `PORT`'s protocol-imposed 65535 is.
+  if (env.DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS !== undefined) {
+    const parsed = Number(env.DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      issues.push({
+        key: 'DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS',
+        message: 'DEVOS_REGISTRATION_TOKEN_EXPIRY_DAYS must be a positive integer.',
+      });
+    }
+  }
+
   if (env.LOG_LEVEL !== undefined && !['debug', 'info', 'warn', 'error'].includes(env.LOG_LEVEL)) {
     issues.push({
       key: 'LOG_LEVEL',

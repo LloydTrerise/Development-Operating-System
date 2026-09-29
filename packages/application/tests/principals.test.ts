@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import type { RegistrationTokenId } from '@devos/contracts';
 import type {
   HumanProfile,
   HumanProfileRepository,
@@ -5,6 +7,8 @@ import type {
   PlatformOperatorRepository,
   Principal,
   PrincipalRepository,
+  RegistrationToken,
+  RegistrationTokenRepository,
   UserIdentity,
   UserIdentityRepository,
 } from '@devos/domain';
@@ -16,10 +20,17 @@ import {
 import { ensureHumanPrincipal } from '../src/principals/ensure-human-principal.js';
 import { ensureUserIdentityForLogin } from '../src/principals/ensure-user-identity.js';
 import { grantPlatformOperator } from '../src/principals/grant-platform-operator.js';
+import { issueRegistrationToken } from '../src/principals/issue-registration-token.js';
 import { listPlatformOperators } from '../src/principals/list-platform-operators.js';
+import { listRegistrationTokens } from '../src/principals/list-registration-tokens.js';
+import { hashRegistrationToken } from '../src/principals/registration-token-crypto.js';
 import { revokePlatformOperator } from '../src/principals/revoke-platform-operator.js';
+import { revokeRegistrationToken } from '../src/principals/revoke-registration-token.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../src/errors.js';
-import type { PlatformOperatorUseCaseDeps } from '../src/principals/deps.js';
+import type {
+  PlatformOperatorUseCaseDeps,
+  RegistrationTokenUseCaseDeps,
+} from '../src/principals/deps.js';
 
 function createInMemoryDeps(): {
   principals: PrincipalRepository;
@@ -291,5 +302,147 @@ describe('listPlatformOperators (DEVOS-327)', () => {
     const result = await listPlatformOperators(deps, 'alice');
 
     expect(result.map((op) => op.principalId).sort()).toEqual(['alice', 'bob']);
+  });
+});
+
+function createRegistrationTokenUseCaseDeps(seedOperatorPrincipalIds: string[] = []): {
+  deps: RegistrationTokenUseCaseDeps;
+  tokensStore: RegistrationToken[];
+} {
+  const { deps: platformOperatorDeps } =
+    createPlatformOperatorUseCaseDeps(seedOperatorPrincipalIds);
+  const tokensStore: RegistrationToken[] = [];
+
+  const registrationTokens: RegistrationTokenRepository = {
+    getByTokenHash: async (tokenHash) => tokensStore.find((t) => t.tokenHash === tokenHash) ?? null,
+    getById: async (id) => tokensStore.find((t) => t.id === id) ?? null,
+    list: async () => [...tokensStore],
+    create: async (token) => {
+      tokensStore.push(token);
+    },
+    markRedeemed: async (id, redeemedByPrincipalId, redeemedOrganisationId, updatedAt) => {
+      const index = tokensStore.findIndex((t) => t.id === id);
+      if (index !== -1) {
+        tokensStore[index] = {
+          ...tokensStore[index]!,
+          status: 'REDEEMED',
+          redeemedByPrincipalId,
+          redeemedOrganisationId,
+          updatedAt,
+        };
+      }
+    },
+    markRevoked: async (id, updatedAt) => {
+      const index = tokensStore.findIndex((t) => t.id === id);
+      if (index !== -1)
+        tokensStore[index] = { ...tokensStore[index]!, status: 'REVOKED', updatedAt };
+    },
+  };
+
+  return {
+    deps: { platformOperators: platformOperatorDeps.platformOperators, registrationTokens },
+    tokensStore,
+  };
+}
+
+describe('issueRegistrationToken (DEVOS-331)', () => {
+  it('rejects a non-operator actor', async () => {
+    const { deps } = createRegistrationTokenUseCaseDeps([]);
+
+    await expect(issueRegistrationToken(deps, 'not-an-operator', 7)).rejects.toThrow(
+      ForbiddenError,
+    );
+  });
+
+  it('issues a token, persisting only its hash, and returns the raw value once', async () => {
+    const { deps, tokensStore } = createRegistrationTokenUseCaseDeps(['alice']);
+
+    const { token, rawToken } = await issueRegistrationToken(deps, 'alice', 7);
+
+    expect(tokensStore).toHaveLength(1);
+    expect(tokensStore[0]).toMatchObject({
+      status: 'ACTIVE',
+      issuedByPlatformOperatorId: 'alice',
+    });
+    expect(tokensStore[0]?.tokenHash).toBe(hashRegistrationToken(rawToken));
+    expect(token.tokenHash).not.toBe(rawToken);
+    expect(rawToken.length).toBeGreaterThan(0);
+  });
+
+  it('sets expiresAt from the given expiryDays', async () => {
+    const { deps } = createRegistrationTokenUseCaseDeps(['alice']);
+
+    const before = Date.now();
+    const { token } = await issueRegistrationToken(deps, 'alice', 1);
+    const expiresAt = new Date(token.expiresAt).getTime();
+
+    expect(expiresAt).toBeGreaterThan(before);
+    expect(expiresAt).toBeLessThanOrEqual(before + 2 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe('listRegistrationTokens (DEVOS-331)', () => {
+  it('rejects a non-operator actor', async () => {
+    const { deps } = createRegistrationTokenUseCaseDeps([]);
+
+    await expect(listRegistrationTokens(deps, 'not-an-operator')).rejects.toThrow(ForbiddenError);
+  });
+
+  it('returns every issued token for an existing operator, without exposing a raw value', async () => {
+    const { deps } = createRegistrationTokenUseCaseDeps(['alice']);
+    await issueRegistrationToken(deps, 'alice', 7);
+    await issueRegistrationToken(deps, 'alice', 7);
+
+    const result = await listRegistrationTokens(deps, 'alice');
+
+    expect(result).toHaveLength(2);
+    for (const token of result) {
+      expect(Object.keys(token)).not.toContain('rawToken');
+    }
+  });
+});
+
+describe('revokeRegistrationToken (DEVOS-331)', () => {
+  it('rejects a non-operator actor', async () => {
+    const { deps, tokensStore } = createRegistrationTokenUseCaseDeps([]);
+    tokensStore.push({
+      id: randomUUID() as RegistrationTokenId,
+      tokenHash: 'hash',
+      issuedByPlatformOperatorId: 'alice',
+      status: 'ACTIVE',
+      expiresAt: new Date(Date.now() + 1000).toISOString(),
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    });
+
+    await expect(
+      revokeRegistrationToken(deps, 'not-an-operator', tokensStore[0]!.id),
+    ).rejects.toThrow(ForbiddenError);
+  });
+
+  it('rejects an unknown token id', async () => {
+    const { deps } = createRegistrationTokenUseCaseDeps(['alice']);
+
+    await expect(
+      revokeRegistrationToken(deps, 'alice', randomUUID() as RegistrationTokenId),
+    ).rejects.toThrow(NotFoundError);
+  });
+
+  it('revokes an ACTIVE token', async () => {
+    const { deps, tokensStore } = createRegistrationTokenUseCaseDeps(['alice']);
+    const { token } = await issueRegistrationToken(deps, 'alice', 7);
+
+    await revokeRegistrationToken(deps, 'alice', token.id);
+
+    expect(tokensStore.find((t) => t.id === token.id)?.status).toBe('REVOKED');
+  });
+
+  it('rejects revoking an already-redeemed or already-revoked token', async () => {
+    const { deps, tokensStore } = createRegistrationTokenUseCaseDeps(['alice']);
+    const { token } = await issueRegistrationToken(deps, 'alice', 7);
+    await revokeRegistrationToken(deps, 'alice', token.id);
+
+    await expect(revokeRegistrationToken(deps, 'alice', token.id)).rejects.toThrow(ValidationError);
+    expect(tokensStore.find((t) => t.id === token.id)?.status).toBe('REVOKED');
   });
 });

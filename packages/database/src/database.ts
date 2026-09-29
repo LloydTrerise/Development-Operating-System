@@ -503,6 +503,23 @@ export interface PlatformOperatorsTable {
   granted_by_principal_id: string | null;
 }
 
+/** DEVOS-329 (migration `0061`): see
+ * `packages/domain/src/principals/registration-token.ts`. `status` here is
+ * the persisted value only (`ACTIVE`/`REDEEMED`/`REVOKED`) — the domain
+ * type's derived `EXPIRED` state is computed by the repository's own
+ * `toDomain`, never stored. */
+export interface RegistrationTokensTable {
+  id: string;
+  token_hash: string;
+  issued_by_platform_operator_id: string;
+  status: string;
+  expires_at: string;
+  redeemed_by_principal_id: string | null;
+  redeemed_organisation_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Database {
   organisations: OrganisationsTable;
   projects: ProjectsTable;
@@ -538,6 +555,7 @@ export interface Database {
   organisation_llm_providers: OrganisationLlmProvidersTable;
   principals: PrincipalsTable;
   platform_operators: PlatformOperatorsTable;
+  registration_tokens: RegistrationTokensTable;
   human_profiles: HumanProfilesTable;
   user_identities: UserIdentitiesTable;
   access_roles: AccessRolesTable;

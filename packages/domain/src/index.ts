@@ -29,6 +29,7 @@ export * from './organisations/organisation.js';
 export * from './policy/policy.js';
 export * from './principals/platform-operator.js';
 export * from './principals/principal.js';
+export * from './principals/registration-token.js';
 export * from './principals/user-identity.js';
 export * from './project-types/project-type-agent.js';
 export * from './project-types/project-type-workflow.js';
