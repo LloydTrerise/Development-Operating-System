@@ -16,6 +16,7 @@ import {
 } from '@mui/material';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ChecklistIcon from '@mui/icons-material/Checklist';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PeopleIcon from '@mui/icons-material/People';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -23,7 +24,6 @@ import SmartToyIcon from '@mui/icons-material/SmartToy';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
 import {
   addOrganisationMember,
-  createOrganisation,
   createOrganisationLlmProvider,
   deleteOrganisationLlmProvider,
   listOrganisationLlmProviders,
@@ -41,6 +41,8 @@ import { LoadingState } from '../../components/LoadingState.js';
 import { StatusChip } from '../../components/StatusChip.js';
 import { useOrganisationContext } from '../../organisation-context.js';
 import { useSession } from '../../session.js';
+import { CreateOrganisationWizard } from './CreateOrganisationWizard.js';
+import { OrganisationSetupChecklist } from './OrganisationSetupChecklist.js';
 
 /**
  * DEVOS-321 (Sprint 54): mirrors `@devos/agents`'s own `LLM_PROVIDER_KEYS`
@@ -465,6 +467,7 @@ function OrganisationRow({
   ownerPrincipalId,
   currentPrincipalId,
   selected,
+  autoOpenSetup,
   onSelect,
   onSaved,
 }: {
@@ -475,16 +478,23 @@ function OrganisationRow({
   ownerPrincipalId: string | undefined;
   currentPrincipalId: string;
   selected: boolean;
+  autoOpenSetup: boolean;
   onSelect: () => void;
   onSaved: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [aiProvidersOpen, setAiProvidersOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(autoOpenSetup);
+  const [setupIncomplete, setSetupIncomplete] = useState(false);
   const [name, setName] = useState(currentName);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (autoOpenSetup) setSetupOpen(true);
+  }, [autoOpenSetup]);
 
   async function handleSave(event: FormEvent) {
     event.preventDefault();
@@ -506,6 +516,9 @@ function OrganisationRow({
     <Box>
       <ListItemButton selected={selected} onClick={onSelect}>
         <ListItemText primary={`${currentName} (${slug})`} sx={{ flex: 1 }} />
+        {setupIncomplete && (
+          <Chip label="Setup incomplete" size="small" color="warning" variant="outlined" />
+        )}
         <StatusChip status={status} />
         <IconButton
           aria-label={`Members of ${currentName}`}
@@ -528,6 +541,16 @@ function OrganisationRow({
           <SmartToyIcon fontSize="small" />
         </IconButton>
         <IconButton
+          aria-label={`Setup checklist for ${currentName}`}
+          size="small"
+          onClick={(event) => {
+            event.stopPropagation();
+            setSetupOpen((current) => !current);
+          }}
+        >
+          <ChecklistIcon fontSize="small" />
+        </IconButton>
+        <IconButton
           aria-label={`Settings for ${currentName}`}
           size="small"
           onClick={(event) => {
@@ -548,6 +571,13 @@ function OrganisationRow({
       </Collapse>
       <Collapse in={aiProvidersOpen} unmountOnExit>
         <AiProvidersPanel organisationId={organisationId} />
+      </Collapse>
+      <Collapse in={setupOpen} unmountOnExit>
+        <OrganisationSetupChecklist
+          organisationId={organisationId}
+          onOpenAiProviders={() => setAiProvidersOpen(true)}
+          onStatusChange={(initialised) => setSetupIncomplete(!initialised)}
+        />
       </Collapse>
       <Collapse in={open} unmountOnExit>
         <Box
@@ -581,31 +611,7 @@ export function OrganisationsPage() {
     useOrganisationContext();
   const session = useSession();
   const currentPrincipalId = 'principalId' in session ? session.principalId : '';
-  const [name, setName] = useState('');
-  const [slug, setSlug] = useState('');
-  const [registrationToken, setRegistrationToken] = useState('');
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    setSubmitting(true);
-    setSubmitError(null);
-
-    const result = await createOrganisation({ name, slug, registrationToken });
-    setSubmitting(false);
-
-    if (!result.ok) {
-      setSubmitError(result.error.message);
-      return;
-    }
-
-    setName('');
-    setSlug('');
-    setRegistrationToken('');
-    refresh();
-    selectOrganisation(result.data.id);
-  }
+  const [justCreatedOrganisationId, setJustCreatedOrganisationId] = useState<string | null>(null);
 
   return (
     <section>
@@ -630,6 +636,7 @@ export function OrganisationsPage() {
                 ownerPrincipalId={organisation.ownerPrincipalId}
                 currentPrincipalId={currentPrincipalId}
                 selected={organisation.id === selectedOrganisationId}
+                autoOpenSetup={organisation.id === justCreatedOrganisationId}
                 onSelect={() => selectOrganisation(organisation.id)}
                 onSaved={refresh}
               />
@@ -644,46 +651,13 @@ export function OrganisationsPage() {
       <Typography variant="h6" component="h3" sx={{ mt: 4 }} gutterBottom>
         New organisation
       </Typography>
-      {/* DEVOS-330 (Sprint 57, candidate epic E31): a bare registration-token
-          field — the minimum needed to keep this form functional against the
-          now-gated `organisation.create` route. Sprint 60's own guided
-          redemption flow (DEVOS-341) replaces this with a proper wizard that
-          also discloses the "this makes you the organisation's Admin" side
-          effect up front; deferred there per that task's own scope, not
-          built here. */}
-      <Stack component="form" onSubmit={handleSubmit} spacing={2} sx={{ maxWidth: 360 }}>
-        <TextField
-          label="Name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          required
-          size="small"
-        />
-        <TextField
-          label="Slug"
-          value={slug}
-          onChange={(event) => setSlug(event.target.value)}
-          required
-          size="small"
-        />
-        <TextField
-          label="Registration token"
-          value={registrationToken}
-          onChange={(event) => setRegistrationToken(event.target.value)}
-          required
-          size="small"
-          helperText="Ask a platform operator to issue you a registration token."
-        />
-        <Button
-          type="submit"
-          variant="contained"
-          disabled={submitting}
-          sx={{ alignSelf: 'flex-start' }}
-        >
-          {submitting ? 'Creating…' : 'Create organisation'}
-        </Button>
-        {submitError && <ErrorAlert message={submitError} />}
-      </Stack>
+      <CreateOrganisationWizard
+        onCreated={(organisation) => {
+          refresh();
+          selectOrganisation(organisation.id);
+          setJustCreatedOrganisationId(organisation.id);
+        }}
+      />
     </section>
   );
 }

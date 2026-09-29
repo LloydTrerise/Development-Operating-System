@@ -1825,3 +1825,24 @@ export function revokeRegistrationToken(tokenId: string): Promise<ApiResult<{ re
     { method: 'DELETE' },
   );
 }
+
+/** DEVOS-342 (Sprint 60, candidate epic E31 part 5): mirrors
+ * `getOrganisationInitialisationStatus`'s own return shape exactly
+ * (`packages/application/src/organisations/get-organisation-initialisation-status.ts`)
+ * — the route (Sprint 58, DEVOS-334) returns this object directly, read-only,
+ * with no wrapper. First client wrapper for this route. */
+export interface OrganisationInitialisationStatus {
+  organisationId: string;
+  hasProjectType: boolean;
+  hasLlmProvider: boolean;
+  hasPolicy: boolean;
+  initialised: boolean;
+}
+
+export function getOrganisationInitialisationStatus(
+  organisationId: string,
+): Promise<ApiResult<OrganisationInitialisationStatus>> {
+  return request<OrganisationInitialisationStatus>(
+    `/api/v1/organisations/${organisationId}/initialisation-status`,
+  );
+}

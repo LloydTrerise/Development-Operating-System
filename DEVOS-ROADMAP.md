@@ -2,7 +2,7 @@
 
 **Product:** DevOS
 **Purpose:** Authoritative task-level implementation roadmap
-**Last Updated:** 2026-09-29 — Sprint 59 marked complete. This file previously accumulated a full per-sprint narrative inline (in its "Authority"/"Current position" sections) that grew unboundedly across 55 sprints; that narrative is preserved in this file's own git history (`git log -p -- DEVOS-ROADMAP.md`) and, per sprint, in `specs/sprints/sprint-NN/README.md`. Nothing was deleted — only removed from this file's live working copy.
+**Last Updated:** 2026-09-29 — Sprint 60 marked complete, closing candidate Epic E31 in full. This file previously accumulated a full per-sprint narrative inline (in its "Authority"/"Current position" sections) that grew unboundedly across 55 sprints; that narrative is preserved in this file's own git history (`git log -p -- DEVOS-ROADMAP.md`) and, per sprint, in `specs/sprints/sprint-NN/README.md`. Nothing was deleted — only removed from this file's live working copy.
 
 ---
 
@@ -14,9 +14,9 @@ Sprint task specifications under `specs/sprints/` are the authority for task-lev
 
 ## Current position
 
-As of 2026-09-29, **Sprint 59 (DEVOS-337–340) is COMPLETE** (candidate Epic E31, Organisation Onboarding, Registration Gating & Mandatory Initialisation, part 4 of 5) — real, server-side enforcement of Sprint 58's `INITIALISED` status: a new application-layer guard (`requireOrganisationInitialised`) and a distinct `403 DEVOS_ORGANISATION_NOT_INITIALISED` error (naming exactly which requirements remain outstanding) wired into 47 of the real, current 62 mutating routes across `apps/api/src/routes/*.ts`, with 3 routes deliberately exempt as the setup-completing actions themselves and 12 exempt as not organisation-scoped at all. Every pre-existing organisation was backfilled to exempt via a new, narrow `Organisation.initialisationEnforcementExemptAt` field (migration `0062`) — a disclosed adaptation of the backlog's own literal "backfill to INITIALISED" story, since Sprint 58 persists no such stored status to backfill in the first place. See `specs/sprints/sprint-59/DEVOS-340.md` for full evidence, including two real bugs found and fixed during implementation. `DEVOS-BUILD-STATE.md`'s own "Current position"/"Next state transition" sections are the authoritative record of this — this file's own job is the task-ID/sprint-outcome index below, not the day-to-day state narrative.
+As of 2026-09-29, **Sprint 60 (DEVOS-341–344) is COMPLETE** (candidate Epic E31, Organisation Onboarding, Registration Gating & Mandatory Initialisation, part 5 of 5) — a guided registration-token redemption + organisation-creation wizard and a real-time mandatory-setup checklist (both in `apps/web`), plus a real, live, full-chain pilot proving the whole epic end-to-end against real Postgres: a bootstrap platform operator issued a real registration token, a second, previously-unaffiliated principal redeemed it to create a real organisation, a genuinely gated mutating route was confirmed rejected before setup and confirmed to succeed after all three mandatory requirements were completed. See `specs/sprints/sprint-60/DEVOS-343.md` for the pilot's own full evidence and `DEVOS-344.md` for the closing disclosure covering the whole epic. `DEVOS-BUILD-STATE.md`'s own "Current position"/"Next state transition" sections are the authoritative record of this — this file's own job is the task-ID/sprint-outcome index below, not the day-to-day state narrative.
 
-Candidate Epic E31's backlog (`specs/DEVOS-ORGANISATION-ONBOARDING-BACKLOG.md`, v2.0, all open decisions resolved by the user) proposes Sprints 56–60 (DEVOS-325–344). Sprint 60 (Guided First-Run UI & Full-Epic Pilot, DEVOS-341–344) is next. Per `AGENTS.md` §4.1, Sprint 60 remains unconverted; per `AGENTS.md` §35/§4.2, conversion and implementation are separate, explicit approvals not yet given.
+**Candidate Epic E31 is now CLOSED** — every sprint in its backlog (`specs/DEVOS-ORGANISATION-ONBOARDING-BACKLOG.md`, v2.0, Sprints 56–60, DEVOS-325–344) is implemented, validated, and complete. No further sprint or epic is currently authorized or scoped.
 
 ---
 
@@ -83,8 +83,7 @@ Candidate Epic E31's backlog (`specs/DEVOS-ORGANISATION-ONBOARDING-BACKLOG.md`, 
 | 57     | DEVOS-329–332 | Registration Token & Invite-Gated Organisation Creation — `registration_tokens` table; `createOrganisation` gated behind redeeming a valid, platform-operator-issued token (the disclosed reversal of its previously ungated design); platform-operator UI/API to issue/list/revoke tokens (candidate E31, part 2)                                     | COMPLETE |
 | 58     | DEVOS-333–336 | Mandatory Initialisation Requirements — a real, live-computed `INITIALISED` status derived from three existing subsystems (a first `Project`/`ProjectType`, a default LLM provider, an initial organisation-wide `Policy`); no new migration, per this sprint's own disclosed persistence-shape decision (candidate E31, part 3)                       | COMPLETE |
 | 59     | DEVOS-337–340 | Server-Side Enforcement — a new initialisation-gate guard genuinely rejecting mutating requests against a non-`INITIALISED`, non-exempt organisation (47 of 62 real mutating routes gated), with every pre-existing organisation backfilled to exempt via a new, narrow `Organisation.initialisationEnforcementExemptAt` field (candidate E31, part 4) | COMPLETE |
-
-Sprint 60 (§ Current position above) remains unconverted, pending user approval.
+| 60     | DEVOS-341–344 | Guided First-Run UI & Full-Epic Pilot — a guided registration-token redemption + organisation-creation wizard and a real-time mandatory-setup checklist, plus a real, live, full-chain pilot proving bootstrap → token → redemption-by-a-second-principal → blocked-then-unblocked gated mutation end to end (candidate E31, part 5 — closes the epic) | COMPLETE |
 
 ---
 
